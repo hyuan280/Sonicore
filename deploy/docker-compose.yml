@@ -1,0 +1,62 @@
+name: sonicore
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: sonicore-db
+    restart: unless-stopped
+    env_file: .env.example
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sonicore}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    container_name: sonicore-redis
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  sonicore:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      network: host
+    image: sonicore:latest
+    container_name: sonicore-app
+    restart: unless-stopped
+    env_file: .env.example
+    volumes:
+      - ${MUSIC_DIR:-/opt/sonicore/music}:/opt/sonicore/music:ro
+      - ${DATA_DIR:-/opt/sonicore/data}:/opt/sonicore/data
+      - ../web/dist:/opt/sonicore/web:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:latest
+    container_name: sonicore-nginx
+    restart: unless-stopped
+    ports:
+      - "28880:80"
+    volumes:
+      - ./nginx/sonicore.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../web/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - sonicore
+
+volumes:
+  pgdata:
+  redisdata:

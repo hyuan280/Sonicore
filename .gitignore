@@ -1,0 +1,46 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+sonicore
+cmd/sonicore/sonicore
+
+# Test binary
+*.test
+
+# Go
+vendor/
+go.work
+
+# Build output
+/build/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+/data/
+
+# Config override
+config.local.yaml
+config.local.toml
+config.toml
+.env
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Development
+run.sh
