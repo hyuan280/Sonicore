@@ -92,6 +92,7 @@ type Track struct {
 	Title        string         `json:"title"`
 	AlbumID      string         `json:"album_id"`
 	ArtistID     string         `json:"artist_id"`
+	CoverImageID *string        `json:"cover_image_id,omitempty"`
 	TrackNumber  int            `json:"track_number"`
 	DiscNumber   int            `json:"disc_number"`
 	Duration     float64        `json:"duration"`

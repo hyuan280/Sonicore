@@ -78,15 +78,16 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]interface{}, len(items))
 	for i, t := range items {
 		entry := map[string]interface{}{
-			"id":        t.ID,
-			"title":     t.Title,
-			"artist_id": t.ArtistID,
-			"album_id":  t.AlbumID,
-			"track":     t.TrackNumber,
-			"duration":  t.Duration,
-			"bit_rate":  t.BitRate,
-			"suffix":    t.FileFormat,
-			"file_size": t.FileSize,
+			"id":             t.ID,
+			"title":          t.Title,
+			"artist_id":      t.ArtistID,
+			"album_id":       t.AlbumID,
+			"cover_image_id": t.CoverImageID,
+			"track":          t.TrackNumber,
+			"duration":       t.Duration,
+			"bit_rate":       t.BitRate,
+			"suffix":         t.FileFormat,
+			"file_size":      t.FileSize,
 		}
 		if artist, err := h.artistRepo.FindByID(r.Context(), t.ArtistID); err == nil {
 			entry["artist"] = artist.Name
@@ -163,15 +164,16 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 			albumTitle = a.Title
 		}
 		trackList[i] = map[string]interface{}{
-			"id":          t.ID,
-			"title":       t.Title,
-			"artist":      artist.Name,
-			"artist_id":   t.ArtistID,
-			"album":       albumTitle,
-			"album_id":    t.AlbumID,
-			"duration":    t.Duration,
-			"file_format": t.FileFormat,
-			"track":       t.TrackNumber,
+			"id":             t.ID,
+			"title":          t.Title,
+			"artist":         artist.Name,
+			"artist_id":      t.ArtistID,
+			"album":          albumTitle,
+			"album_id":       t.AlbumID,
+			"cover_image_id": t.CoverImageID,
+			"duration":       t.Duration,
+			"file_format":    t.FileFormat,
+			"track":          t.TrackNumber,
 		}
 	}
 
@@ -246,27 +248,29 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		trackList[i] = map[string]interface{}{
-			"id":          t.ID,
-			"title":       t.Title,
-			"artist":      aName,
-			"artist_id":   t.ArtistID,
-			"album":       album.Title,
-			"album_id":    t.AlbumID,
-			"duration":    t.Duration,
-			"file_format": t.FileFormat,
-			"track":       t.TrackNumber,
+			"id":             t.ID,
+			"title":          t.Title,
+			"artist":         aName,
+			"artist_id":      t.ArtistID,
+			"album":          album.Title,
+			"album_id":       t.AlbumID,
+			"cover_image_id": t.CoverImageID,
+			"duration":       t.Duration,
+			"file_format":    t.FileFormat,
+			"track":          t.TrackNumber,
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"album": map[string]interface{}{
-			"id":       album.ID,
-			"title":    album.Title,
-			"artist":   artistName,
-			"artist_id": album.ArtistID,
-			"year":     album.Year,
-			"genre":    album.Genre,
-			"duration": album.Duration,
+			"id":             album.ID,
+			"title":          album.Title,
+			"artist":         artistName,
+			"artist_id":      album.ArtistID,
+			"year":           album.Year,
+			"genre":          album.Genre,
+			"duration":       album.Duration,
+			"cover_image_id": album.CoverImageID,
 		},
 		"tracks": trackList,
 	})

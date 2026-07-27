@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,9 +60,11 @@ func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return "", err
 	}
-
-	thumbnailPath := filepath.Join(dir, fmt.Sprintf("%s_%s_256.%s", ownerType, ownerID, ext))
-	resizeToThumbnail(data, thumbnailPath, 256)
+	thumbnailPath := filepath.Join(dir, fmt.Sprintf("%s_%s_256.jpg", ownerType, ownerID))
+	ResizeToThumbnail(data, thumbnailPath, 256)
+	if _, err := os.Stat(thumbnailPath); err != nil {
+		log.Printf("[cover] thumbnail NOT created at %s", thumbnailPath)
+	}
 
 	return path, nil
 }
@@ -73,9 +79,10 @@ func detectImageType(data []byte) string {
 	return "jpg"
 }
 
-func resizeToThumbnail(data []byte, outputPath string, maxSize int) {
+func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
+		log.Printf("[cover] image.Decode error: %v", err)
 		return
 	}
 
@@ -97,15 +104,30 @@ func resizeToThumbnail(data []byte, outputPath string, maxSize int) {
 
 	cmd := exec.Command("ffmpeg",
 		"-y",
+		"-f", "image2pipe",
 		"-i", "pipe:0",
 		"-vf", fmt.Sprintf("scale=%d:%d", newW, newH),
-		"-f", "image2",
+		"-q:v", "2",
 		outputPath,
 	)
 	cmd.Stdin = bytes.NewReader(data)
-	cmd.Run()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("[cover] ffmpeg resize error: %v\n%s", err, out)
+	}
+}
+
+func (ce *CoverExtractor) ImagesDir() string {
+	return ce.imagesDir
 }
 
 func CoverPath(imagesDir, libraryID, ownerType, ownerID, ext string) string {
-	return filepath.Join(imagesDir, libraryID, fmt.Sprintf("%s_%s.%s", ownerType, ownerID, ext))
+	return CoverPathWithSuffix(imagesDir, libraryID, ownerType, ownerID, "", ext)
+}
+
+func CoverPathWithSuffix(imagesDir, libraryID, ownerType, ownerID, suffix, ext string) string {
+	name := fmt.Sprintf("%s_%s", ownerType, ownerID)
+	if suffix != "" {
+		name += suffix
+	}
+	return filepath.Join(imagesDir, libraryID, name+"."+ext)
 }

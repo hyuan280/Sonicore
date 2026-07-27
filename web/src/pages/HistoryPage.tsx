@@ -2,9 +2,9 @@ import { useEffect, useState } from "react"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { api } from "../api/client"
 import { Button } from "../components/ui/button"
-import { Play, Trash2, Clock, Calendar, CheckSquare, Plus, ListPlus, Heart } from "lucide-react"
+import { Play, Trash2, Clock, Calendar, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
-import { formatDuration } from "../lib/utils"
+import { formatDuration, coverUrl } from "../lib/utils"
 
 export default function HistoryPage() {
   const player = usePlayer()
@@ -59,11 +59,6 @@ export default function HistoryPage() {
   const toggleSelect = (id: string) => {
     setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
-  const selectAll = () => {
-    if (selected.size === items.length) setSelected(new Set())
-    else setSelected(new Set(items.map(h => h.id)))
-  }
-
   const batchQueue = () => {
     const tracks = items.filter(h => selected.has(h.id)).map(toTrack)
     player.addToQueue(tracks)
@@ -124,42 +119,65 @@ export default function HistoryPage() {
       </div>
 
       <div className="space-y-1">
-        <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
-          {multi ? (
-            <label className="flex items-center cursor-pointer shrink-0 w-4 h-4" onClick={selectAll}>
-              <input type="checkbox" checked={selected.size === items.length && items.length > 0}
-                onChange={() => {}} className="accent-green-500 cursor-pointer" />
-            </label>
-          ) : (
-            <span className="inline-block w-4 h-4 shrink-0" />
-          )}
-          <span className="w-7 text-right shrink-0">#</span>
-          <span className="w-1/2 min-w-0 ml-3">Title</span>
-          <span className="w-20 shrink-0" />
-          <span className="flex-1 min-w-0" />
-          <span className="w-36 shrink-0 text-center hidden sm:block">Artist</span>
-          <span className="w-36 shrink-0 text-center hidden sm:block">Album</span>
-          <span className="w-16 shrink-0 text-center"><Clock className="w-3 h-3 inline" /></span>
-          <span className="w-44 shrink-0 text-center hidden sm:block"><Calendar className="w-3 h-3 inline" /></span>
+        <div className="flex items-center gap-1 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
+          <div className="flex items-center gap-1 w-1/2 shrink-0">
+            {multi ? (
+              <label className="flex items-center justify-center cursor-pointer shrink-0 w-10"
+                onClick={() => {
+                  if (selected.size === items.length) setSelected(new Set())
+                  else setSelected(new Set(items.map(h => h.id)))
+                }}>
+                <input type="checkbox" checked={selected.size === items.length && items.length > 0}
+                  onChange={() => {}} className="accent-green-500 cursor-pointer" />
+              </label>
+            ) : (
+              <span className="w-10 shrink-0" />
+            )}
+            <span className="w-7 text-right shrink-0">#</span>
+            <span className="flex-1 min-w-0 ml-3">Title</span>
+          </div>
+          <div className="flex items-center gap-1 flex-1">
+            <span className="w-20 shrink-0" />
+            <span className="flex-1 min-w-0" />
+            <span className="w-24 shrink-0 text-center hidden sm:block">Artist</span>
+            <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">Album</span>
+            <span className="w-16 shrink-0 text-center"><Clock className="w-3 h-3 inline" /></span>
+            <span className="min-w-[80px] max-w-[140px] shrink-0 text-center hidden sm:block"><Calendar className="w-3 h-3 inline" /></span>
+          </div>
         </div>
         {items.map((h, i) => (
           <div key={h.id}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
+            className="flex items-center gap-1 px-4 py-1 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
             onClick={() => playTrack(h)}>
-            {multi ? (
-              <input type="checkbox" checked={selected.has(h.id)}
-                onChange={() => toggleSelect(h.id)}
-                onClick={e => e.stopPropagation()}
-                className="accent-green-500 cursor-pointer shrink-0 w-4 h-4" />
-            ) : (
-              <span className="inline-block w-4 h-4 shrink-0" />
-            )}
-              <div className="w-7 shrink-0 justify-end cursor-pointer inline-flex items-center" onClick={() => playTrack(h)}>
-                <span className={`text-sm ${player.queue.find(q => q.id === h.track_id) === player.queue[player.queueIdx] ? "text-green-500" : "text-zinc-500"} group-hover:hidden`}>{i + 1}</span>
-                <Play className={`w-3.5 h-3.5 hidden group-hover:inline text-green-500`} />
+            <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
+              <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); if (multi) toggleSelect(h.id); else playTrack(h); }}>
+                <img src={coverUrl("track", h.track_id, 256)} alt=""
+                  className={`w-full h-full object-cover ${multi && selected.has(h.id) ? "opacity-60" : ""}`}
+                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                <Music className="w-3.5 h-3.5 text-zinc-600 hidden" />
+                {!multi && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Play className="w-5 h-5 text-white" />
+                  </div>
+                )}
+                {multi && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded">
+                    {selected.has(h.id) ? (
+                      <CheckSquare className="w-5 h-5 text-green-400" />
+                    ) : (
+                      <span className="w-5 h-5 rounded border-2 border-zinc-400" />
+                    )}
+                  </div>
+                )}
               </div>
-              <span className={`w-1/2 min-w-0 text-sm truncate ml-3 cursor-pointer ${player.queue.find(q => q.id === h.track_id) === player.queue[player.queueIdx] ? "text-green-500" : ""}`}
+              <div className="w-7 shrink-0 justify-end inline-flex items-center" onClick={(e) => { e.stopPropagation(); playTrack(h); }}>
+                <span className={`text-sm ${player.track?.id === h.track_id ? "text-green-500" : "text-zinc-500"}`}>{i + 1}</span>
+              </div>
+              <span className={`flex-1 min-w-[200px] text-sm truncate ml-3 cursor-pointer ${player.track?.id === h.track_id ? "text-green-500" : ""}`}
                 onClick={() => playTrack(h)}>{h.title || "Unknown track"}</span>
+            </div>
+            <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
                 <AddQueueBtn track={{ id: h.track_id, title: h.title || "", artist: h.artist || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3" }} />
                 <AddBtn trackId={h.track_id} />
@@ -167,10 +185,11 @@ export default function HistoryPage() {
                   onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-36 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{h.artist || ""}</span>
-              <span className="w-36 shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.album || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{h.artist || ""}</span>
+              <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.album || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{h.duration ? formatDuration(h.duration) : ""}</span>
-              <span className="w-44 shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.played_at ? new Date(h.played_at).toLocaleString() : ""}</span>
+              <span className="min-w-[80px] max-w-[140px] shrink-0 text-center hidden sm:block leading-tight"><span className="text-zinc-500 text-xs">{h.played_at ? new Date(h.played_at).toLocaleDateString() : ""}</span><br /><span className="text-zinc-500 text-[10px]">{h.played_at ? new Date(h.played_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ""}</span></span>
+            </div>
           </div>
         ))}
         {items.length === 0 && <p className="text-zinc-500 text-center py-12">No listening history yet</p>}

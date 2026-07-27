@@ -35,10 +35,10 @@ type ScannerService struct {
 	activeScan map[string]*ScanProgress
 }
 
-func NewScannerService(db *sql.DB) *ScannerService {
+func NewScannerService(db *sql.DB, imagesDir string) *ScannerService {
 	return &ScannerService{
 		db:         db,
-		engine:     scanner.NewEngine(db),
+		engine:     scanner.NewEngine(db, imagesDir),
 		scanRepo:   repository.NewScanJobRepo(db),
 		libRepo:    repository.NewLibraryRepo(db),
 		activeScan: make(map[string]*ScanProgress),
@@ -131,11 +131,9 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID string) {
 	log.Printf("[scanner] finished library=%s status=%s new=%d updated=%d deleted=%d errors=%d",
 		libraryID, job.Status, job.NewTracks, job.UpdatedTracks, job.DeletedTracks, len(stats.Errors))
 
-	time.AfterFunc(30*time.Second, func() {
-		s.mu.Lock()
-		delete(s.activeScan, libraryID)
-		s.mu.Unlock()
-	})
+	s.mu.Lock()
+	delete(s.activeScan, libraryID)
+	s.mu.Unlock()
 }
 
 func (s *ScannerService) setError(libraryID, msg string) {
@@ -143,6 +141,9 @@ func (s *ScannerService) setError(libraryID, msg string) {
 	if p := s.activeScan[libraryID]; p != nil {
 		p.Status = "failed"
 	}
+	s.mu.Unlock()
+	s.mu.Lock()
+	delete(s.activeScan, libraryID)
 	s.mu.Unlock()
 	log.Printf("[scanner] error library=%s: %s", libraryID, msg)
 }

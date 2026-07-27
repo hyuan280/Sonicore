@@ -74,7 +74,7 @@ func New(cfg *config.Config) (*Server, error) {
 		log.Printf("[audio] pulse server: %s", pulseServer)
 	}
 
-	scannerService := service.NewScannerService(db)
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
@@ -168,6 +168,9 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 
 	streamHandler := rest.NewStreamHandler(db, sessionStore)
 	api.HandleFunc("/s/{session}/{id}", streamHandler.ServeStream).Methods("GET")
+
+	coverHandler := rest.NewCoverHandler(db, cfg.Data.ImagesDir, sessionStore)
+	api.HandleFunc("/c/{session}/{ownerType}/{ownerId}", coverHandler.Serve).Methods("GET")
 
 	userData := rest.NewUserDataHandler(db)
 	protected.HandleFunc("/user/favorites/list", userData.ListFavorites).Methods("GET")

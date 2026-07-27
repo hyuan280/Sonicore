@@ -19,16 +19,22 @@ export interface Artist {
   id: string; name: string; album_count: number; cover_image_id?: string
 }
 
+export interface AlbumDetail {
+  id: string; title: string; artist: string; artist_id: string
+  year: number; genre: string; duration: number; cover_image_id?: string
+}
+
 export interface Album {
   id: string; name: string; title: string; artist: string; artistId: string
   year: number; genre: string; song_count: number; duration: number
-  cover?: string
+  cover_image_id?: string
 }
 
 export interface Track {
   id: string; title: string; artist: string; artistId: string
   album: string; albumId: string; track: number; discNumber: number
   duration: number; bitRate: number; suffix: string; size: number
+  cover_image_id?: string
 }
 
 export interface PlayerStatus {

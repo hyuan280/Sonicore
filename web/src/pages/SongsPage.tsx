@@ -3,8 +3,8 @@ import { api } from "../api/client"
 import { useLibrary } from "../stores/library"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
-import { Clock, Play, CheckSquare, Plus, ListPlus, Heart } from "lucide-react"
-import { formatDuration } from "../lib/utils"
+import { Clock, Play, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
+import { formatDuration, coverUrl } from "../lib/utils"
 
 export default function SongsPage() {
   const { activeId, libraries } = useLibrary()
@@ -41,11 +41,6 @@ export default function SongsPage() {
   const toggleSelect = (id: string) => {
     setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
-  const selectAll = () => {
-    if (selected.size === tracks.length) setSelected(new Set())
-    else setSelected(new Set(tracks.map(t => t.id)))
-  }
-
   const playTrack = (t: PlayerTrack, idx: number) => player.setQueue(tracks, idx)
 
   return (
@@ -104,53 +99,77 @@ export default function SongsPage() {
       </div>
 
       <div className="space-y-1">
-        <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
-          {multi ? (
-            <label className="flex items-center cursor-pointer shrink-0 w-4 h-4" onClick={selectAll}>
-              <input type="checkbox" checked={selected.size === tracks.length && tracks.length > 0}
-                onChange={() => {}} className="accent-green-500 cursor-pointer" />
-            </label>
-          ) : (
-            <span className="inline-block w-4 h-4 shrink-0" />
-          )}
-          <span className="w-7 text-right shrink-0">#</span>
-          <span className="w-1/2 min-w-0 ml-3">Title</span>
-          <span className="w-20 shrink-0" />
-          <span className="flex-1 min-w-0" />
-          <span className="w-36 shrink-0 text-center hidden sm:block">Artist</span>
-          <span className="w-36 shrink-0 text-center hidden sm:block">Album</span>
-          <span className="w-16 shrink-0 text-center"><Clock className="w-3 h-3 inline" /></span>
+        <div className="flex items-center gap-1 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
+          <div className="flex items-center gap-1 w-1/2 shrink-0">
+            {multi ? (
+              <label className="flex items-center justify-center cursor-pointer shrink-0 w-10"
+                onClick={() => {
+                  if (selected.size === tracks.length) setSelected(new Set())
+                  else setSelected(new Set(tracks.map(t => t.id)))
+                }}>
+                <input type="checkbox" checked={selected.size === tracks.length && tracks.length > 0}
+                  onChange={() => {}} className="accent-green-500 cursor-pointer" />
+              </label>
+            ) : (
+                <span className="w-10 shrink-0" />
+              ) }
+            <span className="w-7 text-right shrink-0">#</span>
+            <span className="flex-1 min-w-0 ml-3">Title</span>
+          </div>
+          <div className="flex items-center gap-1 flex-1">
+            <span className="w-20 shrink-0" />
+            <span className="flex-1 min-w-0" />
+            <span className="w-24 shrink-0 text-center hidden sm:block">Artist</span>
+            <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">Album</span>
+            <span className="w-16 shrink-0 text-center"><Clock className="w-3 h-3 inline" /></span>
+          </div>
         </div>
         {tracks.map((t, i) => {
           const displayIdx = (page - 1) * perPage + i
           const isCurrent = player.track?.id === t.id
           return (
             <div key={t.id}
-              className={`flex items-center gap-2 px-4 py-1.5 rounded-lg group transition-colors ${isCurrent ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}>
-              {multi ? (
-                <input type="checkbox" checked={selected.has(t.id)}
-                  onChange={() => toggleSelect(t.id)}
-                  onClick={e => e.stopPropagation()}
-                  className="accent-green-500 cursor-pointer shrink-0 w-4 h-4" />
-              ) : (
-                <span className="inline-block w-4 h-4 shrink-0" />
-              )}
-              <div className="w-7 shrink-0 justify-end cursor-pointer inline-flex items-center" onClick={() => playTrack(t, i)}>
-                <span className={`text-sm ${isCurrent ? "text-green-500" : "text-zinc-500"} group-hover:hidden`}>{displayIdx + 1}</span>
-                <Play className={`w-3.5 h-3.5 hidden group-hover:inline ${isCurrent ? "text-green-500" : "text-green-500"}`} />
+              className={`flex items-center gap-1 px-4 py-1 rounded-lg group transition-colors ${isCurrent ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}>
+              <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
+                <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); if (multi) toggleSelect(t.id); else playTrack(t, i); }}>
+                  <img src={coverUrl("track", t.id, 256)} alt=""
+                    className={`w-full h-full object-cover ${multi && selected.has(t.id) ? "opacity-60" : ""}`}
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                  <Music className="w-3.5 h-3.5 text-zinc-600 hidden" />
+                  {!multi && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Play className="w-5 h-5 text-white" />
+                    </div>
+                  )}
+                  {multi && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded">
+                      {selected.has(t.id) ? (
+                        <CheckSquare className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <span className="w-5 h-5 rounded border-2 border-zinc-400" />
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="w-7 shrink-0 justify-end inline-flex items-center" onClick={(e) => { e.stopPropagation(); playTrack(t, i); }}>
+                  <span className={`text-sm ${isCurrent ? "text-green-500" : "text-zinc-500"}`}>{displayIdx + 1}</span>
+                </div>
+                <span className={`flex-1 min-w-[200px] text-sm truncate ml-3 cursor-pointer ${isCurrent ? "text-green-500" : ""}`}
+                  onClick={() => playTrack(t, i)}>{t.title}</span>
               </div>
-              <span className={`w-1/2 min-w-0 text-sm truncate ml-3 cursor-pointer ${isCurrent ? "text-green-500" : ""}`}
-                onClick={() => playTrack(t, i)}>{t.title}</span>
-              <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={t} />
-                <AddBtn trackId={t.id} />
-                <FavBtn trackId={t.id} initiallyFav={favoriteIds.has(t.id)}
-                  onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
-              </span>
-              <span className="flex-1 min-w-0" />
-              <span className="w-36 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{t.artist || ""}</span>
-              <span className="w-36 shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
-              <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
+              <div className="flex items-center gap-1 flex-1 min-w-0">
+                <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
+                  <AddQueueBtn track={t} />
+                  <AddBtn trackId={t.id} />
+                  <FavBtn trackId={t.id} initiallyFav={favoriteIds.has(t.id)}
+                    onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
+                </span>
+                <span className="flex-1 min-w-0" />
+                <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{t.artist || ""}</span>
+                <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
+                <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
+              </div>
             </div>
           )
         })}

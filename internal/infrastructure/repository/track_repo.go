@@ -19,13 +19,18 @@ func NewTrackRepo(db *sql.DB) *TrackRepo {
 func scanTrack(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Track, error) {
 	var t domain.Track
 	var metadata sql.NullString
+	var coverID sql.NullString
 	err := scanner.Scan(&t.ID, &t.LibraryID, &t.Title, &t.AlbumID, &t.ArtistID,
+		&coverID,
 		&t.TrackNumber, &t.DiscNumber, &t.Duration, &t.BitRate, &t.SampleRate,
 		&t.Channels, &t.FilePath, &t.FileSize, &t.FileFormat, &t.MBID, &t.AcoustID,
 		&t.Hash, &t.HasLyrics, &t.Lyrics, &t.Rating, &t.PlayCount, &t.LastPlayedAt,
 		&metadata, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if coverID.Valid {
+		t.CoverImageID = &coverID.String
 	}
 	return &t, nil
 }
@@ -39,10 +44,11 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 
 	stmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO tracks (id, library_id, title, album_id, artist_id,
+		 cover_image_id,
 		 track_number, disc_number, duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, mbid, acoust_id, hash,
 		 has_lyrics, lyrics, rating, play_count, metadata, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`)
 	if err != nil {
 		return err
 	}
@@ -50,6 +56,7 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 
 	for _, t := range tracks {
 		_, err = stmt.ExecContext(ctx, t.ID, t.LibraryID, t.Title, t.AlbumID, t.ArtistID,
+			t.CoverImageID,
 			t.TrackNumber, t.DiscNumber, t.Duration, t.BitRate, t.SampleRate, t.Channels,
 			t.FilePath, t.FileSize, t.FileFormat, t.MBID, t.AcoustID, t.Hash,
 			t.HasLyrics, t.Lyrics, t.Rating, t.PlayCount, t.Metadata, t.CreatedAt, t.UpdatedAt)
@@ -64,6 +71,7 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 func (r *TrackRepo) FindByID(ctx context.Context, id string) (*domain.Track, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT t.id, t.library_id, t.title, t.album_id, t.artist_id,
+		 t.cover_image_id,
 		 t.track_number, t.disc_number, t.duration, t.bit_rate, t.sample_rate, t.channels,
 		 t.file_path, t.file_size, t.file_format, t.mbid, t.acoust_id, t.hash,
 		 t.has_lyrics, t.lyrics, t.rating, t.play_count, t.last_played_at, t.metadata, t.created_at, t.updated_at,
@@ -81,6 +89,7 @@ func (r *TrackRepo) FindByIDs(ctx context.Context, ids []string) ([]*domain.Trac
 	}
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT t.id, t.library_id, t.title, t.album_id, t.artist_id,
+		 t.cover_image_id,
 		 t.track_number, t.disc_number, t.duration, t.bit_rate, t.sample_rate, t.channels,
 		 t.file_path, t.file_size, t.file_format, t.mbid, t.acoust_id, t.hash,
 		 t.has_lyrics, t.lyrics, t.rating, t.play_count, t.last_played_at, t.metadata, t.created_at, t.updated_at,
@@ -108,13 +117,18 @@ func (r *TrackRepo) FindByIDs(ctx context.Context, ids []string) ([]*domain.Trac
 func scanTrackWithJoins(row interface{ Scan(...interface{}) error }) (*domain.Track, error) {
 	t := &domain.Track{}
 	var artistName, albumTitle string
+	var coverID sql.NullString
 	err := row.Scan(&t.ID, &t.LibraryID, &t.Title, &t.AlbumID, &t.ArtistID,
+		&coverID,
 		&t.TrackNumber, &t.DiscNumber, &t.Duration, &t.BitRate, &t.SampleRate, &t.Channels,
 		&t.FilePath, &t.FileSize, &t.FileFormat, &t.MBID, &t.AcoustID, &t.Hash,
 		&t.HasLyrics, &t.Lyrics, &t.Rating, &t.PlayCount, &t.LastPlayedAt, &t.Metadata, &t.CreatedAt, &t.UpdatedAt,
 		&artistName, &albumTitle)
 	if err != nil {
 		return nil, err
+	}
+	if coverID.Valid {
+		t.CoverImageID = &coverID.String
 	}
 	t.Artist = &domain.Artist{Name: artistName}
 	t.Album = &domain.Album{Title: albumTitle}
@@ -124,6 +138,7 @@ func scanTrackWithJoins(row interface{ Scan(...interface{}) error }) (*domain.Tr
 func (r *TrackRepo) FindByLibraryID(ctx context.Context, libraryID string) ([]domain.Track, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, library_id, title, album_id, artist_id,
+		 cover_image_id,
 		 track_number, disc_number, duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, mbid, acoust_id, hash,
 		 has_lyrics, lyrics, rating, play_count, last_played_at, metadata, created_at, updated_at
@@ -147,6 +162,7 @@ func (r *TrackRepo) FindByLibraryID(ctx context.Context, libraryID string) ([]do
 func (r *TrackRepo) FindByAlbumID(ctx context.Context, albumID string) ([]domain.Track, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, library_id, title, album_id, artist_id,
+		 cover_image_id,
 		 track_number, disc_number, duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, mbid, acoust_id, hash,
 		 has_lyrics, lyrics, rating, play_count, last_played_at, metadata, created_at, updated_at
@@ -170,6 +186,7 @@ func (r *TrackRepo) FindByAlbumID(ctx context.Context, albumID string) ([]domain
 func (r *TrackRepo) FindByArtistID(ctx context.Context, artistID string) ([]domain.Track, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, library_id, title, album_id, artist_id,
+		 cover_image_id,
 		 track_number, disc_number, duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, mbid, acoust_id, hash,
 		 has_lyrics, lyrics, rating, play_count, last_played_at, metadata, created_at, updated_at
@@ -193,6 +210,7 @@ func (r *TrackRepo) FindByArtistID(ctx context.Context, artistID string) ([]doma
 func (r *TrackRepo) FindByHash(ctx context.Context, hash string) (*domain.Track, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, library_id, title, album_id, artist_id,
+		 cover_image_id,
 		 track_number, disc_number, duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, mbid, acoust_id, hash,
 		 has_lyrics, lyrics, rating, play_count, last_played_at, metadata, created_at, updated_at
@@ -202,14 +220,14 @@ func (r *TrackRepo) FindByHash(ctx context.Context, hash string) (*domain.Track,
 
 func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE tracks SET title=$1, album_id=$2, artist_id=$3, track_number=$4,
-		 disc_number=$5, duration=$6, bit_rate=$7, sample_rate=$8, channels=$9,
-		 file_path=$10, file_size=$11, file_format=$12, mbid=$13, acoust_id=$14,
-		 hash=$15, has_lyrics=$16, lyrics=$17, rating=$18, play_count=$19,
-		 last_played_at=$20, metadata=$21, updated_at=NOW()
-		 WHERE id=$22`,
-		track.Title, track.AlbumID, track.ArtistID, track.TrackNumber,
-		track.DiscNumber, track.Duration, track.BitRate, track.SampleRate, track.Channels,
+		`UPDATE tracks SET title=$1, album_id=$2, artist_id=$3, cover_image_id=$4,
+		 track_number=$5, disc_number=$6, duration=$7, bit_rate=$8, sample_rate=$9, channels=$10,
+		 file_path=$11, file_size=$12, file_format=$13, mbid=$14, acoust_id=$15,
+		 hash=$16, has_lyrics=$17, lyrics=$18, rating=$19, play_count=$20,
+		 last_played_at=$21, metadata=$22, updated_at=NOW()
+		 WHERE id=$23`,
+		track.Title, track.AlbumID, track.ArtistID, track.CoverImageID,
+		track.TrackNumber, track.DiscNumber, track.Duration, track.BitRate, track.SampleRate, track.Channels,
 		track.FilePath, track.FileSize, track.FileFormat, track.MBID, track.AcoustID,
 		track.Hash, track.HasLyrics, track.Lyrics, track.Rating, track.PlayCount,
 		track.LastPlayedAt, track.Metadata, track.ID)

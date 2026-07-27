@@ -99,6 +99,7 @@ func RunMigrations(db *sql.DB) error {
 		title         VARCHAR(255) NOT NULL,
 		album_id      VARCHAR(26) NOT NULL REFERENCES albums(id),
 		artist_id     VARCHAR(26) NOT NULL REFERENCES artists(id),
+		cover_image_id VARCHAR(26),
 		track_number  INTEGER NOT NULL DEFAULT 0,
 		disc_number   INTEGER NOT NULL DEFAULT 1,
 		duration      DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -229,7 +230,6 @@ func RunMigrations(db *sql.DB) error {
 		device_id       VARCHAR(255) NOT NULL DEFAULT 'default',
 		device_name     VARCHAR(255) NOT NULL DEFAULT '',
 		device_config_id VARCHAR(26) REFERENCES audio_devices(id) ON DELETE SET NULL,
-		device_driver   VARCHAR(20) NOT NULL DEFAULT '',
 		volume          DOUBLE PRECISION NOT NULL DEFAULT 0.8,
 		play_mode       VARCHAR(20) NOT NULL DEFAULT 'normal',
 		queue           JSONB NOT NULL DEFAULT '[]',
@@ -246,6 +246,9 @@ func RunMigrations(db *sql.DB) error {
 	);
 	INSERT INTO server_settings (key, value) VALUES ('allow_registration', 'true')
 		ON CONFLICT (key) DO NOTHING;
+
+	-- add cover_image_id to tracks if not exists (for existing databases)
+	ALTER TABLE tracks ADD COLUMN IF NOT EXISTS cover_image_id VARCHAR(26);
 	`
 
 	_, err := db.Exec(schema)

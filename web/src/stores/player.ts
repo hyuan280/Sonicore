@@ -4,6 +4,7 @@ import { api } from "../api/client"
 export interface PlayerTrack {
   id: string; title: string; artist: string; album: string
   album_id: string; duration: number; suffix: string
+  cover_image_id?: string
 }
 
 interface PlayerState {
@@ -48,11 +49,11 @@ function shuffleArray<T>(arr: T[]): T[] {
 const SYNC_KEY = "player_state"
 
 function serializeTrack(t: PlayerTrack) {
-  return { id: t.id, title: t.title, artist: t.artist, album: t.album, album_id: t.album_id, duration: t.duration, suffix: t.suffix }
+  return { id: t.id, title: t.title, artist: t.artist, album: t.album, album_id: t.album_id, duration: t.duration, suffix: t.suffix, cover_image_id: t.cover_image_id }
 }
 
 function unserializeTrack(t: any): PlayerTrack {
-  return { id: t.id, title: t.title, artist: t.artist, album: t.album, album_id: t.album_id, duration: t.duration, suffix: t.suffix }
+  return { id: t.id, title: t.title, artist: t.artist, album: t.album, album_id: t.album_id, duration: t.duration, suffix: t.suffix, cover_image_id: t.cover_image_id }
 }
 
 export function savePlayerState() {

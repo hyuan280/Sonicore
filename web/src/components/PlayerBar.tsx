@@ -2,8 +2,8 @@ import { useRef, useEffect, useState, useCallback } from "react"
 import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart } from "lucide-react"
-import { formatDuration } from "../lib/utils"
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music } from "lucide-react"
+import { formatDuration, coverUrl } from "../lib/utils"
 
 export default function PlayerBar() {
   const ps = usePlayer()
@@ -173,8 +173,11 @@ export default function PlayerBar() {
           <div className="flex items-center gap-3 w-72">
             {track ? (
               <>
-                <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 flex items-center justify-center text-xs text-zinc-500">
-                  {track.suffix?.toUpperCase()}
+                <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 flex items-center justify-center text-xs text-zinc-500 overflow-hidden">
+                  <img src={coverUrl("track", track.id, 256)} alt={track.title}
+                    className="w-full h-full object-cover"
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                  <Music className="w-5 h-5 text-zinc-600 hidden" />
                 </div>
                 <div className="truncate min-w-0">
                   <p className="text-sm font-medium truncate">{track.title}</p>

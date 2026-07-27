@@ -15,3 +15,10 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+
+export function coverUrl(type: "track" | "album" | "artist", id: string, size?: number): string {
+  const session = localStorage.getItem("session_token") || ""
+  let url = `/api/c/${session}/${type}/${id}`
+  if (size) url += `?size=${size}`
+  return url
+}

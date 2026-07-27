@@ -591,13 +591,14 @@ func (h *UserDataHandler) SaveQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 type trackSummary struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Artist   string  `json:"artist"`
-	Album    string  `json:"album"`
-	AlbumID  string  `json:"album_id"`
-	Duration float64 `json:"duration"`
-	Suffix   string  `json:"suffix"`
+	ID            string  `json:"id"`
+	Title         string  `json:"title"`
+	Artist        string  `json:"artist"`
+	Album         string  `json:"album"`
+	AlbumID       string  `json:"album_id"`
+	Duration      float64 `json:"duration"`
+	Suffix        string  `json:"suffix"`
+	CoverImageID  *string `json:"cover_image_id,omitempty"`
 }
 
 func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
@@ -624,7 +625,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve track metadata (maintain order)
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(al.title, ''), t.album_id, t.duration, t.file_format
+		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(al.title, ''), t.album_id, t.duration, t.file_format, t.cover_image_id
 		 FROM tracks t
 		 LEFT JOIN artists ar ON t.artist_id = ar.id
 		 LEFT JOIN albums al ON t.album_id = al.id
@@ -639,8 +640,12 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	tracks := make([]trackSummary, 0, len(q.TrackIDs))
 	for rows.Next() {
 		var t trackSummary
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix); err != nil {
+		var coverID sql.NullString
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID); err != nil {
 			continue
+		}
+		if coverID.Valid {
+			t.CoverImageID = &coverID.String
 		}
 		tracks = append(tracks, t)
 	}

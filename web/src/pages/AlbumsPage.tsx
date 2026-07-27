@@ -3,11 +3,12 @@ import { Link } from "react-router-dom"
 import { api } from "../api/client"
 import { useLibrary } from "../stores/library"
 import { Card, CardGrid } from "../components/ui/card"
-import { Disc3, LayoutGrid, List } from "lucide-react"
+import { Disc3, LayoutGrid, List, Music } from "lucide-react"
+import { coverUrl } from "../lib/utils"
 
 interface AlbumItem {
   id: string; title: string; name: string; artist: string; year: number
-  song_count: number; library_id: string
+  song_count: number; library_id: string; cover_image_id?: string
 }
 
 export default function AlbumsPage() {
@@ -51,8 +52,13 @@ export default function AlbumsPage() {
           {albums.map(a => (
             <Link key={a.id} to={`/albums/${a.id}?lib=${a.library_id || activeId}`} className="block">
               <Card className="hover:bg-zinc-800/50 transition-colors h-full">
-                <div className="aspect-square rounded-lg bg-zinc-800 mb-3 flex items-center justify-center">
-                  <Disc3 className="w-8 h-8 text-zinc-600" />
+                <div className="aspect-square rounded-lg bg-zinc-800 mb-3 flex items-center justify-center overflow-hidden">
+                  {a.cover_image_id ? (
+                    <img src={coverUrl("album", a.id)} alt={a.title || a.name}
+                      className="w-full h-full object-cover"
+                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                  ) : null}
+                  <Disc3 className={`w-8 h-8 text-zinc-600 ${a.cover_image_id ? "hidden" : ""}`} />
                 </div>
                 <p className="font-medium text-sm truncate">{a.title || a.name}</p>
                 <p className="text-xs text-zinc-400 truncate">{a.artist || ""}</p>
@@ -69,8 +75,13 @@ export default function AlbumsPage() {
           {albums.map(a => (
             <Link key={a.id} to={`/albums/${a.id}?lib=${a.library_id || activeId}`}
               className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors">
-              <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
-                <Disc3 className="w-4 h-4 text-zinc-500" />
+              <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">
+                {a.cover_image_id ? (
+                  <img src={coverUrl("album", a.id)} alt={a.title || a.name}
+                    className="w-full h-full object-cover"
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                ) : null}
+                <Disc3 className={`w-4 h-4 text-zinc-500 ${a.cover_image_id ? "hidden" : ""}`} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{a.title || a.name}</p>

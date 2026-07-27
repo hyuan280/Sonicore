@@ -435,18 +435,55 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 		return
 	}
 
-	album, err := h.albumRepo.FindByID(r.Context(), id)
-	if err == nil && album.CoverImageID != nil {
-		imagePath := metadata.CoverPath(h.imagesDir, album.LibraryID, "album", album.ID, "jpg")
+	size := q.Get("size")
+	useThumbnail := size == "256"
+
+	coverPath := func(libID, ownerType, ownerID, ext string) string {
+		suffix := ""
+		if useThumbnail {
+			suffix = "_256"
+		}
+		return metadata.CoverPathWithSuffix(h.imagesDir, libID, ownerType, ownerID, suffix, ext)
+	}
+
+	ctx := r.Context()
+
+	track, err := h.trackRepo.FindByID(ctx, id)
+	if err == nil && track.CoverImageID != nil {
+		imagePath := coverPath(track.LibraryID, "track", track.ID, "jpg")
 		if _, err := os.Stat(imagePath); err == nil {
 			http.ServeFile(w, r, imagePath)
 			return
 		}
 	}
 
-	artist, err := h.artistRepo.FindByID(r.Context(), id)
+	var album *domain.Album
+	if track != nil {
+		album, _ = h.albumRepo.FindByID(ctx, track.AlbumID)
+	} else {
+		album, _ = h.albumRepo.FindByID(ctx, id)
+	}
+	if album != nil && album.CoverImageID != nil {
+		imagePath := coverPath(album.LibraryID, "album", album.ID, "jpg")
+		if _, err := os.Stat(imagePath); err == nil {
+			http.ServeFile(w, r, imagePath)
+			return
+		}
+		if albumTracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
+			for i := range albumTracks {
+				if albumTracks[i].CoverImageID != nil {
+					if p := coverPath(album.LibraryID, "track", albumTracks[i].ID, "jpg"); fileExists(p) {
+						http.ServeFile(w, r, p)
+						return
+					}
+				}
+			}
+		}
+	}
+
+	artist, err := h.artistRepo.FindByID(ctx, id)
 	if err == nil && artist.CoverImageID != nil {
-		imagePath := metadata.CoverPath(h.imagesDir, artist.LibraryID, "artist", artist.ID, "jpg")
+		imagePath := coverPath(artist.LibraryID, "artist", artist.ID, "jpg")
 		if _, err := os.Stat(imagePath); err == nil {
 			http.ServeFile(w, r, imagePath)
 			return
@@ -454,6 +491,11 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 	}
 
 	http.Error(w, "cover art not found", http.StatusNotFound)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func albumToSub(a *domain.Album) map[string]interface{} {
