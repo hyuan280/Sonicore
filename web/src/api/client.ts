@@ -94,9 +94,10 @@ export const api = {
       request("/api/user/favorites/remove", { method: "POST", body: JSON.stringify({ item_type: itemType, item_ids: itemIds }) }),
     checkFavorites: (ids: string[]) =>
       request("/api/user/favorites/check", { method: "POST", body: JSON.stringify({ ids }) }),
-    history: () => request("/api/user/history"),
-    addHistory: (trackId: string) => request("/api/user/history", { method: "POST", body: JSON.stringify({ track_id: trackId }) }),
-    clearHistory: () => request("/api/user/history", { method: "DELETE" }),
+    history: () => request("/api/user/history/list"),
+    addHistory: (trackId: string) => request("/api/user/history/add", { method: "POST", body: JSON.stringify({ track_id: trackId }) }),
+    clearHistory: () => request("/api/user/history/clear", { method: "POST" }),
+    deleteHistoryItems: (ids: string[]) => request("/api/user/history/remove", { method: "POST", body: JSON.stringify({ ids }) }),
     playlists: () => request("/api/user/playlists"),
     getPlaylist: (id: string) => request(`/api/user/playlists/${id}`),
     createPlaylist: (name: string) => request("/api/user/playlists", { method: "POST", body: JSON.stringify({ name }) }),

@@ -69,6 +69,19 @@ export default function HistoryPage() {
     await api.user.addFavorites("track", sel.map(h => h.track_id))
   }
 
+  const deleteItem = async (id: string) => {
+    if (!confirm("Remove this history entry?")) return
+    await api.user.deleteHistoryItems([id])
+    setItems(prev => prev.filter(h => h.id !== id))
+  }
+
+  const batchDelete = async () => {
+    if (!confirm(`Remove ${selected.size} history entr${selected.size > 1 ? "ies" : "y"}?`)) return
+    await api.user.deleteHistoryItems([...selected])
+    setItems(prev => prev.filter(h => !selected.has(h.id)))
+    setSelected(new Set())
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -113,6 +126,10 @@ export default function HistoryPage() {
             <button onClick={batchFav}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
               <Heart className="w-4 h-4" /> Favorite
+            </button>
+            <button onClick={batchDelete}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-red-400 cursor-pointer">
+              <Trash2 className="w-4 h-4" /> Delete
             </button>
           </div>
         )}
@@ -188,7 +205,13 @@ export default function HistoryPage() {
               <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{h.artist || ""}</span>
               <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.album || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{h.duration ? formatDuration(h.duration) : ""}</span>
-              <span className="min-w-[80px] max-w-[140px] shrink-0 text-center hidden sm:block leading-tight"><span className="text-zinc-500 text-xs">{h.played_at ? new Date(h.played_at).toLocaleDateString() : ""}</span><br /><span className="text-zinc-500 text-[10px]">{h.played_at ? new Date(h.played_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ""}</span></span>
+              <span className="min-w-[80px] max-w-[140px] shrink-0 text-center hidden sm:block leading-tight">
+                <span className="group-hover:hidden"><span className="text-zinc-500 text-xs">{h.played_at ? new Date(h.played_at).toLocaleDateString() : ""}</span><br /><span className="text-zinc-500 text-[10px]">{h.played_at ? new Date(h.played_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ""}</span></span>
+                <button onClick={e => { e.stopPropagation(); deleteItem(h.id) }}
+                  className="hidden group-hover:inline-flex items-center justify-center w-full cursor-pointer text-zinc-500 hover:text-red-400">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </span>
             </div>
           </div>
         ))}
