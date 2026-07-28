@@ -170,6 +170,8 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
 	})
 	protected.HandleFunc("/metadata/identify", metadataHandler.Identify).Methods("POST")
+	protected.HandleFunc("/metadata/search", metadataHandler.Search).Methods("POST")
+	protected.HandleFunc("/metadata/save", metadataHandler.Save).Methods("POST")
 
 	userHandler := rest.NewUserHandler(db)
 	protected.HandleFunc("/user/me", userHandler.Me).Methods("GET")

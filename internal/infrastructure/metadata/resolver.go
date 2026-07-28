@@ -86,10 +86,12 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		}
 	}
 
-	for _, rel := range recording.Releases {
+	var relIdx = -1
+	for i, rel := range recording.Releases {
 		if rel.Status != "" && rel.Status != "official" {
 			continue
 		}
+		relIdx = i
 		result.AlbumMBID = rel.ID
 		if meta.Album == "" {
 			result.Album = rel.Title
@@ -97,16 +99,27 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		if len(rel.Date) >= 4 {
 			fmt.Sscanf(rel.Date[:4], "%d", &result.Year)
 		}
-
+		break
+	}
+	// Pick year from any release if not found on official one
+	if result.Year == 0 {
+		for _, rel := range recording.Releases {
+			if len(rel.Date) >= 4 {
+				fmt.Sscanf(rel.Date[:4], "%d", &result.Year)
+				break
+			}
+		}
+	}
+	// Pick genre from first official release
+	if relIdx >= 0 {
+		rel := recording.Releases[relIdx]
 		full, err := r.mb.LookupRelease(rel.ID)
 		if err == nil {
 			if g := GenreFromTags(full.Tags); g != "" {
 				result.Genre = g
 			}
 		}
-
 		result.CoverArtURL = fmt.Sprintf("https://coverartarchive.org/release/%s/front", rel.ID)
-		break
 	}
 
 	if result.ArtistMBID != "" {

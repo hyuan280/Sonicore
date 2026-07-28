@@ -28,6 +28,8 @@ export default function SettingsPage() {
   const [scanOverwrite, setScanOverwrite] = useState(false)
   const [manageLib, setManageLib] = useState<any>(null)
   const [manageTracks, setManageTracks] = useState<any[]>([])
+  const [searching, setSearching] = useState("")
+  const [searchModal, setSearchModal] = useState<any>(null)
 
   useEffect(() => {
     if (!manageLib) { setManageTracks([]); return }
@@ -282,9 +284,20 @@ export default function SettingsPage() {
                     <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(t.duration)}</span>
                     <span className="w-36 shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => {/* TODO: re-identify */}}
-                        className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Re-identify (overwrite all)">
-                        <Search className="w-4 h-4" />
+                      <button onClick={async () => {
+                        setSearching(t.id); setSearchModal({ track: t, edit: {} })
+                        try {
+                          const res = await fetch("/api/metadata/search", {
+                            method: "POST",
+                            headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
+                            body: JSON.stringify({ track_id: t.id, title: t.title, artist: t.artist || "", album: t.album || "" }),
+                          })
+                          setSearchModal({ track: t, result: await res.json(), edit: {} })
+                        } catch { setSearchModal({ track: t, error: "Search failed" }) }
+                        setSearching("")
+                      }}
+                        className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Identify with MusicBrainz">
+                        {searching === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
                       </button>
                       <button onClick={() => {
                         const mbid = prompt("Enter MusicBrainz recording ID:")
@@ -304,6 +317,83 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+      {searchModal &&       <SearchResultModal data={searchModal} onClose={() => setSearchModal(null)} onUpdate={(edit) => setSearchModal((prev: any) => ({ ...prev, edit }))} />}
+    </div>
+  )
+}
+
+function SearchResultModal({ data, onClose, onUpdate }: { data: any; onClose: () => void; onUpdate: (e: any) => void }) {
+  const [saving, setSaving] = useState(false)
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold">MusicBrainz Match</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-zinc-800 cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-xs text-zinc-500 mb-4 truncate">{data.track?.title}</p>
+        {data.result == null ? (
+          <div className="space-y-3">
+            <div className="w-full h-1 bg-zinc-700 rounded-full overflow-hidden">
+              <div className="h-full bg-green-500 animate-pulse rounded-full w-full" />
+            </div>
+            <p className="text-sm text-zinc-400 text-center">Searching MusicBrainz...</p>
+          </div>
+        ) : data.error ? (
+          <p className="text-sm text-red-400">{data.error}</p>
+        ) : data.result.matched ? (
+          <div className="space-y-2 text-sm">
+            {(["title","artist","album","year","genre"] as const).map(f => (
+              <div key={f} className="flex items-center gap-2">
+                <span className="text-zinc-400 w-14 shrink-0 text-right">{f.charAt(0).toUpperCase()+f.slice(1)}</span>
+                <input
+                  value={data.edit[f] ?? (data.result[f] || "")}
+                  onChange={e => onUpdate({ ...data.edit, [f]: e.target.value })}
+                  className="bg-zinc-800 rounded px-2 py-0.5 text-sm text-right flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+              </div>
+            ))}
+            <div className="flex justify-between">
+              <span className="text-zinc-400">MBID</span>
+              <span className="text-xs font-mono text-zinc-500">{data.result.track_mbid}</span>
+            </div>
+            {data.result.file_hash && (
+              <div className="flex justify-between">
+                <span className="text-zinc-400">Hash</span>
+                <span className="text-xs font-mono text-zinc-600 truncate ml-2 max-w-[200px]">{data.result.file_hash}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-400">No match found on MusicBrainz</p>
+        )}
+        {data.result?.matched && (
+          <button onClick={async () => {
+            setSaving(true)
+            try {
+              await fetch("/api/metadata/save", {
+                method: "POST",
+                headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
+                body: JSON.stringify({
+                  track_id: data.track?.id || "",
+                  file_hash: data.result.file_hash || data.track?.file_hash || "",
+                  track_mbid: data.result.track_mbid || "",
+                  title: data.edit.title ?? data.result.title ?? "",
+                  artist: data.edit.artist ?? data.result.artist ?? "",
+                  album: data.edit.album ?? data.result.album ?? "",
+                  year: parseInt(data.edit.year) || data.result.year || 0,
+                  genre: data.edit.genre ?? data.result.genre ?? "",
+                }),
+              })
+              onClose()
+            } catch {}
+            setSaving(false)
+          }} disabled={saving}
+            className="mt-4 w-full py-2 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
+            {saving ? "Saving..." : "Save & Use for This Track"}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

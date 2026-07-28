@@ -241,6 +241,22 @@ func RunMigrations(db *sql.DB) error {
 		value TEXT NOT NULL DEFAULT ''
 	);
 
+	CREATE TABLE IF NOT EXISTS user_metadata (
+		user_id      VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		file_hash    VARCHAR(64) NOT NULL,
+		track_mbid   VARCHAR(36) NOT NULL DEFAULT '',
+		title        VARCHAR(255) NOT NULL DEFAULT '',
+		artist       VARCHAR(255) NOT NULL DEFAULT '',
+		album        VARCHAR(255) NOT NULL DEFAULT '',
+		album_artist VARCHAR(255) NOT NULL DEFAULT '',
+		track_number INTEGER NOT NULL DEFAULT 0,
+		disc_number  INTEGER NOT NULL DEFAULT 0,
+		year         INTEGER NOT NULL DEFAULT 0,
+		genre        VARCHAR(128) NOT NULL DEFAULT '',
+		updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, file_hash)
+	);
+
 	INSERT INTO server_settings (key, value) VALUES ('allow_registration', 'true')
 		ON CONFLICT (key) DO NOTHING;
 	`

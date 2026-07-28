@@ -88,6 +88,7 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 			"bit_rate":       t.BitRate,
 			"suffix":         t.FileFormat,
 			"file_size":      t.FileSize,
+			"file_hash":      t.Hash,
 		}
 		if artist, err := h.artistRepo.FindByID(r.Context(), t.ArtistID); err == nil {
 			entry["artist"] = artist.Name

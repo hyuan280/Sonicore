@@ -22,6 +22,7 @@ type Engine struct {
 	trackRepo      *repository.TrackRepo
 	albumRepo      *repository.AlbumRepo
 	artistRepo     *repository.ArtistRepo
+	umRepo         *repository.UserMetadataRepo
 	coverExtractor *metadata.CoverExtractor
 	resolver       *metadata.Resolver
 }
@@ -39,6 +40,7 @@ func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig) *Engine {
 		trackRepo:      repository.NewTrackRepo(db),
 		albumRepo:      repository.NewAlbumRepo(db),
 		artistRepo:     repository.NewArtistRepo(db),
+		umRepo:         repository.NewUserMetadataRepo(db),
 		coverExtractor: metadata.NewCoverExtractor(imagesDir),
 		resolver:       resolver,
 	}
@@ -113,6 +115,26 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			stats.Scanned++
 			onProgress(*stats)
 			return nil
+		}
+
+		// Apply user-saved metadata overrides (priority 1)
+		if um, err := e.umRepo.FindByUserAndHash(ctx, lib.OwnerID, fileHash); err == nil {
+			if um.Title != "" {
+				meta.Title = um.Title
+				meta.TitleFromFilename = false
+			}
+			if um.Artist != "" {
+				meta.Artist = um.Artist
+			}
+			if um.Album != "" {
+				meta.Album = um.Album
+			}
+			if um.Year != 0 {
+				meta.Year = um.Year
+			}
+			if um.Genre != "" {
+				meta.Genre = um.Genre
+			}
 		}
 
 		seenPaths[path] = true
