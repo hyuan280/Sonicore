@@ -31,20 +31,16 @@ export default function HistoryPage() {
       id: h.track_id, title: h.title || "Unknown",
       artist: h.artist || "", album: h.album || "",
       album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+      cover_image_id: h.cover_image_id,
     }))
     if (tracks.length > 0) player.setQueue(tracks, 0)
-  }
-
-  const clearAll = async () => {
-    if (!confirm("Clear all listening history?")) return
-    await api.user.clearHistory()
-    setItems([])
   }
 
   const toTrack = (h: any): PlayerTrack => ({
     id: h.track_id, title: h.title || "Unknown",
     artist: h.artist || "", album: h.album || "",
-    album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "",
+    album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+    cover_image_id: h.cover_image_id,
   })
 
   const playTrack = (h: any) => {
@@ -70,7 +66,6 @@ export default function HistoryPage() {
   }
 
   const deleteItem = async (id: string) => {
-    if (!confirm("Remove this history entry?")) return
     await api.user.deleteHistoryItems([id])
     setItems(prev => prev.filter(h => h.id !== id))
   }
@@ -164,15 +159,17 @@ export default function HistoryPage() {
         </div>
         {items.map((h, i) => (
           <div key={h.id}
-            className="flex items-center gap-1 px-4 py-1 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
+            className="flex items-center gap-1 px-4 py-0 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
             onClick={() => playTrack(h)}>
             <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
               <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); if (multi) toggleSelect(h.id); else playTrack(h); }}>
-                <img src={coverUrl("track", h.track_id, 256)} alt=""
-                  className={`w-full h-full object-cover ${multi && selected.has(h.id) ? "opacity-60" : ""}`}
-                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
-                <Music className="w-3.5 h-3.5 text-zinc-600 hidden" />
+                {h.cover_image_id ? (
+                  <img src={coverUrl("track", h.track_id, 64)} alt=""
+                    className={`w-full h-full object-cover ${multi && selected.has(h.id) ? "opacity-60" : ""}`}
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                ) : null}
+                <Music className={`w-3.5 h-3.5 text-zinc-600 ${h.cover_image_id ? "hidden" : ""}`} />
                 {!multi && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                     <Play className="w-5 h-5 text-white" />
@@ -196,7 +193,7 @@ export default function HistoryPage() {
             </div>
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={{ id: h.track_id, title: h.title || "", artist: h.artist || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3" }} />
+                <AddQueueBtn track={{ id: h.track_id, title: h.title || "", artist: h.artist || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id }} />
                 <AddBtn trackId={h.track_id} />
                 <FavBtn trackId={h.track_id} initiallyFav={favoriteIds.has(h.track_id)}
                   onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />

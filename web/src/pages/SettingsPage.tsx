@@ -5,7 +5,8 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
-import { Music, Scan, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2 } from "lucide-react"
+import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileEdit } from "lucide-react"
+import { formatDuration } from "../lib/utils"
 import DirectoryPicker from "../components/DirectoryPicker"
 
 const roleLabel = (r: string) =>
@@ -22,6 +23,16 @@ export default function SettingsPage() {
 
   const [dirPickerOpen, setDirPickerOpen] = useState(false)
 
+
+  const [scanDialogLib, setScanDialogLib] = useState<string | null>(null)
+  const [scanOverwrite, setScanOverwrite] = useState(false)
+  const [manageLib, setManageLib] = useState<any>(null)
+  const [manageTracks, setManageTracks] = useState<any[]>([])
+
+  useEffect(() => {
+    if (!manageLib) { setManageTracks([]); return }
+    api.data.tracks(manageLib.id, 1, 9999).then(d => setManageTracks(d.items || [])).catch(() => {})
+  }, [manageLib?.id])
 
   const [showPwModal, setShowPwModal] = useState(false)
   const [pwForm, setPwForm] = useState({ oldPw: "", newPw: "", confirmPw: "" })
@@ -68,11 +79,11 @@ export default function SettingsPage() {
     }
   }, [reloadLibs])
 
-  const startScan = useCallback(async (id: string) => {
+  const startScan = useCallback(async (id: string, mode?: string) => {
     pollingRef.current[id] = true
     setScanning(prev => ({ ...prev, [id]: { scanned: 0, total: 0 } }))
     try {
-      await api.libraries.scan(id)
+      await api.libraries.scan(id, mode)
       pollScan(id)
     } catch {
       setScanning(prev => { const n = { ...prev }; delete n[id]; return n })
@@ -160,8 +171,11 @@ export default function SettingsPage() {
                         {prog.scanned}/{prog.total || "?"}
                       </span>
                     ) : null}
-                    <Button variant="ghost" size="sm" onClick={() => startScan(lib.id)} disabled={!!prog}>
-                      {prog ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
+                    <Button variant="ghost" size="sm" onClick={() => setManageLib(lib)} disabled={!!prog}>
+                      <ColumnsSettings className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => { setScanDialogLib(lib.id); setScanOverwrite(false) }} disabled={!!prog}>
+                      {prog ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => del(lib.id)}>
                       <Trash2 className="w-4 h-4 text-red-400" />
@@ -202,6 +216,94 @@ export default function SettingsPage() {
       )}
 
       <Button variant="danger" onClick={logout}>Sign Out</Button>
+
+      {/* Scan dialog */}
+      {scanDialogLib && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setScanDialogLib(null)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">Scan Library</h2>
+            <label className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800 cursor-pointer" onClick={() => setScanOverwrite(false)}>
+              <input type="radio" checked={!scanOverwrite} onChange={() => setScanOverwrite(false)} className="accent-green-500" />
+              <div>
+                <p className="text-sm font-medium">Search missing metadata</p>
+                <p className="text-xs text-zinc-400">Only fill empty fields from MusicBrainz</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800 cursor-pointer" onClick={() => setScanOverwrite(true)}>
+              <input type="radio" checked={scanOverwrite} onChange={() => setScanOverwrite(true)} className="accent-green-500" />
+              <div>
+                <p className="text-sm font-medium">Overwrite all metadata</p>
+                <p className="text-xs text-zinc-400">Replace existing data with MusicBrainz results</p>
+              </div>
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={() => setScanDialogLib(null)}>Cancel</Button>
+              <Button variant="primary" onClick={() => { const id = scanDialogLib; const mode = scanOverwrite ? "overwrite" : "missing"; setScanDialogLib(null); startScan(id, mode) }}>Start Scan</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Library manage modal (full-screen) */}
+      {manageLib && (
+        <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+            <div>
+              <h2 className="text-lg font-bold">{manageLib.name}</h2>
+              <p className="text-sm text-zinc-500">{manageLib.track_count} tracks</p>
+            </div>
+            <button onClick={() => { setManageLib(null); setManageTracks([]) }}
+              className="p-2 rounded-lg hover:bg-zinc-800 cursor-pointer">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          {/* Track list */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {manageTracks.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-zinc-500">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading tracks...
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
+                  <span className="flex-1 min-w-0">Title</span>
+                  <span className="w-32 shrink-0 text-center hidden sm:block">Artist</span>
+                  <span className="w-32 shrink-0 text-center hidden sm:block">Album</span>
+                  <span className="w-16 shrink-0 text-center">Format</span>
+                  <span className="w-16 shrink-0 text-center">Duration</span>
+                  <span className="w-36 shrink-0 text-center">Actions</span>
+                </div>
+                {manageTracks.map((t: any) => (
+                  <div key={t.id} className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 text-sm group">
+                    <span className="flex-1 min-w-0 truncate">{t.title}</span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block">{t.artist || ""}</span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.album || ""}</span>
+                    <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
+                    <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(t.duration)}</span>
+                    <span className="w-36 shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => {/* TODO: re-identify */}}
+                        className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Re-identify (overwrite all)">
+                        <Search className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => {
+                        const mbid = prompt("Enter MusicBrainz recording ID:")
+                        if (mbid) fetch("/api/metadata/identify", { method: "POST", headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")}, body: JSON.stringify({ track_id: t.id, mbid }) }).then(r => r.ok ? alert("Updated!") : alert("Failed")).catch(() => {})
+                      }} className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Manual identify (enter MBID)">
+                        <FileEdit className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => {/* TODO: edit metadata (cover, lyrics) */}}
+                        className="p-1 rounded text-zinc-500 hover:text-yellow-400 cursor-pointer" title="Edit metadata (cover / lyrics)">
+                        <Upload className="w-4 h-4" />
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

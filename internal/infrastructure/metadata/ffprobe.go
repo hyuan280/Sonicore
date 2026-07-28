@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 type ProbeResult struct {
@@ -50,6 +51,8 @@ type AudioMeta struct {
 	FileFormat  string
 	MBID        string
 	AcoustID    string
+
+	TitleFromFilename bool
 }
 
 var audioExts = map[string]bool{
@@ -139,6 +142,19 @@ func Probe(path string) (*AudioMeta, error) {
 
 		meta.HasCoverArt = hasCoverArt(result.Streams)
 	}
+
+	// Clear garbled fields (invalid UTF-8 or replacement characters)
+	if !utf8.ValidString(meta.Title) || strings.ContainsRune(meta.Title, 0xFFFD) {
+		meta.Title = ""
+	}
+	if !utf8.ValidString(meta.Artist) || strings.ContainsRune(meta.Artist, 0xFFFD) {
+		meta.Artist = ""
+	}
+	if !utf8.ValidString(meta.Album) || strings.ContainsRune(meta.Album, 0xFFFD) {
+		meta.Album = ""
+	}
+
+	meta.TitleFromFilename = meta.Title == ""
 
 	if meta.Title == "" {
 		meta.Title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))

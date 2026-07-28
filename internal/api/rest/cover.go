@@ -2,6 +2,7 @@ package rest
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -51,19 +52,20 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	size := r.URL.Query().Get("size")
 
 	tryCover := func(libID, otype, oid string) bool {
-		suffix := ""
-		if size == "256" {
-			suffix = "_256"
-		}
-		for _, ext := range []string{"jpg", "png"} {
-			p := metadata.CoverPathWithSuffix(h.imagesDir, libID, otype, oid, suffix, ext)
+		// Try: 64 → 256 → original (regardless of requested size)
+		for _, s := range []int{64, 256} {
+			p := metadata.CoverPathWithSuffix(h.imagesDir, libID, otype, oid, fmt.Sprintf("_%d", s), "jpg")
 			if _, err := os.Stat(p); err == nil {
 				http.ServeFile(w, r, p)
 				return true
 			}
+		}
+		p := metadata.CoverPathWithSuffix(h.imagesDir, libID, otype, oid, "", "jpg")
+		if _, err := os.Stat(p); err == nil {
+			http.ServeFile(w, r, p)
+			return true
 		}
 		return false
 	}
@@ -78,12 +80,12 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if album, err := h.albumRepo.FindByID(ctx, track.AlbumID); err == nil {
-			if album.CoverImageID != nil && tryCover(album.LibraryID, "album", album.ID) {
+			if album.CoverImageID != nil && tryCover("album", "album", album.ID) {
 				return
 			}
 			if tracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
 				for i := range tracks {
-					if tracks[i].CoverImageID != nil && tryCover(album.LibraryID, "track", tracks[i].ID) {
+					if tracks[i].CoverImageID != nil && tryCover("album", "track", tracks[i].ID) {
 						return
 					}
 				}
@@ -95,12 +97,12 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-		if album.CoverImageID != nil && tryCover(album.LibraryID, "album", album.ID) {
+		if tryCover("album", "album", album.ID) {
 			return
 		}
 		if tracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
 			for i := range tracks {
-				if tracks[i].CoverImageID != nil && tryCover(album.LibraryID, "track", tracks[i].ID) {
+				if tryCover("album", "track", tracks[i].ID) {
 					return
 				}
 			}
@@ -111,7 +113,7 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-		if artist.CoverImageID != nil && tryCover(artist.LibraryID, "artist", artist.ID) {
+		if tryCover("artist", "artist", artist.ID) {
 			return
 		}
 	}

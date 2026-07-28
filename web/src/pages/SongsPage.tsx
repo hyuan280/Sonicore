@@ -129,14 +129,16 @@ export default function SongsPage() {
           const isCurrent = player.track?.id === t.id
           return (
             <div key={t.id}
-              className={`flex items-center gap-1 px-4 py-1 rounded-lg group transition-colors ${isCurrent ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}>
+              className={`flex items-center gap-1 px-4 py-0 rounded-lg group transition-colors ${isCurrent ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}>
               <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
                 <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
                   onClick={(e) => { e.stopPropagation(); if (multi) toggleSelect(t.id); else playTrack(t, i); }}>
-                  <img src={coverUrl("track", t.id, 256)} alt=""
-                    className={`w-full h-full object-cover ${multi && selected.has(t.id) ? "opacity-60" : ""}`}
-                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
-                  <Music className="w-3.5 h-3.5 text-zinc-600 hidden" />
+                  {t.cover_image_id ? (
+                    <img src={coverUrl("track", t.id, 64)} alt=""
+                      className={`w-full h-full object-cover ${multi && selected.has(t.id) ? "opacity-60" : ""}`}
+                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                  ) : null}
+                  <Music className={`w-3.5 h-3.5 text-zinc-600 ${t.cover_image_id ? "hidden" : ""}`} />
                   {!multi && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                       <Play className="w-5 h-5 text-white" />

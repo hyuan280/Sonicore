@@ -47,6 +47,12 @@ refresh_expiration = "720h"
 # PulseAudio 服务器路径。不配置此值则不使用 PulseAudio（仅保留 ALSA 检测）。
 # pulse_server = "/run/pulse/native"
 
+[metadata]
+# MusicBrainz 元数据刮削。默认关闭，需手动启用。
+# musicbrainz_enabled = false
+# musicbrainz_api_url = "https://musicbrainz.org/ws/2"
+# musicbrainz_rate_limit = 1
+
 [log]
 level = "info"
 format = "console"

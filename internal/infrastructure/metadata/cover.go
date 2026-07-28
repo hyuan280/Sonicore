@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif"
-	_ "image/jpeg"
+	"image/jpeg"
 	_ "image/png"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"golang.org/x/image/draw"
 )
 
 type CoverExtractor struct {
@@ -48,7 +50,7 @@ func (ce *CoverExtractor) ExtractFromFile(audioPath string) ([]byte, string, err
 	return data, contentType, nil
 }
 
-func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte, ext string) (string, error) {
+func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte, ext string, sizes ...int) (string, error) {
 	dir := filepath.Join(ce.imagesDir, libraryID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
@@ -60,12 +62,13 @@ func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return "", err
 	}
-	thumbnailPath := filepath.Join(dir, fmt.Sprintf("%s_%s_256.jpg", ownerType, ownerID))
-	ResizeToThumbnail(data, thumbnailPath, 256)
-	if _, err := os.Stat(thumbnailPath); err != nil {
-		log.Printf("[cover] thumbnail NOT created at %s", thumbnailPath)
+	if len(sizes) == 0 {
+		sizes = []int{64, 256}
 	}
-
+	for _, size := range sizes {
+		thumbPath := filepath.Join(dir, fmt.Sprintf("%s_%s_%d.jpg", ownerType, ownerID, size))
+		ResizeToThumbnail(data, thumbPath, size)
+	}
 	return path, nil
 }
 
@@ -80,13 +83,13 @@ func detectImageType(data []byte) string {
 }
 
 func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
-	img, _, err := image.Decode(bytes.NewReader(data))
+	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		log.Printf("[cover] image.Decode error: %v", err)
 		return
 	}
 
-	bounds := img.Bounds()
+	bounds := src.Bounds()
 	w := bounds.Dx()
 	h := bounds.Dy()
 
@@ -102,18 +105,16 @@ func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
 	newW := int(float64(w) * scale)
 	newH := int(float64(h) * scale)
 
-	cmd := exec.Command("ffmpeg",
-		"-y",
-		"-f", "image2pipe",
-		"-i", "pipe:0",
-		"-vf", fmt.Sprintf("scale=%d:%d", newW, newH),
-		"-q:v", "2",
-		outputPath,
-	)
-	cmd.Stdin = bytes.NewReader(data)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("[cover] ffmpeg resize error: %v\n%s", err, out)
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+
+	out, err := os.Create(outputPath)
+	if err != nil {
+		log.Printf("[cover] create thumbnail error: %v", err)
+		return
 	}
+	defer out.Close()
+	jpeg.Encode(out, dst, &jpeg.Options{Quality: 85})
 }
 
 func (ce *CoverExtractor) ImagesDir() string {

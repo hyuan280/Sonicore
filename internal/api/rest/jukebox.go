@@ -111,6 +111,7 @@ func (h *JukeboxHandler) ensureEngine(ctx context.Context, id string) (*player.E
 func (h *JukeboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	list, err := h.jukeboxRepo.List(r.Context())
 	if err != nil {
+		log.Printf("[jukebox] List failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

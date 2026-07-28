@@ -7,7 +7,7 @@ import { Mic2, LayoutGrid, List, Music } from "lucide-react"
 import { coverUrl } from "../lib/utils"
 
 export default function ArtistsPage() {
-  const { activeId, libraries } = useLibrary()
+  const { activeId } = useLibrary()
   const [artists, setArtists] = useState<any[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -16,16 +16,14 @@ export default function ArtistsPage() {
 
   const load = async () => {
     if (!activeId) return
-    const ids = activeId === "__all__" ? libraries.map(l => l.id) : [activeId]
-    const results = await Promise.all(ids.map(id => api.data.artists(id, 1, 9999)))
-    const merged = results.flatMap(r => r.items || [])
-    const totalItems = results.reduce((sum, r) => sum + (r.total || 0), 0)
+    const r = await api.data.artists(1, 9999)
+    const items = r.items || []
+    setTotal(items.length)
     const start = (page - 1) * perPage
-    setArtists(merged.slice(start, start + perPage))
-    setTotal(totalItems)
+    setArtists(items.slice(start, start + perPage))
   }
 
-  useEffect(() => { load() }, [activeId, page, libraries.length])
+  useEffect(() => { load() }, [activeId, page])
 
   const totalPages = Math.ceil(total / perPage)
 
@@ -45,18 +43,18 @@ export default function ArtistsPage() {
       {layout === "grid" ? (
         <CardGrid>
           {artists.map(a => (
-            <Link key={a.id} to={`/artists/${a.id}?lib=${a.library_id || activeId}`} className="block">
+            <Link key={a.id} to={`/artists/${a.id}`} className="block">
               <Card className="flex flex-col hover:bg-zinc-800/50 transition-colors">
                 <div className="aspect-square rounded-full bg-zinc-800 mb-3 flex items-center justify-center overflow-hidden">
                   {a.cover_image_id ? (
-                    <img src={coverUrl("artist", a.id)} alt={a.name}
+                    <img src={coverUrl("artist", a.id, 256)} alt={a.name}
                       className="w-full h-full object-cover"
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                   ) : null}
                   <Mic2 className={`w-8 h-8 text-zinc-500 ${a.cover_image_id ? "hidden" : ""}`} />
                 </div>
               <p className="font-medium text-sm text-center">{a.name}</p>
-              <p className="text-xs text-zinc-500 text-center">{a.album_count} albums</p>
+              <p className="text-xs text-zinc-500 text-center">{a.track_count} tracks</p>
               </Card>
             </Link>
           ))}
@@ -64,11 +62,11 @@ export default function ArtistsPage() {
       ) : (
         <div className="space-y-1">
           {artists.map(a => (
-            <Link key={a.id} to={`/artists/${a.id}?lib=${a.library_id || activeId}`}
+            <Link key={a.id} to={`/artists/${a.id}`}
               className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors">
               <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">
                 {a.cover_image_id ? (
-                  <img src={coverUrl("artist", a.id)} alt={a.name}
+                  <img src={coverUrl("artist", a.id, 256)} alt={a.name}
                     className="w-full h-full object-cover"
                     onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                 ) : null}
@@ -76,7 +74,7 @@ export default function ArtistsPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{a.name}</p>
-                <p className="text-xs text-zinc-500 truncate">{a.album_count} albums</p>
+                <p className="text-xs text-zinc-500 truncate">{a.track_count} tracks</p>
               </div>
             </Link>
           ))}

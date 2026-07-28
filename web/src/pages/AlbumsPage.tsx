@@ -8,11 +8,11 @@ import { coverUrl } from "../lib/utils"
 
 interface AlbumItem {
   id: string; title: string; name: string; artist: string; year: number
-  song_count: number; library_id: string; cover_image_id?: string
+  song_count: number; cover_image_id?: string
 }
 
 export default function AlbumsPage() {
-  const { activeId, libraries } = useLibrary()
+  const { activeId } = useLibrary()
   const [albums, setAlbums] = useState<AlbumItem[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -21,16 +21,14 @@ export default function AlbumsPage() {
 
   const load = async () => {
     if (!activeId) return
-    const ids = activeId === "__all__" ? libraries.map(l => l.id) : [activeId]
-    const results = await Promise.all(ids.map(id => api.data.albums(id, 1, 9999)))
-    const merged = results.flatMap(r => r.items || [])
-    const totalItems = results.reduce((sum, r) => sum + (r.total || 0), 0)
+    const r = await api.data.albums(1, 9999)
+    const items = r.items || []
+    setTotal(items.length)
     const start = (page - 1) * perPage
-    setAlbums(merged.slice(start, start + perPage))
-    setTotal(totalItems)
+    setAlbums(items.slice(start, start + perPage))
   }
 
-  useEffect(() => { load() }, [activeId, page, libraries.length])
+  useEffect(() => { load() }, [activeId, page])
 
   const totalPages = Math.ceil(total / perPage)
 
@@ -50,21 +48,23 @@ export default function AlbumsPage() {
       {layout === "grid" ? (
         <CardGrid>
           {albums.map(a => (
-            <Link key={a.id} to={`/albums/${a.id}?lib=${a.library_id || activeId}`} className="block">
-              <Card className="hover:bg-zinc-800/50 transition-colors h-full">
-                <div className="aspect-square rounded-lg bg-zinc-800 mb-3 flex items-center justify-center overflow-hidden">
+            <Link key={a.id} to={`/albums/${a.id}`} className="block">
+              <Card className="hover:bg-zinc-800/50 transition-colors h-full p-0 overflow-hidden">
+                <div className="aspect-square flex items-center justify-center overflow-hidden bg-zinc-800">
                   {a.cover_image_id ? (
-                    <img src={coverUrl("album", a.id)} alt={a.title || a.name}
+                    <img src={coverUrl("album", a.id, 256)} alt={a.title || a.name}
                       className="w-full h-full object-cover"
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                   ) : null}
                   <Disc3 className={`w-8 h-8 text-zinc-600 ${a.cover_image_id ? "hidden" : ""}`} />
                 </div>
+                <div className="p-3">
                 <p className="font-medium text-sm truncate">{a.title || a.name}</p>
                 <p className="text-xs text-zinc-400 truncate">{a.artist || ""}</p>
                 <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
                   <span>{a.year || ""}</span>
                   {a.song_count > 0 && <span>· {a.song_count} tracks</span>}
+                </div>
                 </div>
               </Card>
             </Link>
@@ -73,11 +73,11 @@ export default function AlbumsPage() {
       ) : (
         <div className="space-y-1">
           {albums.map(a => (
-            <Link key={a.id} to={`/albums/${a.id}?lib=${a.library_id || activeId}`}
+            <Link key={a.id} to={`/albums/${a.id}`}
               className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors">
               <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">
                 {a.cover_image_id ? (
-                  <img src={coverUrl("album", a.id)} alt={a.title || a.name}
+                  <img src={coverUrl("album", a.id, 256)} alt={a.title || a.name}
                     className="w-full h-full object-cover"
                     onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                 ) : null}

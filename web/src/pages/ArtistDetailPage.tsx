@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
-import { useParams, useSearchParams } from "react-router-dom"
+import { useParams } from "react-router-dom"
 import { api } from "../api/client"
-import { useLibrary } from "../stores/library"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { Play, Clock, CheckSquare, Plus, ListPlus, Heart, Mic2, Music } from "lucide-react"
@@ -9,9 +8,6 @@ import { formatDuration, coverUrl } from "../lib/utils"
 
 export default function ArtistDetailPage() {
   const { artistId } = useParams()
-  const [searchParams] = useSearchParams()
-  const libId = searchParams.get("lib")
-  const { activeId, libraries } = useLibrary()
   const player = usePlayer()
   const [artist, setArtist] = useState<any>(null)
   const [tracks, setTracks] = useState<PlayerTrack[]>([])
@@ -23,13 +19,12 @@ export default function ArtistDetailPage() {
 
   useEffect(() => {
     if (!artistId) return
-    const id = libId || (activeId === "__all__" ? libraries[0]?.id : activeId)
-    if (!id) return
-    api.data.artist(id, artistId).then(async d => {
+    api.data.artist(artistId).then(async d => {
       setArtist(d.artist)
       const items: PlayerTrack[] = (d.tracks || []).map((t: any) => ({
         id: t.id, title: t.title, artist: d.artist?.name || "",
         album: t.album || "", album_id: t.album_id, duration: t.duration, suffix: t.file_format || "mp3",
+        cover_image_id: t.cover_image_id,
       }))
       setTracks(items)
       if (items.length > 0) {
@@ -37,7 +32,7 @@ export default function ArtistDetailPage() {
         setFavoriteIds(new Set(Object.keys(fav.favorites || {})))
       }
     })
-  }, [artistId, libId, activeId, libraries.length])
+  }, [artistId])
 
   const toggleSelect = (id: string) => {
     setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -142,14 +137,16 @@ export default function ArtistDetailPage() {
         </div>
         {tracks.map((t, i) => (
           <div key={t.id}
-            className="flex items-center gap-1 px-4 py-1 rounded-lg hover:bg-zinc-800/50 cursor-pointer group">
+            className="flex items-center gap-1 px-4 py-0 rounded-lg hover:bg-zinc-800/50 cursor-pointer group">
             <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
               <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); if (multi) toggleSelect(t.id); else player.setQueue(tracks, i); }}>
-                <img src={coverUrl("track", t.id, 256)} alt=""
-                  className={`w-full h-full object-cover ${multi && selected.has(t.id) ? "opacity-60" : ""}`}
-                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
-                <Music className="w-3.5 h-3.5 text-zinc-600 hidden" />
+                {t.cover_image_id ? (
+                  <img src={coverUrl("track", t.id, 64)} alt=""
+                    className={`w-full h-full object-cover ${multi && selected.has(t.id) ? "opacity-60" : ""}`}
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                ) : null}
+                <Music className={`w-3.5 h-3.5 text-zinc-600 ${t.cover_image_id ? "hidden" : ""}`} />
                 {!multi && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                     <Play className="w-5 h-5 text-white" />

@@ -16,6 +16,15 @@ type Config struct {
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Log      LogConfig      `mapstructure:"log"`
 	Audio    AudioConfig    `mapstructure:"audio"`
+	Metadata MetadataConfig `mapstructure:"metadata"`
+}
+
+type MetadataConfig struct {
+	MusicBrainzEnabled    bool   `mapstructure:"musicbrainz_enabled"`
+	MusicBrainzAPIURL     string `mapstructure:"musicbrainz_api_url"`
+	MusicBrainzRateLimit  int    `mapstructure:"musicbrainz_rate_limit"`
+	MusicBrainzAppName    string `mapstructure:"musicbrainz_app_name"`
+	MusicBrainzAppVersion string `mapstructure:"musicbrainz_app_version"`
 }
 
 type ServerConfig struct {
@@ -108,6 +117,12 @@ func Load() *Config {
 	v.SetDefault("jwt.refresh_expiration", "720h")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "console")
+
+	v.SetDefault("metadata.musicbrainz_enabled", false)
+	v.SetDefault("metadata.musicbrainz_api_url", "https://musicbrainz.org/ws/2")
+	v.SetDefault("metadata.musicbrainz_rate_limit", 1)
+	v.SetDefault("metadata.musicbrainz_app_name", "Sonicore")
+	v.SetDefault("metadata.musicbrainz_app_version", "0.1.0")
 
 	v.AutomaticEnv()
 	v.SetEnvPrefix("SONICORE")

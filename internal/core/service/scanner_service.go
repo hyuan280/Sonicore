@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/internal/infrastructure/scanner"
 )
@@ -26,23 +27,44 @@ type ScanProgress struct {
 }
 
 type ScannerService struct {
-	db       *sql.DB
-	engine   *scanner.Engine
-	scanRepo *repository.ScanJobRepo
-	libRepo  *repository.LibraryRepo
+	db         *sql.DB
+	engine     *scanner.Engine
+	scanRepo   *repository.ScanJobRepo
+	libRepo    *repository.LibraryRepo
+	settingsRepo *repository.SettingsRepo
+	imagesDir  string
+	mbCfg      metadata.MBConfig
 
 	mu         sync.RWMutex
 	activeScan map[string]*ScanProgress
 }
 
-func NewScannerService(db *sql.DB, imagesDir string) *ScannerService {
+func NewScannerService(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig) *ScannerService {
 	return &ScannerService{
-		db:         db,
-		engine:     scanner.NewEngine(db, imagesDir),
-		scanRepo:   repository.NewScanJobRepo(db),
-		libRepo:    repository.NewLibraryRepo(db),
-		activeScan: make(map[string]*ScanProgress),
+		db:           db,
+		engine:       scanner.NewEngine(db, imagesDir, mbCfg),
+		scanRepo:     repository.NewScanJobRepo(db),
+		libRepo:      repository.NewLibraryRepo(db),
+		settingsRepo: repository.NewSettingsRepo(db),
+		imagesDir:    imagesDir,
+		mbCfg:       mbCfg,
+		activeScan:   make(map[string]*ScanProgress),
 	}
+}
+
+// rebuildEngine re-creates the scanner engine, reading latest MB config from DB if available.
+func (s *ScannerService) rebuildEngine(ctx context.Context) {
+	cfg := s.mbCfg
+	if enabled, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_enabled"); err == nil {
+		cfg.Enabled = enabled == "true"
+	}
+	if url, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_api_url"); err == nil && url != "" {
+		cfg.APIURL = url
+	}
+	if rl, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
+		fmt.Sscanf(rl, "%d", &cfg.RateLimit)
+	}
+	s.engine = scanner.NewEngine(s.db, s.imagesDir, cfg)
 }
 
 func (s *ScannerService) GetProgress(libraryID string) *ScanProgress {
@@ -51,23 +73,27 @@ func (s *ScannerService) GetProgress(libraryID string) *ScanProgress {
 	return s.activeScan[libraryID]
 }
 
-func (s *ScannerService) StartScan(ctx context.Context, libraryID string) error {
+func (s *ScannerService) StartScan(ctx context.Context, libraryID string, mode string) error {
 	s.mu.Lock()
 	if _, running := s.activeScan[libraryID]; running {
 		s.mu.Unlock()
 		return fmt.Errorf("scan already running for library %s", libraryID)
 	}
+	s.rebuildEngine(ctx)
 	s.activeScan[libraryID] = &ScanProgress{
 		LibraryID: libraryID,
 		Status:    "running",
 	}
 	s.mu.Unlock()
 
-	go s.runScan(context.Background(), libraryID)
+	if mode != "overwrite" {
+		mode = "missing"
+	}
+	go s.runScan(context.Background(), libraryID, mode)
 	return nil
 }
 
-func (s *ScannerService) runScan(ctx context.Context, libraryID string) {
+func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string) {
 	lib, err := s.libRepo.FindByID(ctx, libraryID)
 	if err != nil {
 		s.setError(libraryID, fmt.Sprintf("library not found: %v", err))
@@ -84,7 +110,7 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID string) {
 	}
 	s.scanRepo.Create(ctx, job)
 
-	stats, err := s.engine.ScanLibrary(ctx, lib, func(stats scanner.ScanStats) {
+	stats, err := s.engine.ScanLibrary(ctx, lib, scanner.ScanOptions{Mode: mode}, func(stats scanner.ScanStats) {
 		s.mu.Lock()
 		if p := s.activeScan[libraryID]; p != nil {
 			p.TotalFiles = stats.TotalFiles
@@ -123,10 +149,6 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID string) {
 
 	lib.UpdatedAt = time.Now()
 	s.libRepo.UpdateStats(ctx, lib)
-
-	s.db.ExecContext(ctx,
-		`UPDATE artists SET album_count = (SELECT COUNT(*) FROM albums WHERE albums.artist_id = artists.id)
-		 WHERE library_id = $1`, libraryID)
 
 	log.Printf("[scanner] finished library=%s status=%s new=%d updated=%d deleted=%d errors=%d",
 		libraryID, job.Status, job.NewTracks, job.UpdatedTracks, job.DeletedTracks, len(stats.Errors))

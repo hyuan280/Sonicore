@@ -32,12 +32,17 @@ func (h *ScanHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.scanner.StartScan(r.Context(), libID); err != nil {
+	mode := r.URL.Query().Get("mode")
+	if mode != "overwrite" {
+		mode = "missing"
+	}
+
+	if err := h.scanner.StartScan(r.Context(), libID, mode); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scan started"})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scan started", "mode": mode})
 }
 
 func (h *ScanHandler) Status(w http.ResponseWriter, r *http.Request) {

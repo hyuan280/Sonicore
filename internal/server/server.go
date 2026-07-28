@@ -22,6 +22,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/download"
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -74,7 +75,14 @@ func New(cfg *config.Config) (*Server, error) {
 		log.Printf("[audio] pulse server: %s", pulseServer)
 	}
 
-	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir)
+	mbCfg := metadata.MBConfig{
+		Enabled:   cfg.Metadata.MusicBrainzEnabled,
+		APIURL:    cfg.Metadata.MusicBrainzAPIURL,
+		RateLimit: cfg.Metadata.MusicBrainzRateLimit,
+		AppName:   cfg.Metadata.MusicBrainzAppName,
+		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
+	}
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, mbCfg)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
@@ -140,7 +148,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 
 	protected.HandleFunc("/auth/logout", authHandler.Logout).Methods("POST")
 
-	libHandler := rest.NewLibraryHandler(db)
+	libHandler := rest.NewLibraryHandler(db, cfg.Data.ImagesDir)
 	protected.HandleFunc("/libraries", libHandler.Create).Methods("POST")
 	protected.HandleFunc("/libraries", libHandler.List).Methods("GET")
 	protected.HandleFunc("/libraries/{id}", libHandler.Get).Methods("GET")
@@ -154,16 +162,25 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/libraries/{id}/scan", scanHandler.Start).Methods("POST")
 	protected.HandleFunc("/libraries/{id}/scan/status", scanHandler.Status).Methods("GET")
 
+	metadataHandler := rest.NewMetadataHandler(db, metadata.MBConfig{
+		Enabled:   cfg.Metadata.MusicBrainzEnabled,
+		APIURL:    cfg.Metadata.MusicBrainzAPIURL,
+		RateLimit: cfg.Metadata.MusicBrainzRateLimit,
+		AppName:   cfg.Metadata.MusicBrainzAppName,
+		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
+	})
+	protected.HandleFunc("/metadata/identify", metadataHandler.Identify).Methods("POST")
+
 	userHandler := rest.NewUserHandler(db)
 	protected.HandleFunc("/user/me", userHandler.Me).Methods("GET")
 	protected.HandleFunc("/user/password", userHandler.ChangePassword).Methods("PUT")
 
 	browseHandler := rest.NewDataHandler(db)
 	protected.HandleFunc("/data/{libId}/tracks", browseHandler.Tracks).Methods("GET")
-	protected.HandleFunc("/data/{libId}/artists", browseHandler.Artists).Methods("GET")
-	protected.HandleFunc("/data/{libId}/artists/{artistId}", browseHandler.ArtistDetail).Methods("GET")
-	protected.HandleFunc("/data/{libId}/albums", browseHandler.Albums).Methods("GET")
-	protected.HandleFunc("/data/{libId}/albums/{albumId}", browseHandler.AlbumDetail).Methods("GET")
+	protected.HandleFunc("/data/artists", browseHandler.Artists).Methods("GET")
+	protected.HandleFunc("/data/artists/{artistId}", browseHandler.ArtistDetail).Methods("GET")
+	protected.HandleFunc("/data/albums", browseHandler.Albums).Methods("GET")
+	protected.HandleFunc("/data/albums/{albumId}", browseHandler.AlbumDetail).Methods("GET")
 	protected.HandleFunc("/data/tracks/byids", browseHandler.TracksByIDs).Methods("POST")
 
 	streamHandler := rest.NewStreamHandler(db, sessionStore)
@@ -180,7 +197,6 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/user/history/list", userData.ListHistory).Methods("GET")
 	protected.HandleFunc("/user/history/add", userData.AddHistory).Methods("POST")
 	protected.HandleFunc("/user/history/remove", userData.RemoveHistoryItems).Methods("POST")
-	protected.HandleFunc("/user/history/clear", userData.ClearHistory).Methods("POST")
 	protected.HandleFunc("/user/playlists", userData.ListPlaylists).Methods("GET")
 	protected.HandleFunc("/user/playlists", userData.CreatePlaylist).Methods("POST")
 	protected.HandleFunc("/user/playlists/{id}", userData.GetPlaylist).Methods("GET")

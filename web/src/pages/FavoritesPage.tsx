@@ -22,6 +22,7 @@ export default function FavoritesPage() {
       id: h.item_id, title: h.title || "Unknown",
       artist: h.artist || "", album: h.album || "",
       album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+      cover_image_id: h.cover_image_id,
     }))
     if (tracks.length > 0) player.setQueue(tracks, 0)
   }
@@ -37,6 +38,7 @@ export default function FavoritesPage() {
       id: h.item_id, title: h.title || "Unknown",
       artist: h.artist || "", album: h.album || "",
       album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+      cover_image_id: h.cover_image_id,
     }
     const existingIdx = player.queue.findIndex(t => t.id === track.id)
     if (existingIdx >= 0) { player.playIndex(existingIdx); return }
@@ -71,6 +73,7 @@ export default function FavoritesPage() {
             <button onClick={() => player.addToQueue(items.filter(h => selected.has(h.item_id)).map(h => ({
               id: h.item_id, title: h.title || "Unknown", artist: h.artist || "", album: h.album || "",
               album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+              cover_image_id: h.cover_image_id,
             })))}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
               <Plus className="w-4 h-4" /> Queue
@@ -139,15 +142,17 @@ export default function FavoritesPage() {
         </div>
         {items.map((h, i) => (
           <div key={h.item_id}
-            className="flex items-center gap-1 px-4 py-1 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
+            className="flex items-center gap-1 px-4 py-0 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
             onClick={() => playTrack(h)}>
             <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
               <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); if (multi) toggleSelect(h.item_id); else playTrack(h); }}>
-                <img src={coverUrl("track", h.item_id, 256)} alt=""
-                  className={`w-full h-full object-cover ${multi && selected.has(h.item_id) ? "opacity-60" : ""}`}
-                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
-                <Music className="w-3.5 h-3.5 text-zinc-600 hidden" />
+                {h.cover_image_id ? (
+                  <img src={coverUrl("track", h.item_id, 64)} alt=""
+                    className={`w-full h-full object-cover ${multi && selected.has(h.item_id) ? "opacity-60" : ""}`}
+                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                ) : null}
+                <Music className={`w-3.5 h-3.5 text-zinc-600 ${h.cover_image_id ? "hidden" : ""}`} />
                 {!multi && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                     <Play className="w-5 h-5 text-white" />
@@ -171,7 +176,7 @@ export default function FavoritesPage() {
             </div>
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={{ id: h.item_id, title: h.title || "", artist: h.artist || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3" }} />
+                <AddQueueBtn track={{ id: h.item_id, title: h.title || "", artist: h.artist || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id }} />
                 <AddBtn trackId={h.item_id} />
                 <FavBtn trackId={h.item_id} initiallyFav={!removed.has(h.item_id)}
                   onToggle={(id, nowFav) => { setRemoved(prev => { const n = new Set(prev); nowFav ? n.delete(id) : n.add(id); return n }) }} />

@@ -174,10 +174,12 @@ export default function PlayerBar() {
             {track ? (
               <>
                 <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 flex items-center justify-center text-xs text-zinc-500 overflow-hidden">
-                  <img src={coverUrl("track", track.id, 256)} alt={track.title}
-                    className="w-full h-full object-cover"
-                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
-                  <Music className="w-5 h-5 text-zinc-600 hidden" />
+                  {track.cover_image_id ? (
+                    <img src={coverUrl("track", track.id, 64)} alt={track.title}
+                      className="w-full h-full object-cover"
+                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
+                  ) : null}
+                  <Music className={`w-5 h-5 text-zinc-600 ${track.cover_image_id ? "hidden" : ""}`} />
                 </div>
                 <div className="truncate min-w-0">
                   <p className="text-sm font-medium truncate">{track.title}</p>

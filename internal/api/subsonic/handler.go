@@ -100,7 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "startScan":
 		libs, _ := h.libRepo.FindByUserID(ctx, user.ID)
 		for _, lib := range libs {
-			if err := h.scanner.StartScan(ctx, lib.ID); err != nil {
+			if err := h.scanner.StartScan(ctx, lib.ID, "missing"); err != nil {
 				log.Printf("[subsonic] start scan error: %v", err)
 			}
 		}
@@ -227,7 +227,7 @@ func (h *Handler) getArtists(ctx context.Context, user *domain.User) map[string]
 			entry := map[string]interface{}{
 				"id":         a.ID,
 				"name":       a.Name,
-				"albumCount": a.AlbumCount,
+				"albumCount": a.TrackCount,
 			}
 			key := "#"
 			if len(a.Name) > 0 {
@@ -435,22 +435,21 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 		return
 	}
 
-	size := q.Get("size")
-	useThumbnail := size == "256"
-
-	coverPath := func(libID, ownerType, ownerID, ext string) string {
-		suffix := ""
-		if useThumbnail {
-			suffix = "_256"
+	coverPath := func(libID, ownerType, ownerID string) string {
+		for _, s := range []int{64, 256} {
+			p := metadata.CoverPathWithSuffix(h.imagesDir, libID, ownerType, ownerID, fmt.Sprintf("_%d", s), "jpg")
+			if fileExists(p) {
+				return p
+			}
 		}
-		return metadata.CoverPathWithSuffix(h.imagesDir, libID, ownerType, ownerID, suffix, ext)
+		return metadata.CoverPathWithSuffix(h.imagesDir, libID, ownerType, ownerID, "", "jpg")
 	}
 
 	ctx := r.Context()
 
 	track, err := h.trackRepo.FindByID(ctx, id)
 	if err == nil && track.CoverImageID != nil {
-		imagePath := coverPath(track.LibraryID, "track", track.ID, "jpg")
+		imagePath := coverPath(track.LibraryID, "track", track.ID)
 		if _, err := os.Stat(imagePath); err == nil {
 			http.ServeFile(w, r, imagePath)
 			return
@@ -464,7 +463,7 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 		album, _ = h.albumRepo.FindByID(ctx, id)
 	}
 	if album != nil && album.CoverImageID != nil {
-		imagePath := coverPath(album.LibraryID, "album", album.ID, "jpg")
+		imagePath := coverPath("album", "album", album.ID)
 		if _, err := os.Stat(imagePath); err == nil {
 			http.ServeFile(w, r, imagePath)
 			return
@@ -472,7 +471,7 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 		if albumTracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
 			for i := range albumTracks {
 				if albumTracks[i].CoverImageID != nil {
-					if p := coverPath(album.LibraryID, "track", albumTracks[i].ID, "jpg"); fileExists(p) {
+					if p := coverPath("album", "track", albumTracks[i].ID); fileExists(p) {
 						http.ServeFile(w, r, p)
 						return
 					}
@@ -483,7 +482,7 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 
 	artist, err := h.artistRepo.FindByID(ctx, id)
 	if err == nil && artist.CoverImageID != nil {
-		imagePath := coverPath(artist.LibraryID, "artist", artist.ID, "jpg")
+		imagePath := coverPath("artist", "artist", artist.ID)
 		if _, err := os.Stat(imagePath); err == nil {
 			http.ServeFile(w, r, imagePath)
 			return

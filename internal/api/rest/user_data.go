@@ -46,7 +46,8 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 		rows, err := h.db.QueryContext(r.Context(),
 			`SELECT f.item_type, f.item_id, f.created_at,
 			        COALESCE(t.title, ''), COALESCE(a.name, ''), COALESCE(al.title, ''),
-			        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, '')
+			        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+			        t.cover_image_id
 			 FROM favorites f
 			 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 			 LEFT JOIN artists a ON a.id = t.artist_id
@@ -63,12 +64,17 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			var ca time.Time
 			var title, artist, album, albumID, fileFormat string
 			var duration float64
-			rows.Scan(&t, &id, &ca, &title, &artist, &album, &albumID, &duration, &fileFormat)
-			items = append(items, map[string]interface{}{
+			var coverID sql.NullString
+			rows.Scan(&t, &id, &ca, &title, &artist, &album, &albumID, &duration, &fileFormat, &coverID)
+			item := map[string]interface{}{
 				"item_type": t, "item_id": id, "created_at": ca,
 				"title": title, "artist": artist, "album": album,
 				"album_id": albumID, "duration": duration, "suffix": fileFormat,
-			})
+			}
+			if coverID.Valid {
+				item["cover_image_id"] = coverID.String
+			}
+			items = append(items, item)
 		}
 	} else {
 		rows, err := h.db.QueryContext(r.Context(),
@@ -190,9 +196,10 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT ph.id, ph.track_id, ph.played_at,
 		        COALESCE(t.title, ''), COALESCE(a.name, ''), COALESCE(al.title, ''),
-		        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, '')
+		        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+		        t.cover_image_id
 		 FROM play_history ph
-		 LEFT JOIN tracks t ON t.id = ph.track_id
+		 INNER JOIN tracks t ON t.id = ph.track_id
 		 LEFT JOIN artists a ON a.id = t.artist_id
 		 LEFT JOIN albums al ON al.id = t.album_id
 		 WHERE ph.user_id = $1
@@ -210,13 +217,18 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 		var pa time.Time
 		var title, artist, album, albumID, fileFormat string
 		var duration float64
+		var coverID sql.NullString
 		rows.Scan(&id, &tid, &pa, &title, &artist, &album,
-			&albumID, &duration, &fileFormat)
-		items = append(items, map[string]interface{}{
+			&albumID, &duration, &fileFormat, &coverID)
+		item := map[string]interface{}{
 			"id": id, "track_id": tid, "played_at": pa,
 			"title": title, "artist": artist, "album": album,
 			"album_id": albumID, "duration": duration, "suffix": fileFormat,
-		})
+		}
+		if coverID.Valid {
+			item["cover_image_id"] = coverID.String
+		}
+		items = append(items, item)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
@@ -265,17 +277,6 @@ func (h *UserDataHandler) RemoveHistoryItems(w http.ResponseWriter, r *http.Requ
 		"DELETE FROM play_history WHERE id = ANY($1) AND user_id = $2",
 		pq.Array(req.IDs), userID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (h *UserDataHandler) ClearHistory(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
-	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-
-	h.db.ExecContext(r.Context(), "DELETE FROM play_history WHERE user_id=$1", userID)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
 // ---- Playlists ----
@@ -366,14 +367,15 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		t := map[string]interface{}{
-			"id":       track.ID,
-			"title":    track.Title,
-			"artist_id": track.ArtistID,
-			"album_id":  track.AlbumID,
-			"track":    track.TrackNumber,
-			"duration": track.Duration,
-			"bit_rate": track.BitRate,
-			"suffix":   track.FileFormat,
+			"id":             track.ID,
+			"title":          track.Title,
+			"artist_id":      track.ArtistID,
+			"album_id":       track.AlbumID,
+			"cover_image_id": track.CoverImageID,
+			"track":          track.TrackNumber,
+			"duration":       track.Duration,
+			"bit_rate":       track.BitRate,
+			"suffix":         track.FileFormat,
 		}
 		if a, err := h.artistRepo.FindByID(r.Context(), track.ArtistID); err == nil {
 			t["artist"] = a.Name
@@ -430,32 +432,6 @@ func (h *UserDataHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 		updated, plID, userID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "added"})
-}
-
-func (h *UserDataHandler) RemoveTrackFromPlaylist(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
-	plID := mux.Vars(r)["id"]
-	trackID := mux.Vars(r)["trackId"]
-
-	var trackIDs []byte
-	h.db.QueryRowContext(r.Context(),
-		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs)
-
-	var ids []string
-	json.Unmarshal(trackIDs, &ids)
-	filtered := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if id != trackID {
-			filtered = append(filtered, id)
-		}
-	}
-	updated, _ := json.Marshal(filtered)
-
-	h.db.ExecContext(r.Context(),
-		"UPDATE playlists SET track_ids = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3",
-		updated, plID, userID)
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 func (h *UserDataHandler) AddTracksToPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -670,10 +646,15 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		tracks = append(tracks, t)
 	}
 
+	// Adjust queue_idx if current track was deleted
+	queueIdx := q.QueueIdx
+	if queueIdx >= len(tracks) {
+		queueIdx = 0
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"track_ids":     q.TrackIDs,
 		"tracks":        tracks,
-		"queue_idx":     q.QueueIdx,
+		"queue_idx":     queueIdx,
 		"shuffle_order": q.ShuffleOrder,
 		"shuffle_idx":   q.ShuffleIdx,
 		"mode":          q.Mode,

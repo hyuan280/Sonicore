@@ -69,7 +69,7 @@ export const api = {
     get: (id: string) => request(`/api/libraries/${id}`),
     create: (d: any) => request("/api/libraries", { method: "POST", body: JSON.stringify(d) }),
     delete: (id: string) => request(`/api/libraries/${id}`, { method: "DELETE" }),
-    scan: (id: string) => request(`/api/libraries/${id}/scan`, { method: "POST" }),
+    scan: (id: string, mode?: string) => request(`/api/libraries/${id}/scan${mode ? `?mode=${mode}` : ""}`, { method: "POST" }),
     scanStatus: (id: string) => request(`/api/libraries/${id}/scan/status`),
   },
   data: {
@@ -77,14 +77,14 @@ export const api = {
       request(`/api/data/${libId}/tracks?page=${page}&per_page=${perPage}`),
     tracksByIds: (ids: string[]) =>
       request("/api/data/tracks/byids", { method: "POST", body: JSON.stringify({ ids }) }),
-    artists: (libId: string, page = 1, perPage = 50) =>
-      request(`/api/data/${libId}/artists?page=${page}&per_page=${perPage}`),
-    artist: (libId: string, artistId: string) =>
-      request(`/api/data/${libId}/artists/${artistId}`),
-    albums: (libId: string, page = 1, perPage = 50) =>
-      request(`/api/data/${libId}/albums?page=${page}&per_page=${perPage}`),
-    album: (libId: string, albumId: string) =>
-      request(`/api/data/${libId}/albums/${albumId}`),
+		artists: (page = 1, perPage = 9999) =>
+			request(`/api/data/artists?page=${page}&per_page=${perPage}`),
+		artist: (artistId: string) =>
+			request(`/api/data/artists/${artistId}`),
+		albums: (page = 1, perPage = 9999) =>
+			request(`/api/data/albums?page=${page}&per_page=${perPage}`),
+		album: (albumId: string) =>
+			request(`/api/data/albums/${albumId}`),
   },
   user: {
     favorites: (type?: string) => request(`/api/user/favorites/list${type ? `?type=${type}` : ""}`),
@@ -96,7 +96,6 @@ export const api = {
       request("/api/user/favorites/check", { method: "POST", body: JSON.stringify({ ids }) }),
     history: () => request("/api/user/history/list"),
     addHistory: (trackId: string) => request("/api/user/history/add", { method: "POST", body: JSON.stringify({ track_id: trackId }) }),
-    clearHistory: () => request("/api/user/history/clear", { method: "POST" }),
     deleteHistoryItems: (ids: string[]) => request("/api/user/history/remove", { method: "POST", body: JSON.stringify({ ids }) }),
     playlists: () => request("/api/user/playlists"),
     getPlaylist: (id: string) => request(`/api/user/playlists/${id}`),

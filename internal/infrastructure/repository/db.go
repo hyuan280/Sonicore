@@ -62,22 +62,18 @@ func RunMigrations(db *sql.DB) error {
 
 	CREATE TABLE IF NOT EXISTS artists (
 		id         VARCHAR(26) PRIMARY KEY,
-		library_id VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
 		name       VARCHAR(255) NOT NULL,
 		sort_name  VARCHAR(255) NOT NULL DEFAULT '',
 		mbid       VARCHAR(36) NOT NULL DEFAULT '',
 		biography  TEXT NOT NULL DEFAULT '',
 		cover_image_id VARCHAR(26),
-		album_count INTEGER NOT NULL DEFAULT 0,
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
-	CREATE INDEX IF NOT EXISTS idx_artists_library ON artists(library_id);
 	CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
 
 	CREATE TABLE IF NOT EXISTS albums (
 		id           VARCHAR(26) PRIMARY KEY,
-		library_id   VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
 		title        VARCHAR(255) NOT NULL,
 		artist_id    VARCHAR(26) NOT NULL REFERENCES artists(id),
 		mbid         VARCHAR(36) NOT NULL DEFAULT '',
@@ -89,7 +85,6 @@ func RunMigrations(db *sql.DB) error {
 		created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
-	CREATE INDEX IF NOT EXISTS idx_albums_library ON albums(library_id);
 	CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
 	CREATE INDEX IF NOT EXISTS idx_albums_title ON albums(title);
 
@@ -230,6 +225,7 @@ func RunMigrations(db *sql.DB) error {
 		device_id       VARCHAR(255) NOT NULL DEFAULT 'default',
 		device_name     VARCHAR(255) NOT NULL DEFAULT '',
 		device_config_id VARCHAR(26) REFERENCES audio_devices(id) ON DELETE SET NULL,
+		device_driver   VARCHAR(255) NOT NULL DEFAULT '',
 		volume          DOUBLE PRECISION NOT NULL DEFAULT 0.8,
 		play_mode       VARCHAR(20) NOT NULL DEFAULT 'normal',
 		queue           JSONB NOT NULL DEFAULT '[]',
@@ -244,11 +240,9 @@ func RunMigrations(db *sql.DB) error {
 		key   VARCHAR(64) PRIMARY KEY,
 		value TEXT NOT NULL DEFAULT ''
 	);
+
 	INSERT INTO server_settings (key, value) VALUES ('allow_registration', 'true')
 		ON CONFLICT (key) DO NOTHING;
-
-	-- add cover_image_id to tracks if not exists (for existing databases)
-	ALTER TABLE tracks ADD COLUMN IF NOT EXISTS cover_image_id VARCHAR(26);
 	`
 
 	_, err := db.Exec(schema)

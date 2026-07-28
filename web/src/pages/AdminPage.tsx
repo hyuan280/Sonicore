@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom"
 import { api } from "../api/client"
 import { getRole } from "../stores/auth"
 import { Card } from "../components/ui/card"
-import { Shield } from "lucide-react"
+import { Input } from "../components/ui/input"
+import { Shield, Users } from "lucide-react"
 
 const roleLabel = (r: string) =>
   r === "super_admin" ? "Super Admin" : r === "admin" ? "Admin" : "User"
@@ -12,6 +13,13 @@ export default function AdminPage() {
   const navigate = useNavigate()
   const [users, setUsers] = useState<any[]>([])
   const [allowRegistration, setAllowRegistration] = useState(true)
+  const [mbEnabled, setMbEnabled] = useState(false)
+  const [mbApiUrl, setMbApiUrl] = useState("")
+  const [mbRateLimit, setMbRateLimit] = useState("1")
+  const [mbSaving, setMbSaving] = useState(false)
+  const [mbModified, setMbModified] = useState(false)
+  const [mbInit, setMbInit] = useState({ enabled: false, apiUrl: "", rateLimit: "1" })
+  const [mbError, setMbError] = useState("")
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -27,6 +35,14 @@ export default function AdminPage() {
       ])
       setUsers(u.users)
       setAllowRegistration(s.allow_registration)
+      setMbEnabled(s.metadata_musicbrainz_enabled)
+      setMbApiUrl(s.metadata_musicbrainz_api_url || "")
+      setMbRateLimit(s.metadata_musicbrainz_rate_limit || "1")
+      setMbInit({
+        enabled: s.metadata_musicbrainz_enabled,
+        apiUrl: s.metadata_musicbrainz_api_url || "",
+        rateLimit: s.metadata_musicbrainz_rate_limit || "1",
+      })
     } catch (err: any) { setError(err.error || "failed to load") }
   }
 
@@ -69,7 +85,53 @@ export default function AdminPage() {
       </Card>
 
       <Card className="space-y-3">
-        <h3 className="font-medium flex items-center gap-2"><Shield className="w-4 h-4" /> Users</h3>
+        <h3 className="font-medium flex items-center gap-2"><img src="/musicbrainz.svg" className="w-4 h-4" /> MusicBrainz</h3>
+        <div className="space-y-3 p-3 rounded-lg bg-zinc-800/50">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Enable MusicBrainz</p>
+              <p className="text-xs text-zinc-400">Scrape metadata during library scan</p>
+            </div>
+            <button onClick={() => { setMbEnabled(!mbEnabled); setMbModified(true) }}
+              className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer ${mbEnabled ? "bg-green-600" : "bg-zinc-700"}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${mbEnabled ? "translate-x-6" : ""}`} />
+            </button>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">API URL</p>
+            <Input value={mbApiUrl} onChange={e => { setMbApiUrl(e.target.value); setMbModified(true) }}
+              placeholder="https://musicbrainz.org/ws/2" />
+          </div>
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">Rate Limit (requests/sec)</p>
+            <Input value={mbRateLimit} onChange={e => { setMbRateLimit(e.target.value); setMbModified(true) }}
+              placeholder="1" />
+          </div>
+          {mbModified && (
+          <div className="flex items-center gap-3">
+          <button onClick={async () => {
+            setMbSaving(true); setMbError("")
+            try {
+              await api.admin.updateSettings({
+                metadata_musicbrainz_enabled: mbEnabled,
+                metadata_musicbrainz_api_url: mbApiUrl || undefined,
+                metadata_musicbrainz_rate_limit: mbRateLimit || undefined,
+              })
+              setMbModified(false)
+            } catch (err: any) { setMbError(err.error || "failed") }
+            setMbSaving(false)
+          }} disabled={mbSaving}
+            className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
+            {mbSaving ? "Saving..." : "Save"}
+          </button>
+          {mbError && <span className="text-xs text-red-400">{mbError}</span>}
+          </div>
+          )}
+        </div>
+      </Card>
+
+      <Card className="space-y-3">
+        <h3 className="font-medium flex items-center gap-2"><Users className="w-4 h-4" /> Users</h3>
         <div className="space-y-1">
           {users.map(u => (
             <div key={u.id} className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50 text-sm">

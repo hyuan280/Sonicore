@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,29 +13,52 @@ import (
 )
 
 type MBClient struct {
-	http     *http.Client
-	base     string
-	appName  string
-	appVer   string
-	lastReq  time.Time
-	mu       sync.Mutex
+	http           *http.Client
+	base           string
+	appName        string
+	appVer         string
+	rateLimitPerSec int // requests per second
+	lastReq        time.Time
+	mu             sync.Mutex
 }
 
-func NewMBClient() *MBClient {
+type MBConfig struct {
+	Enabled   bool
+	APIURL    string
+	RateLimit int
+	AppName   string
+	AppVer    string
+}
+
+func NewMBClient(cfg MBConfig) *MBClient {
+	if cfg.APIURL == "" {
+		cfg.APIURL = "https://musicbrainz.org/ws/2"
+	}
+	if cfg.RateLimit <= 0 {
+		cfg.RateLimit = 1
+	}
+	if cfg.AppName == "" {
+		cfg.AppName = "Sonicore"
+	}
+	if cfg.AppVer == "" {
+		cfg.AppVer = "0.1.0"
+	}
 	return &MBClient{
-		http: &http.Client{Timeout: 10 * time.Second},
-		base: "https://musicbrainz.org/ws/2",
-		appName: "Sonicore",
-		appVer: "0.1.0",
+		http:           &http.Client{Timeout: 10 * time.Second},
+		base:           cfg.APIURL,
+		appName:        cfg.AppName,
+		appVer:         cfg.AppVer,
+		rateLimitPerSec: cfg.RateLimit,
 	}
 }
 
 func (c *MBClient) rateLimit() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	interval := time.Second / time.Duration(c.rateLimitPerSec)
 	elapsed := time.Since(c.lastReq)
-	if elapsed < time.Second {
-		time.Sleep(time.Second - elapsed)
+	if elapsed < interval {
+		time.Sleep(interval - elapsed)
 	}
 	c.lastReq = time.Now()
 }
@@ -48,6 +72,8 @@ func (c *MBClient) get(path string, params url.Values, out interface{}) error {
 	}
 	params.Set("fmt", "json")
 	u += "?" + params.Encode()
+
+	log.Printf("[mb] GET %s", u)
 
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
@@ -66,6 +92,7 @@ func (c *MBClient) get(path string, params url.Values, out interface{}) error {
 		return fmt.Errorf("musicbrainz HTTP %d: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
 	}
 
+	log.Printf("[mb] 200 %s", path)
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
@@ -118,6 +145,46 @@ type MBTrack struct {
 	Number string `json:"number"`
 	Title  string `json:"title"`
 	Length int    `json:"length"`
+}
+
+type MBRecordingSearch struct {
+	Recordings []MBRecording `json:"recordings"`
+}
+
+type MBRecording struct {
+	ID       string        `json:"id"`
+	Title    string        `json:"title"`
+	Length   int           `json:"length"`
+	Artists  []MBArtistRef `json:"artist-credit"`
+	Releases []struct {
+		ID     string        `json:"id"`
+		Title  string        `json:"title"`
+		Date   string        `json:"date"`
+		Status string        `json:"status"`
+		Artists []MBArtistRef `json:"artist-credit"`
+	} `json:"releases"`
+	Tags []MBTag `json:"tags,omitempty"`
+}
+
+func (c *MBClient) SearchRecordings(title, artist, album string) ([]MBRecording, error) {
+	var result MBRecordingSearch
+	q := url.Values{}
+	query := "recording:" + title
+	if artist != "" && artist != "Unknown Artist" {
+		query += " AND artist:" + artist
+	}
+	if album != "" && album != "Unknown Album" {
+		query += " AND release:" + album
+	}
+	q.Set("query", query)
+	q.Set("limit", "10")
+	q.Set("inc", "artists+releases+tags")
+
+	if err := c.get("/recording", q, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Recordings, nil
 }
 
 func (c *MBClient) SearchArtist(name string) (*MBArtistBrief, error) {

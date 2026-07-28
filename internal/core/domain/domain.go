@@ -58,20 +58,18 @@ type LibraryMember struct {
 
 type Artist struct {
 	ID           string    `json:"id"`
-	LibraryID    string    `json:"library_id"`
 	Name         string    `json:"name"`
 	SortName     string    `json:"sort_name"`
 	MBID         string    `json:"mbid"`
 	Biography    string    `json:"biography"`
 	CoverImageID *string   `json:"cover_image_id,omitempty"`
-	AlbumCount   int       `json:"album_count"`
+	TrackCount   int       `json:"track_count"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type Album struct {
 	ID           string    `json:"id"`
-	LibraryID    string    `json:"library_id"`
 	Title        string    `json:"title"`
 	ArtistID     string    `json:"artist_id"`
 	MBID         string    `json:"mbid"`
@@ -92,7 +90,7 @@ type Track struct {
 	Title        string         `json:"title"`
 	AlbumID      string         `json:"album_id"`
 	ArtistID     string         `json:"artist_id"`
-	CoverImageID *string        `json:"cover_image_id,omitempty"`
+	CoverImageID *string   `json:"cover_image_id,omitempty"`
 	TrackNumber  int            `json:"track_number"`
 	DiscNumber   int            `json:"disc_number"`
 	Duration     float64        `json:"duration"`

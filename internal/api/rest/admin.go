@@ -107,13 +107,22 @@ func (h *AdminHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
+	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
+	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
+	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"allow_registration": allowReg == "true",
+		"allow_registration":            allowReg == "true",
+		"metadata_musicbrainz_enabled":  mbEnabled == "true",
+		"metadata_musicbrainz_api_url":  mbURL,
+		"metadata_musicbrainz_rate_limit": mbRateLimit,
 	})
 }
 
 type updateSettingsRequest struct {
-	AllowRegistration *bool `json:"allow_registration,omitempty"`
+	AllowRegistration           *bool   `json:"allow_registration,omitempty"`
+	MusicBrainzEnabled          *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
+	MusicBrainzAPIURL           *string `json:"metadata_musicbrainz_api_url,omitempty"`
+	MusicBrainzRateLimit        *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -128,15 +137,31 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if *req.AllowRegistration {
 			val = "true"
 		}
-		if err := h.settingsRepo.Set(r.Context(), "allow_registration", val); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update setting"})
-			return
+		h.settingsRepo.Set(r.Context(), "allow_registration", val)
+	}
+	if req.MusicBrainzEnabled != nil {
+		val := "false"
+		if *req.MusicBrainzEnabled {
+			val = "true"
 		}
+		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_enabled", val)
+	}
+	if req.MusicBrainzAPIURL != nil {
+		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_api_url", *req.MusicBrainzAPIURL)
+	}
+	if req.MusicBrainzRateLimit != nil {
+		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_rate_limit", *req.MusicBrainzRateLimit)
 	}
 
+	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
+	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
+	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"allow_registration": allowReg == "true",
+		"allow_registration":              allowReg == "true",
+		"metadata_musicbrainz_enabled":    mbEnabled == "true",
+		"metadata_musicbrainz_api_url":    mbURL,
+		"metadata_musicbrainz_rate_limit": mbRateLimit,
 	})
 }
 

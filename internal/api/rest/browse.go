@@ -51,7 +51,7 @@ func parsePagination(r *http.Request) (page, perPage int) {
 func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	libID := mux.Vars(r)["libId"]
-	if !h.perm.IsMember(r.Context(), libID, userID) {
+	if libID != "" && libID != "__all__" && !h.perm.IsMember(r.Context(), libID, userID) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
 		return
 	}
@@ -108,13 +108,8 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 
 func (h *DataHandler) Artists(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
-	libID := mux.Vars(r)["libId"]
-	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
-		return
-	}
 
-	all, err := h.artistRepo.FindByLibraryID(r.Context(), libID)
+	all, err := h.artistRepo.FindAccessible(r.Context(), userID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load artists"})
 		return
@@ -140,12 +135,6 @@ func (h *DataHandler) Artists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
-	libID := mux.Vars(r)["libId"]
-	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
-		return
-	}
 
 	artistID := mux.Vars(r)["artistId"]
 	artist, err := h.artistRepo.FindByID(r.Context(), artistID)
@@ -186,13 +175,8 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 
 func (h *DataHandler) Albums(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
-	libID := mux.Vars(r)["libId"]
-	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
-		return
-	}
 
-	all, err := h.albumRepo.FindByLibraryID(r.Context(), libID)
+	all, err := h.albumRepo.FindAccessible(r.Context(), userID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load albums"})
 		return
@@ -218,12 +202,6 @@ func (h *DataHandler) Albums(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
-	libID := mux.Vars(r)["libId"]
-	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
-		return
-	}
 
 	albumID := mux.Vars(r)["albumId"]
 	album, err := h.albumRepo.FindByID(r.Context(), albumID)

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -17,14 +19,16 @@ type LibraryHandler struct {
 	libraryRepo *repository.LibraryRepo
 	userRepo    *repository.UserRepo
 	perm        *middleware.PermissionChecker
+	imagesDir   string
 }
 
-func NewLibraryHandler(db *sql.DB) *LibraryHandler {
+func NewLibraryHandler(db *sql.DB, imagesDir string) *LibraryHandler {
 	return &LibraryHandler{
 		db:          db,
 		libraryRepo: repository.NewLibraryRepo(db),
 		userRepo:    repository.NewUserRepo(db),
 		perm:        middleware.NewPermissionChecker(db),
+		imagesDir:   imagesDir,
 	}
 }
 
@@ -134,6 +138,12 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.libraryRepo.Delete(r.Context(), libID)
+
+	// Clean up cover images
+	if libDir := filepath.Join(h.imagesDir, libID); libDir != "" {
+		os.RemoveAll(libDir)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
