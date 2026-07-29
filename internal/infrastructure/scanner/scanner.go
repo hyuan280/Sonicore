@@ -167,6 +167,10 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 					changed = true
 				}
 				if enrichment != nil {
+					if meta.TitleFromFilename && enrichment.Title != "" && existing.Title != enrichment.Title {
+						existing.Title = enrichment.Title
+						changed = true
+					}
 					if meta.MBID == "" && enrichment.TrackMBID != "" && existing.MBID == "" {
 						existing.MBID = enrichment.TrackMBID
 						changed = true
