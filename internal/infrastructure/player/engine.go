@@ -672,6 +672,14 @@ func (m *EngineManager) Remove(id string) {
 	}
 }
 
+func (m *EngineManager) ForEach(fn func(id string, eng *Engine)) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for id, e := range m.engines {
+		fn(id, e)
+	}
+}
+
 func (m *EngineManager) StopAll() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -148,7 +148,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 
 	protected.HandleFunc("/auth/logout", authHandler.Logout).Methods("POST")
 
-	libHandler := rest.NewLibraryHandler(db, cfg.Data.ImagesDir)
+	libHandler := rest.NewLibraryHandler(db, cfg.Data.ImagesDir, engineManager)
 	protected.HandleFunc("/libraries", libHandler.Create).Methods("POST")
 	protected.HandleFunc("/libraries", libHandler.List).Methods("GET")
 	protected.HandleFunc("/libraries/{id}", libHandler.Get).Methods("GET")

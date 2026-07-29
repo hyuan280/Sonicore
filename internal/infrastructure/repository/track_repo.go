@@ -234,10 +234,14 @@ func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 	return err
 }
 
-func (r *TrackRepo) DeleteByFilePath(ctx context.Context, path, libraryID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM tracks WHERE file_path = $1 AND library_id = $2`, path, libraryID)
-	return err
+func (r *TrackRepo) DeleteByFilePath(ctx context.Context, path, libraryID string) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`DELETE FROM tracks WHERE file_path = $1 AND library_id = $2 RETURNING id`, path, libraryID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
 }
 
 

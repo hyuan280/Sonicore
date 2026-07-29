@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAuth } from "../stores/auth"
 import { useLibrary } from "../stores/library"
+import { usePlayer } from "../stores/player"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
@@ -103,6 +104,24 @@ export default function SettingsPage() {
     if (confirm("Delete this library?")) {
       await api.libraries.delete(id)
       reloadLibs()
+      api.user.getQueue().then((data: any) => {
+        if (data?.tracks) {
+          usePlayer.setState({
+            queue: data.tracks.map((t: any) => ({
+              id: t.id, title: t.title, artist: t.artist, album: t.album,
+              album_id: t.album_id, duration: t.duration, suffix: t.suffix,
+              cover_image_id: t.cover_image_id,
+            })),
+            queueIdx: data.queue_idx ?? 0,
+            shuffleOrder: data.shuffle_order ?? [],
+            shuffleIdx: data.shuffle_idx ?? 0,
+            mode: data.mode ?? "normal",
+          })
+        }
+        if (!data?.tracks?.length) {
+          usePlayer.setState({ track: null, playing: false })
+        }
+      }).catch(() => {})
     }
   }
 

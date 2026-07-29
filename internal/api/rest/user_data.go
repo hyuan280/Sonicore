@@ -118,9 +118,18 @@ func (h *UserDataHandler) AddFavorites(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	for _, id := range req.ItemIDs {
-		h.db.ExecContext(r.Context(),
-			"INSERT INTO favorites (user_id, item_type, item_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-			userID, req.ItemType, id, now)
+		var libID *string
+		if req.ItemType == "track" {
+			h.db.QueryRowContext(r.Context(),
+				"SELECT library_id FROM tracks WHERE id = $1", id).Scan(&libID)
+		}
+		if _, err := h.db.ExecContext(r.Context(),
+			`INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at)
+			 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+			userID, req.ItemType, id, libID, now); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "favorited"})
@@ -252,9 +261,22 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	h.db.ExecContext(r.Context(),
 		`DELETE FROM play_history WHERE user_id=$1 AND track_id=$2`, userID, req.TrackID)
-	h.db.ExecContext(r.Context(),
-		"INSERT INTO play_history (id, user_id, track_id, played_at) VALUES ($1, $2, $3, $4)",
-		domain.NewID(), userID, req.TrackID, now)
+
+	var libID string
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT library_id FROM tracks WHERE id = $1", req.TrackID).Scan(&libID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "track not found"})
+		return
+	}
+
+	if _, err := h.db.ExecContext(r.Context(),
+		`INSERT INTO play_history (id, user_id, track_id, library_id, played_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		domain.NewID(), userID, req.TrackID, libID, now); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
 }

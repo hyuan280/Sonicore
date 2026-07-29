@@ -22,6 +22,14 @@ export default function PlayerBar() {
     }
   }, [ps.track?.id])
 
+  useEffect(() => {
+    if (ps.queue.length === 0 && ps.track) {
+      usePlayer.setState({ track: null, playing: false, position: 0 })
+      savePlayerState()
+      api.user.saveQueue({ track_ids: [], queue_idx: 0, shuffle_order: [], shuffle_idx: 0, mode: "normal" }).catch(() => {})
+    }
+  }, [ps.queue.length])
+
   const toggleFav = async () => {
     if (!ps.track) return
     if (fav) {

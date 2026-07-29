@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
@@ -20,15 +21,17 @@ type LibraryHandler struct {
 	userRepo    *repository.UserRepo
 	perm        *middleware.PermissionChecker
 	imagesDir   string
+	manager     *player.EngineManager
 }
 
-func NewLibraryHandler(db *sql.DB, imagesDir string) *LibraryHandler {
+func NewLibraryHandler(db *sql.DB, imagesDir string, manager *player.EngineManager) *LibraryHandler {
 	return &LibraryHandler{
 		db:          db,
 		libraryRepo: repository.NewLibraryRepo(db),
 		userRepo:    repository.NewUserRepo(db),
 		perm:        middleware.NewPermissionChecker(db),
 		imagesDir:   imagesDir,
+		manager:     manager,
 	}
 }
 
@@ -137,9 +140,77 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.db.ExecContext(r.Context(),
+		`UPDATE jukeboxes SET
+			queue = COALESCE(
+				(SELECT jsonb_agg(elem) FROM jsonb_array_elements_text(queue) AS elem
+				 WHERE elem NOT IN (SELECT id FROM tracks WHERE library_id = $1)),
+				'[]'::jsonb
+			),
+			queue_idx = 0,
+			shuffle_order = '[]'::jsonb,
+			shuffle_idx = 0`, libID)
+
+	h.db.ExecContext(r.Context(),
+		`UPDATE user_settings SET value =
+			jsonb_set(value::jsonb, '{track_ids}',
+				COALESCE(
+					(SELECT jsonb_agg(elem) FROM jsonb_array_elements_text((value::jsonb -> 'track_ids')) AS elem
+					 WHERE elem NOT IN (SELECT id FROM tracks WHERE library_id = $1)),
+					'[]'::jsonb
+				)
+			)::text
+		WHERE key = 'player_queue'`, libID)
+
+	h.db.ExecContext(r.Context(),
+		`UPDATE playlists SET track_ids = (
+			SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+			FROM jsonb_array_elements_text(track_ids) AS elem
+			WHERE elem NOT IN (SELECT id FROM tracks WHERE library_id = $1)
+		) WHERE track_ids ?| ARRAY(SELECT id FROM tracks WHERE library_id = $1)`, libID)
+
+	libTrackIDs := map[string]bool{}
+	rows, err := h.db.QueryContext(r.Context(), "SELECT id FROM tracks WHERE library_id = $1", libID)
+	if err == nil {
+		for rows.Next() {
+			var tid string
+			rows.Scan(&tid)
+			libTrackIDs[tid] = true
+		}
+		rows.Close()
+	}
+
+	h.manager.ForEach(func(_ string, eng *player.Engine) {
+		status := eng.Status()
+		var newQueue []string
+		for _, tid := range status.Queue {
+			if !libTrackIDs[tid] {
+				newQueue = append(newQueue, tid)
+			}
+		}
+		if len(newQueue) != len(status.Queue) {
+			if len(newQueue) == 0 {
+				eng.ClearQueue()
+			} else {
+				eng.SetQueue(newQueue)
+				if status.Track != nil && libTrackIDs[status.Track.ID] {
+					eng.Next()
+				}
+			}
+		}
+	})
+
 	h.libraryRepo.Delete(r.Context(), libID)
 
-	// Clean up cover images
+	h.db.ExecContext(r.Context(),
+		`DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+	h.db.ExecContext(r.Context(),
+		`DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+	h.db.ExecContext(r.Context(),
+		`DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
+	h.db.ExecContext(r.Context(),
+		`DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
+
 	if libDir := filepath.Join(h.imagesDir, libID); libDir != "" {
 		os.RemoveAll(libDir)
 	}

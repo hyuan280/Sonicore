@@ -36,6 +36,7 @@ export default function JukeboxDetailPage() {
   const playMode = status?.play_mode || "normal"
   const queue = status?.queue || []
   const queueIdx = status?.queue_idx ?? 0
+  const hasTracks = queue.length > 0
 
   useEffect(() => {
     const key = queue.join(",")
@@ -189,10 +190,10 @@ export default function JukeboxDetailPage() {
       {/* Now Playing */}
       <div className="flex items-center gap-4 p-4 border border-zinc-800 rounded-xl bg-zinc-900/50 cursor-pointer" onClick={isPlaying ? handleStop : handlePlay}>
         <div className="w-14 h-14 bg-zinc-800 rounded-lg flex items-center justify-center flex-shrink-0">
-          {isPlaying ? <Pause className="w-6 h-6 text-green-500" /> : <Play className="w-6 h-6 text-zinc-600" />}
+          {isPlaying && hasTracks ? <Pause className="w-6 h-6 text-green-500" /> : <Play className="w-6 h-6 text-zinc-600" />}
         </div>
         <div className="flex-1 min-w-0">
-          {track ? (
+          {track && hasTracks ? (
             <>
               <div className="font-medium truncate">{track.title}</div>
               <div className="text-sm text-zinc-400 truncate">{track.artist || "Unknown"}</div>

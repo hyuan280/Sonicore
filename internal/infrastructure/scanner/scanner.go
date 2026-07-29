@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -341,15 +342,44 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		return stats, err
 	}
 
+	var deletedIDs []string
 	for path := range existingByPath {
 		if !seenPaths[path] {
-			if err := e.trackRepo.DeleteByFilePath(ctx, path, lib.ID); err != nil {
+			trackID, err := e.trackRepo.DeleteByFilePath(ctx, path, lib.ID)
+			if err != nil {
 				stats.Errors = append(stats.Errors, fmt.Sprintf("delete error %s: %v", path, err))
-			} else {
+			} else if trackID != "" {
+				deletedIDs = append(deletedIDs, trackID)
 				stats.DeletedTracks++
 			}
 		}
 	}
+
+	if len(deletedIDs) > 0 {
+		e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'track' AND item_id = ANY($1)`, pq.Array(deletedIDs))
+		e.db.ExecContext(ctx, `DELETE FROM play_history WHERE track_id = ANY($1)`, pq.Array(deletedIDs))
+		e.db.ExecContext(ctx,
+			`UPDATE playlists SET track_ids = (
+				SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+				FROM jsonb_array_elements_text(track_ids) AS elem
+				WHERE NOT (elem = ANY($1::text[]))
+			) WHERE track_ids ?| $1`, pq.Array(deletedIDs))
+		e.db.ExecContext(ctx,
+			`UPDATE jukeboxes SET
+				queue = COALESCE(
+					(SELECT jsonb_agg(elem) FROM jsonb_array_elements_text(queue) AS elem
+					 WHERE NOT (elem = ANY($1::text[]))),
+					'[]'::jsonb
+				),
+				queue_idx = 0,
+				shuffle_order = '[]'::jsonb,
+				shuffle_idx = 0`, pq.Array(deletedIDs))
+	}
+
+	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
+	e.db.ExecContext(ctx, `DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
 
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks
 	lib.LastScannedAt = timePtr(time.Now())

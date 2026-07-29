@@ -71,6 +71,7 @@ func RunMigrations(db *sql.DB) error {
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
+	CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists(mbid);
 
 	CREATE TABLE IF NOT EXISTS albums (
 		id           VARCHAR(26) PRIMARY KEY,
@@ -87,6 +88,7 @@ func RunMigrations(db *sql.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
 	CREATE INDEX IF NOT EXISTS idx_albums_title ON albums(title);
+	CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums(mbid);
 
 	CREATE TABLE IF NOT EXISTS tracks (
 		id            VARCHAR(26) PRIMARY KEY,
@@ -121,6 +123,7 @@ func RunMigrations(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
 	CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(hash);
 	CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
+	CREATE INDEX IF NOT EXISTS idx_tracks_filepath ON tracks(file_path);
 
 	CREATE TABLE IF NOT EXISTS images (
 		id         VARCHAR(26) PRIMARY KEY,
@@ -189,17 +192,21 @@ func RunMigrations(db *sql.DB) error {
 		user_id    VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		item_type  VARCHAR(10) NOT NULL,
 		item_id    VARCHAR(26) NOT NULL,
+		library_id VARCHAR(26) REFERENCES libraries(id) ON DELETE CASCADE,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		PRIMARY KEY (user_id, item_type, item_id)
 	);
+	CREATE INDEX IF NOT EXISTS idx_favorites_library ON favorites(library_id);
 
 	CREATE TABLE IF NOT EXISTS play_history (
-		id        VARCHAR(26) PRIMARY KEY,
-		user_id   VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-		track_id  VARCHAR(26) NOT NULL,
-		played_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		id         VARCHAR(26) PRIMARY KEY,
+		user_id    VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		track_id   VARCHAR(26) NOT NULL,
+		library_id VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+		played_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	CREATE INDEX IF NOT EXISTS idx_play_history_user ON play_history(user_id, played_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_play_history_library ON play_history(library_id);
 
 	CREATE TABLE IF NOT EXISTS user_settings (
 		user_id VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,

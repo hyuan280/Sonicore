@@ -223,16 +223,18 @@ type RefreshToken struct {
 }
 
 type Favorite struct {
-	UserID   string    `json:"user_id"`
-	ItemType string    `json:"item_type"` // track | album | artist
-	ItemID   string    `json:"item_id"`
-	CreatedAt time.Time `json:"created_at"`
+	UserID    string     `json:"user_id"`
+	ItemType  string     `json:"item_type"` // track | album | artist
+	ItemID    string     `json:"item_id"`
+	LibraryID *string    `json:"library_id,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type PlayHistory struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
 	TrackID   string    `json:"track_id"`
+	LibraryID string    `json:"library_id"`
 	PlayedAt  time.Time `json:"played_at"`
 }
 
