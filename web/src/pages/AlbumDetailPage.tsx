@@ -57,7 +57,7 @@ export default function AlbumDetailPage() {
           <p className="text-xs uppercase tracking-wider text-zinc-400">Album</p>
           <h1 className="text-3xl font-bold mt-1">{album.title}</h1>
           {album.artist && <p className="text-sm text-zinc-300 mt-1">{album.artist}</p>}
-          <p className="text-sm text-zinc-500 mt-1">{album.year || ""} · {tracks.length} tracks</p>
+          <p className="text-sm text-zinc-500 mt-1">{album.year || ""}{album.country ? ` · ${album.country}` : ""} · {tracks.length} tracks</p>
           <Button className="mt-4 w-fit" onClick={playAll}><Play className="w-4 h-4 mr-2" />Play All</Button>
         </div>
       </div>

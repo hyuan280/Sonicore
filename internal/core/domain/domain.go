@@ -61,6 +61,7 @@ type Artist struct {
 	Name         string    `json:"name"`
 	SortName     string    `json:"sort_name"`
 	MBID         string    `json:"mbid"`
+	Country      string    `json:"country"`
 	Biography    string    `json:"biography"`
 	CoverImageID *string   `json:"cover_image_id,omitempty"`
 	TrackCount   int       `json:"track_count"`
@@ -73,6 +74,7 @@ type Album struct {
 	Title        string    `json:"title"`
 	ArtistID     string    `json:"artist_id"`
 	MBID         string    `json:"mbid"`
+	Country      string    `json:"country"`
 	Year         int       `json:"year"`
 	Genre        string    `json:"genre"`
 	CoverImageID *string   `json:"cover_image_id,omitempty"`

@@ -16,18 +16,18 @@ export interface Library {
 }
 
 export interface Artist {
-  id: string; name: string; album_count: number; cover_image_id?: string
+  id: string; name: string; album_count: number; cover_image_id?: string; country?: string
 }
 
 export interface AlbumDetail {
   id: string; title: string; artist: string; artist_id: string
-  year: number; genre: string; duration: number; cover_image_id?: string
+  year: number; genre: string; duration: number; cover_image_id?: string; country?: string
 }
 
 export interface Album {
   id: string; name: string; title: string; artist: string; artistId: string
   year: number; genre: string; song_count: number; duration: number
-  cover_image_id?: string
+  cover_image_id?: string; country?: string
 }
 
 export interface Track {

@@ -8,7 +8,7 @@ import { coverUrl } from "../lib/utils"
 
 interface AlbumItem {
   id: string; title: string; name: string; artist: string; year: number
-  song_count: number; cover_image_id?: string
+  song_count: number; cover_image_id?: string; country?: string
 }
 
 export default function AlbumsPage() {
@@ -63,6 +63,7 @@ export default function AlbumsPage() {
                 <p className="text-xs text-zinc-400 truncate">{a.artist || ""}</p>
                 <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
                   <span>{a.year || ""}</span>
+                  {a.country && <span>· {a.country}</span>}
                   {a.song_count > 0 && <span>· {a.song_count} tracks</span>}
                 </div>
                 </div>

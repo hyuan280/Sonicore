@@ -55,7 +55,7 @@ export default function ArtistDetailPage() {
         <div className="flex flex-col justify-end">
           <p className="text-xs uppercase tracking-wider text-zinc-400">Artist</p>
           <h1 className="text-3xl font-bold mt-1">{artist.name}</h1>
-          <p className="text-sm text-zinc-500 mt-1">{tracks.length} tracks</p>
+          <p className="text-sm text-zinc-500 mt-1">{artist.country ? `${artist.country} · ` : ""}{tracks.length} tracks</p>
           <button className="mt-4 w-fit px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-500 cursor-pointer flex items-center gap-2" onClick={playAll}>
             <Play className="w-4 h-4" />Play All
           </button>

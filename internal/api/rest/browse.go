@@ -248,6 +248,7 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 			"artist_id":      album.ArtistID,
 			"year":           album.Year,
 			"genre":          album.Genre,
+			"country":        album.Country,
 			"duration":       album.Duration,
 			"cover_image_id": album.CoverImageID,
 		},

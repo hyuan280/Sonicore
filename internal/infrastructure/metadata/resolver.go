@@ -8,16 +8,18 @@ import (
 )
 
 type EnrichmentResult struct {
-	ArtistMBID  string
-	AlbumMBID   string
-	TrackMBID   string
-	Genre       string
-	Year        int
-	Biography   string
-	CoverArtURL string
-	Title       string  // MB-corrected title (if ffprobe was wrong)
-	Artist      string  // MB-corrected artist
-	Album       string  // MB-corrected album
+	ArtistMBID   string
+	AlbumMBID    string
+	TrackMBID    string
+	ArtistCountry string
+	AlbumCountry  string
+	Genre        string
+	Year         int
+	Biography    string
+	CoverArtURL  string
+	Title        string  // MB-corrected title (if ffprobe was wrong)
+	Artist       string  // MB-corrected artist
+	Album        string  // MB-corrected album
 }
 
 type Resolver struct {
@@ -80,6 +82,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	if len(recording.Artists) > 0 {
 		if recording.Artists[0].Artist != nil {
 			result.ArtistMBID = recording.Artists[0].Artist.ID
+			result.ArtistCountry = recording.Artists[0].Artist.Country
 		}
 		if meta.Artist == "" {
 			result.Artist = recording.Artists[0].Name
@@ -118,16 +121,22 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 			if g := GenreFromTags(full.Tags); g != "" {
 				result.Genre = g
 			}
+			result.AlbumCountry = full.Country
 		}
 		result.CoverArtURL = fmt.Sprintf("https://coverartarchive.org/release/%s/front", rel.ID)
 	}
 
 	if result.ArtistMBID != "" {
 		full, err := r.mb.LookupArtist(result.ArtistMBID)
-		if err == nil && len(full.Tags) > 0 {
-			if result.Genre == "" {
-				if g := GenreFromTags(full.Tags); g != "" {
-					result.Genre = g
+		if err == nil {
+			if result.ArtistCountry == "" && full.Country != "" {
+				result.ArtistCountry = full.Country
+			}
+			if len(full.Tags) > 0 {
+				if result.Genre == "" {
+					if g := GenreFromTags(full.Tags); g != "" {
+						result.Genre = g
+					}
 				}
 			}
 		}
@@ -276,6 +285,7 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 	if len(rec.Artists) > 0 {
 		if rec.Artists[0].Artist != nil {
 			result.ArtistMBID = rec.Artists[0].Artist.ID
+			result.ArtistCountry = rec.Artists[0].Artist.Country
 		}
 		result.Artist = rec.Artists[0].Name
 	}
@@ -295,6 +305,7 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 			if g := GenreFromTags(full.Tags); g != "" {
 				result.Genre = g
 			}
+			result.AlbumCountry = full.Country
 		}
 
 		result.CoverArtURL = fmt.Sprintf("https://coverartarchive.org/release/%s/front", rel.ID)
@@ -303,10 +314,15 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 
 	if result.ArtistMBID != "" {
 		full, err := r.mb.LookupArtist(result.ArtistMBID)
-		if err == nil && len(full.Tags) > 0 {
-			if result.Genre == "" {
-				if g := GenreFromTags(full.Tags); g != "" {
-					result.Genre = g
+		if err == nil {
+			if result.ArtistCountry == "" && full.Country != "" {
+				result.ArtistCountry = full.Country
+			}
+			if len(full.Tags) > 0 {
+				if result.Genre == "" {
+					if g := GenreFromTags(full.Tags); g != "" {
+						result.Genre = g
+					}
 				}
 			}
 		}

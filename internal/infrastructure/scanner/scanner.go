@@ -146,7 +146,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		var enrichment *metadata.EnrichmentResult
-		if e.resolver != nil {
+		if e.resolver != nil && (opts.Mode == "overwrite" || !e.metaComplete(ctx, existing)) {
 			if result, err := e.resolver.Enrich(ctx, meta); err != nil {
 				log.Printf("[scan] mb enrich error for %s: %v", path, err)
 			} else {
@@ -159,72 +159,95 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		if existing != nil && existing.Hash == fileHash {
-			if opts.Mode == "overwrite" {
-			} else {
-				changed := false
-				if meta.MBID != "" && existing.MBID == "" {
-					existing.MBID = meta.MBID
+			changed := false
+			overwrite := opts.Mode == "overwrite"
+
+			if meta.MBID != "" && (existing.MBID == "" || overwrite) {
+				existing.MBID = meta.MBID
+				changed = true
+			}
+			if enrichment != nil {
+				if meta.TitleFromFilename && enrichment.Title != "" && (existing.Title != enrichment.Title || overwrite) {
+					existing.Title = enrichment.Title
 					changed = true
 				}
-				if enrichment != nil {
-					if meta.TitleFromFilename && enrichment.Title != "" && existing.Title != enrichment.Title {
-						existing.Title = enrichment.Title
-						changed = true
-					}
-					if meta.MBID == "" && enrichment.TrackMBID != "" && existing.MBID == "" {
-						existing.MBID = enrichment.TrackMBID
-						changed = true
-					}
-					if enrichment.ArtistMBID != "" && existing.ArtistID != "" {
-						if artist, err := e.artistRepo.FindByID(ctx, existing.ArtistID); err == nil && artist.MBID == "" {
+				if enrichment.TrackMBID != "" && (existing.MBID == "" || overwrite) {
+					existing.MBID = enrichment.TrackMBID
+					changed = true
+				}
+				if enrichment.ArtistMBID != "" && existing.ArtistID != "" {
+					if artist, err := e.artistRepo.FindByID(ctx, existing.ArtistID); err == nil {
+						updated := false
+						if enrichment.ArtistMBID != "" && (artist.MBID == "" || overwrite) {
 							artist.MBID = enrichment.ArtistMBID
-							if enrichment.Artist != "" && (artist.Name == "" || artist.Name == "Unknown Artist") {
-								artist.Name = enrichment.Artist
-								artist.SortName = enrichment.Artist
-							}
+							updated = true
+						}
+						if enrichment.Artist != "" && (artist.Name == "" || artist.Name == "Unknown Artist" || overwrite) {
+							artist.Name = enrichment.Artist
+							artist.SortName = enrichment.Artist
+							updated = true
+						}
+						if enrichment.ArtistCountry != "" && (artist.Country == "" || overwrite) {
+							artist.Country = enrichment.ArtistCountry
+							updated = true
+						}
+						if updated {
 							changed = true
 							e.artistRepo.Update(ctx, artist)
 						}
 					}
-					if enrichment.AlbumMBID != "" && existing.AlbumID != "" {
-						if album, err := e.albumRepo.FindByID(ctx, existing.AlbumID); err == nil && album.MBID == "" {
+				}
+				if enrichment.AlbumMBID != "" && existing.AlbumID != "" {
+					if album, err := e.albumRepo.FindByID(ctx, existing.AlbumID); err == nil {
+						updated := false
+						if enrichment.AlbumMBID != "" && (album.MBID == "" || overwrite) {
 							album.MBID = enrichment.AlbumMBID
-							if enrichment.Album != "" && (album.Title == "" || album.Title == "Unknown Album") {
-								album.Title = enrichment.Album
-							}
-							if album.Year == 0 && enrichment.Year != 0 {
-								album.Year = enrichment.Year
-							}
-							if album.Genre == "" && enrichment.Genre != "" {
-								album.Genre = enrichment.Genre
-							}
+							updated = true
+						}
+						if enrichment.Album != "" && (album.Title == "" || album.Title == "Unknown Album" || overwrite) {
+							album.Title = enrichment.Album
+							updated = true
+						}
+						if enrichment.Year != 0 && (album.Year == 0 || overwrite) {
+							album.Year = enrichment.Year
+							updated = true
+						}
+						if enrichment.Genre != "" && (album.Genre == "" || overwrite) {
+							album.Genre = enrichment.Genre
+							updated = true
+						}
+						if enrichment.AlbumCountry != "" && (album.Country == "" || overwrite) {
+							album.Country = enrichment.AlbumCountry
+							updated = true
+						}
+						if updated {
 							changed = true
 							e.albumRepo.Update(ctx, album)
 						}
 					}
 				}
-				if meta.HasCoverArt {
-					if !thumbnailExists(e.coverExtractor, lib.ID, existing.ID, 64) {
-						if data, _, err := e.coverExtractor.ExtractFromFile(path); err == nil {
-							thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), lib.ID)
-							os.MkdirAll(thumbDir, 0755)
-							thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", existing.ID))
-							metadata.ResizeToThumbnail(data, thumbPath, 64)
-							if existing.CoverImageID == nil {
-								existing.CoverImageID = &existing.ID
-								changed = true
-							}
-							stats.CoversExtracted++
+			}
+			if meta.HasCoverArt {
+				if !thumbnailExists(e.coverExtractor, lib.ID, existing.ID, 64) {
+					if data, _, err := e.coverExtractor.ExtractFromFile(path); err == nil {
+						thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), lib.ID)
+						os.MkdirAll(thumbDir, 0755)
+						thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", existing.ID))
+						metadata.ResizeToThumbnail(data, thumbPath, 64)
+						if existing.CoverImageID == nil {
+							existing.CoverImageID = &existing.ID
+							changed = true
 						}
+						stats.CoversExtracted++
 					}
 				}
-				if changed {
-					e.trackRepo.Update(ctx, existing)
-				}
-				stats.Scanned++
-				onProgress(*stats)
-				return nil
 			}
+			if changed {
+				e.trackRepo.Update(ctx, existing)
+			}
+			stats.Scanned++
+			onProgress(*stats)
+			return nil
 		}
 
 		title := meta.Title
@@ -458,6 +481,31 @@ func (e *Engine) ensureThumbnail(libraryID, trackID string) error {
 	return nil
 }
 
+func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
+	if track == nil {
+		return false
+	}
+	if track.MBID == "" {
+		return false
+	}
+	if track.ArtistID != "" {
+		artist, err := e.artistRepo.FindByID(ctx, track.ArtistID)
+		if err != nil || artist.Name == "" || artist.Name == "Unknown Artist" ||
+			artist.MBID == "" || artist.Country == "" {
+			return false
+		}
+	}
+	if track.AlbumID != "" {
+		album, err := e.albumRepo.FindByID(ctx, track.AlbumID)
+		if err != nil || album.Title == "" || album.Title == "Unknown Album" ||
+			album.MBID == "" || album.Country == "" ||
+			album.Year == 0 || album.Genre == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
 	if name == "" {
 		name = "Unknown Artist"
@@ -470,6 +518,10 @@ func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string,
 				artist.SortName = enrichment.Artist
 				e.artistRepo.Update(ctx, artist)
 			}
+			if artist.Country == "" && enrichment.ArtistCountry != "" {
+				artist.Country = enrichment.ArtistCountry
+				e.artistRepo.Update(ctx, artist)
+			}
 			return artist, nil
 		}
 	}
@@ -478,6 +530,10 @@ func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string,
 	if err == nil {
 		if artist.MBID == "" && enrichment != nil && enrichment.ArtistMBID != "" {
 			artist.MBID = enrichment.ArtistMBID
+			e.artistRepo.Update(ctx, artist)
+		}
+		if artist.Country == "" && enrichment != nil && enrichment.ArtistCountry != "" {
+			artist.Country = enrichment.ArtistCountry
 			e.artistRepo.Update(ctx, artist)
 		}
 		return artist, nil
@@ -493,6 +549,7 @@ func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string,
 	}
 	if enrichment != nil {
 		artist.MBID = enrichment.ArtistMBID
+		artist.Country = enrichment.ArtistCountry
 	}
 
 	err = e.artistRepo.BatchCreate(ctx, []domain.Artist{*artist})
@@ -523,6 +580,10 @@ func (e *Engine) findOrCreateAlbum(ctx context.Context, libraryID, title, artist
 				album.Genre = enrichment.Genre
 				updated = true
 			}
+			if album.Country == "" && enrichment.AlbumCountry != "" {
+				album.Country = enrichment.AlbumCountry
+				updated = true
+			}
 			if updated {
 				e.albumRepo.Update(ctx, album)
 			}
@@ -545,6 +606,10 @@ func (e *Engine) findOrCreateAlbum(ctx context.Context, libraryID, title, artist
 			album.Genre = enrichment.Genre
 			updated = true
 		}
+		if enrichment != nil && album.Country == "" && enrichment.AlbumCountry != "" {
+			album.Country = enrichment.AlbumCountry
+			updated = true
+		}
 		if updated {
 			e.albumRepo.Update(ctx, album)
 		}
@@ -563,6 +628,7 @@ func (e *Engine) findOrCreateAlbum(ctx context.Context, libraryID, title, artist
 	}
 	if enrichment != nil {
 		album.MBID = enrichment.AlbumMBID
+		album.Country = enrichment.AlbumCountry
 		if year == 0 && enrichment.Year != 0 {
 			album.Year = enrichment.Year
 		}
