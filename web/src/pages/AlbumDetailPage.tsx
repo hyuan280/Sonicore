@@ -5,7 +5,7 @@ import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { Button } from "../components/ui/button"
 import { Play, Clock, Disc3, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
-import { formatDuration, coverUrl } from "../lib/utils"
+import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 
 export default function AlbumDetailPage() {
   const { albumId } = useParams()
@@ -22,9 +22,9 @@ export default function AlbumDetailPage() {
     if (!albumId) return
     api.data.album(albumId).then(async d => {
       const items: PlayerTrack[] = (d.tracks || []).map((t: any) => ({
-        id: t.id, title: t.title, artist: t.artist || "", album: d.album?.title || "",
+        id: t.id, title: t.title, album: d.album?.title || "",
         album_id: albumId!, duration: t.duration, suffix: t.file_format || "mp3",
-        cover_image_id: t.cover_image_id,
+        cover_image_id: t.cover_image_id, artists: t.artists,
       }))
       setTracks(items)
       setAlbum(d.album)
@@ -176,7 +176,7 @@ export default function AlbumDetailPage() {
                   onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{t.artist || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(t.artists) || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
             </div>
           </div>

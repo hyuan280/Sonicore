@@ -10,7 +10,7 @@ import {
   Play, Pause, SkipBack, SkipForward, Shuffle, Trash2, Repeat, Repeat1,
   Turntable, Settings, ArrowUpFromLine, Loader2,
 } from "lucide-react"
-import { formatDuration } from "../lib/utils"
+import { formatDuration, performerNames } from "../lib/utils"
 
 export default function JukeboxDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -47,7 +47,7 @@ export default function JukeboxDetailPage() {
       for (const t of d.tracks || []) {
         map[t.id] = {
           title: t.title,
-          artist: t.artist?.name || "",
+          artist: performerNames(t.artists) || "",
           album: t.album?.title || "",
         }
       }

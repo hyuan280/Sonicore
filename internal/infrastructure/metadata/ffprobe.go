@@ -33,6 +33,7 @@ type ProbeStream struct {
 type AudioMeta struct {
 	Title       string
 	Artist      string
+	Artists     []string
 	AlbumArtist string
 	Album       string
 	TrackNumber int
@@ -46,6 +47,8 @@ type AudioMeta struct {
 	HasCoverArt bool
 	Comment     string
 	Composer    string
+	Lyricist    string
+	Arranger    string
 	FilePath    string
 	FileSize    int64
 	FileFormat  string
@@ -127,8 +130,10 @@ func Probe(path string) (*AudioMeta, error) {
 		meta.Album = tags["album"]
 		meta.Genre = tags["genre"]
 		meta.Comment = tags["comment"]
-		meta.Composer = tags["composer"]
-		meta.MBID = tags["musicbrainz_trackid"]
+	meta.Composer = tags["composer"]
+	meta.Lyricist = tags["lyricist"]
+	meta.Arranger = tags["arranger"]
+	meta.MBID = tags["musicbrainz_trackid"]
 		if meta.MBID == "" {
 			meta.MBID = tags["musicbrainz track id"]
 		}
@@ -153,6 +158,8 @@ func Probe(path string) (*AudioMeta, error) {
 	if !utf8.ValidString(meta.Album) || strings.ContainsRune(meta.Album, 0xFFFD) {
 		meta.Album = ""
 	}
+
+	meta.Artists = splitArtistNames(meta.Artist)
 
 	meta.TitleFromFilename = meta.Title == ""
 
@@ -184,4 +191,35 @@ func parseInt(s string, out *int) {
 		return
 	}
 	fmt.Sscanf(s, "%d", out)
+}
+
+func splitArtistNames(artist string) []string {
+	if artist == "" || artist == "Unknown Artist" {
+		return nil
+	}
+	if strings.Contains(artist, "/") {
+		return splitTrim(artist, "/")
+	}
+	if strings.Contains(artist, ",") {
+		return splitTrim(artist, ",")
+	}
+	if strings.Contains(artist, ";") {
+		return splitTrim(artist, ";")
+	}
+	return []string{artist}
+}
+
+func splitTrim(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return []string{s}
+	}
+	return result
 }

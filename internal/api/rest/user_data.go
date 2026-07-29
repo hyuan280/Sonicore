@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -45,12 +46,11 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 	if itemType == "track" {
 		rows, err := h.db.QueryContext(r.Context(),
 			`SELECT f.item_type, f.item_id, f.created_at,
-			        COALESCE(t.title, ''), COALESCE(a.name, ''), COALESCE(al.title, ''),
+			        COALESCE(t.title, ''), COALESCE(al.title, ''),
 			        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
 			        t.cover_image_id
 			 FROM favorites f
 			 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
-			 LEFT JOIN artists a ON a.id = t.artist_id
 			 LEFT JOIN albums al ON al.id = t.album_id
 			 WHERE f.user_id = $1 AND f.item_type = 'track'
 			 ORDER BY f.created_at DESC`, userID)
@@ -59,22 +59,31 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		defer rows.Close()
+		var trackIDs []string
 		for rows.Next() {
 			var t, id string
 			var ca time.Time
-			var title, artist, album, albumID, fileFormat string
+			var title, album, albumID, fileFormat string
 			var duration float64
 			var coverID sql.NullString
-			rows.Scan(&t, &id, &ca, &title, &artist, &album, &albumID, &duration, &fileFormat, &coverID)
+			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID)
 			item := map[string]interface{}{
 				"item_type": t, "item_id": id, "created_at": ca,
-				"title": title, "artist": artist, "album": album,
+				"title": title, "album": album,
 				"album_id": albumID, "duration": duration, "suffix": fileFormat,
 			}
 			if coverID.Valid {
 				item["cover_image_id"] = coverID.String
 			}
 			items = append(items, item)
+			trackIDs = append(trackIDs, id)
+		}
+		artistsByTrack := h.loadTrackArtistsBulk(r.Context(), trackIDs)
+		for i := range items {
+			tid := items[i]["item_id"].(string)
+			if artists, ok := artistsByTrack[tid]; ok {
+				items[i]["artists"] = artists
+			}
 		}
 	} else {
 		rows, err := h.db.QueryContext(r.Context(),
@@ -204,12 +213,11 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT ph.id, ph.track_id, ph.played_at,
-		        COALESCE(t.title, ''), COALESCE(a.name, ''), COALESCE(al.title, ''),
+		        COALESCE(t.title, ''), COALESCE(al.title, ''),
 		        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
 		        t.cover_image_id
 		 FROM play_history ph
 		 INNER JOIN tracks t ON t.id = ph.track_id
-		 LEFT JOIN artists a ON a.id = t.artist_id
 		 LEFT JOIN albums al ON al.id = t.album_id
 		 WHERE ph.user_id = $1
 		 ORDER BY ph.played_at DESC LIMIT 100`,
@@ -221,23 +229,32 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var items []map[string]interface{}
+	var trackIDs []string
 	for rows.Next() {
 		var id, tid string
 		var pa time.Time
-		var title, artist, album, albumID, fileFormat string
+		var title, album, albumID, fileFormat string
 		var duration float64
 		var coverID sql.NullString
-		rows.Scan(&id, &tid, &pa, &title, &artist, &album,
+		rows.Scan(&id, &tid, &pa, &title, &album,
 			&albumID, &duration, &fileFormat, &coverID)
 		item := map[string]interface{}{
 			"id": id, "track_id": tid, "played_at": pa,
-			"title": title, "artist": artist, "album": album,
+			"title": title, "album": album,
 			"album_id": albumID, "duration": duration, "suffix": fileFormat,
 		}
 		if coverID.Valid {
 			item["cover_image_id"] = coverID.String
 		}
 		items = append(items, item)
+		trackIDs = append(trackIDs, tid)
+	}
+	artistsByTrack := h.loadTrackArtistsBulk(r.Context(), trackIDs)
+	for i := range items {
+		tid := items[i]["track_id"].(string)
+		if artists, ok := artistsByTrack[tid]; ok {
+			items[i]["artists"] = artists
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
@@ -391,7 +408,6 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 		t := map[string]interface{}{
 			"id":             track.ID,
 			"title":          track.Title,
-			"artist_id":      track.ArtistID,
 			"album_id":       track.AlbumID,
 			"cover_image_id": track.CoverImageID,
 			"track":          track.TrackNumber,
@@ -399,8 +415,16 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 			"bit_rate":       track.BitRate,
 			"suffix":         track.FileFormat,
 		}
-		if a, err := h.artistRepo.FindByID(r.Context(), track.ArtistID); err == nil {
-			t["artist"] = a.Name
+		if tas, err := h.trackRepo.LoadTrackArtists(r.Context(), track.ID); err == nil && len(tas) > 0 {
+			artists := make([]map[string]interface{}, len(tas))
+			for i, ta := range tas {
+				artists[i] = map[string]interface{}{
+					"artist_id": ta.ArtistID,
+					"name":      ta.Artist.Name,
+					"role":      ta.Role,
+				}
+			}
+			t["artists"] = artists
 		}
 		if a, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil {
 			t["album"] = a.Title
@@ -645,7 +669,8 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(al.title, ''), t.album_id, t.duration, t.file_format, t.cover_image_id
 		 FROM tracks t
-		 LEFT JOIN artists ar ON t.artist_id = ar.id
+		 LEFT JOIN track_artists ta ON ta.track_id = t.id AND ta.role = 'performer' AND ta.sort_order = 0
+		 LEFT JOIN artists ar ON ta.artist_id = ar.id
 		 LEFT JOIN albums al ON t.album_id = al.id
 		 WHERE t.id = ANY($1)
 		 ORDER BY array_position($1::text[], t.id)`, pq.Array(q.TrackIDs))
@@ -655,17 +680,36 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tracks := make([]trackSummary, 0, len(q.TrackIDs))
+	tracks := make([]map[string]interface{}, 0, len(q.TrackIDs))
+	trackIDs := make([]string, 0, len(q.TrackIDs))
 	for rows.Next() {
 		var t trackSummary
 		var coverID sql.NullString
 		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID); err != nil {
 			continue
 		}
-		if coverID.Valid {
-			t.CoverImageID = &coverID.String
+		item := map[string]interface{}{
+			"id":       t.ID,
+			"title":    t.Title,
+			"artist":   t.Artist,
+			"album":    t.Album,
+			"album_id": t.AlbumID,
+			"duration": t.Duration,
+			"suffix":   t.Suffix,
 		}
-		tracks = append(tracks, t)
+		if coverID.Valid {
+			item["cover_image_id"] = coverID.String
+		}
+		tracks = append(tracks, item)
+		trackIDs = append(trackIDs, t.ID)
+	}
+
+	artistsByTrack := h.loadTrackArtistsBulk(r.Context(), trackIDs)
+	for i := range tracks {
+		tid := tracks[i]["id"].(string)
+		if artists, ok := artistsByTrack[tid]; ok {
+			tracks[i]["artists"] = artists
+		}
 	}
 
 	// Adjust queue_idx if current track was deleted
@@ -681,4 +725,28 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		"shuffle_idx":   q.ShuffleIdx,
 		"mode":          q.Mode,
 	})
+}
+
+func (h *UserDataHandler) loadTrackArtistsBulk(ctx context.Context, trackIDs []string) map[string][]map[string]interface{} {
+	result := make(map[string][]map[string]interface{})
+	for _, tid := range trackIDs {
+		tas, err := h.trackRepo.LoadTrackArtists(ctx, tid)
+		if err != nil || len(tas) == 0 {
+			continue
+		}
+		artists := make([]map[string]interface{}, len(tas))
+		for i, ta := range tas {
+			entry := map[string]interface{}{
+				"artist_id": ta.ArtistID,
+				"role":      ta.Role,
+			}
+			if ta.Artist != nil {
+				entry["name"] = ta.Artist.Name
+				entry["mbid"] = ta.Artist.MBID
+			}
+			artists[i] = entry
+		}
+		result[tid] = artists
+	}
+	return result
 }

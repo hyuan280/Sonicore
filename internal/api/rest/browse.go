@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -80,7 +81,6 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 		entry := map[string]interface{}{
 			"id":             t.ID,
 			"title":          t.Title,
-			"artist_id":      t.ArtistID,
 			"album_id":       t.AlbumID,
 			"cover_image_id": t.CoverImageID,
 			"track":          t.TrackNumber,
@@ -90,12 +90,10 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 			"file_size":      t.FileSize,
 			"file_hash":      t.Hash,
 		}
-		if artist, err := h.artistRepo.FindByID(r.Context(), t.ArtistID); err == nil {
-			entry["artist"] = artist.Name
-		}
 		if album, err := h.albumRepo.FindByID(r.Context(), t.AlbumID); err == nil {
 			entry["album"] = album.Title
 		}
+		entry["artists"] = h.buildTrackArtists(r.Context(), t.ID)
 		result[i] = entry
 	}
 
@@ -156,14 +154,13 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 		trackList[i] = map[string]interface{}{
 			"id":             t.ID,
 			"title":          t.Title,
-			"artist":         artist.Name,
-			"artist_id":      t.ArtistID,
 			"album":          albumTitle,
 			"album_id":       t.AlbumID,
 			"cover_image_id": t.CoverImageID,
 			"duration":       t.Duration,
 			"file_format":    t.FileFormat,
 			"track":          t.TrackNumber,
+			"artists":        h.buildTrackArtists(r.Context(), t.ID),
 		}
 	}
 
@@ -220,23 +217,17 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 	tracks, _ := h.trackRepo.FindByAlbumID(r.Context(), albumID)
 	trackList := make([]map[string]interface{}, len(tracks))
 	for i, t := range tracks {
-		aName := artistName
-		if aName == "" {
-			if a, err := h.artistRepo.FindByID(r.Context(), t.ArtistID); err == nil {
-				aName = a.Name
-			}
-		}
+		artists := h.buildTrackArtists(r.Context(), t.ID)
 		trackList[i] = map[string]interface{}{
 			"id":             t.ID,
 			"title":          t.Title,
-			"artist":         aName,
-			"artist_id":      t.ArtistID,
 			"album":          album.Title,
 			"album_id":       t.AlbumID,
 			"cover_image_id": t.CoverImageID,
 			"duration":       t.Duration,
 			"file_format":    t.FileFormat,
 			"track":          t.TrackNumber,
+			"artists":        artists,
 		}
 	}
 
@@ -254,6 +245,26 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 		},
 		"tracks": trackList,
 	})
+}
+
+func (h *DataHandler) buildTrackArtists(ctx context.Context, trackID string) []map[string]interface{} {
+	tas, err := h.trackRepo.LoadTrackArtists(ctx, trackID)
+	if err != nil || len(tas) == 0 {
+		return []map[string]interface{}{}
+	}
+	result := make([]map[string]interface{}, len(tas))
+	for i, ta := range tas {
+		entry := map[string]interface{}{
+			"artist_id": ta.ArtistID,
+			"role":      ta.Role,
+		}
+		if ta.Artist != nil {
+			entry["name"] = ta.Artist.Name
+			entry["mbid"] = ta.Artist.MBID
+		}
+		result[i] = entry
+	}
+	return result
 }
 
 func (h *DataHandler) TracksByIDs(w http.ResponseWriter, r *http.Request) {

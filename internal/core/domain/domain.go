@@ -65,6 +65,7 @@ type Artist struct {
 	Biography    string    `json:"biography"`
 	CoverImageID *string   `json:"cover_image_id,omitempty"`
 	TrackCount   int       `json:"track_count"`
+	Roles        []string  `json:"roles,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -91,7 +92,6 @@ type Track struct {
 	LibraryID    string         `json:"library_id"`
 	Title        string         `json:"title"`
 	AlbumID      string         `json:"album_id"`
-	ArtistID     string         `json:"artist_id"`
 	CoverImageID *string   `json:"cover_image_id,omitempty"`
 	TrackNumber  int            `json:"track_number"`
 	DiscNumber   int            `json:"disc_number"`
@@ -114,8 +114,17 @@ type Track struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 
-	Album  *Album  `json:"album,omitempty"`
-	Artist *Artist `json:"artist,omitempty"`
+	Album  *Album         `json:"album,omitempty"`
+	Artist *Artist        `json:"-"`
+	Artists []*TrackArtist `json:"artists,omitempty"`
+}
+
+type TrackArtist struct {
+	TrackID   string  `json:"track_id"`
+	ArtistID  string  `json:"artist_id"`
+	Role      string  `json:"role"`
+	SortOrder int     `json:"sort_order"`
+	Artist    *Artist `json:"artist,omitempty"`
 }
 
 type TrackMetadata struct {

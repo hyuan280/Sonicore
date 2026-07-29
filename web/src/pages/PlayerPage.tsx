@@ -1,7 +1,7 @@
 import { usePlayer } from "../stores/player"
 import { Button } from "../components/ui/button"
 import { SkipForward, Music, Play } from "lucide-react"
-import { formatDuration } from "../lib/utils"
+import { formatDuration, performerNames, coverUrl } from "../lib/utils"
 
 export default function PlayerPage() {
   const ps = usePlayer()
@@ -21,17 +21,33 @@ export default function PlayerPage() {
           <span className="flex-1">Title</span>
           <span className="w-16 text-right">Duration</span>
         </div>
-        {ps.queue.map((t, i) => (
-          <div key={t.id + i}
-            className={`flex items-center px-4 py-2 rounded-lg cursor-pointer group ${i === ps.queueIdx ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}
-            onClick={() => ps.playIndex(i)}>
-            <span className={`w-8 text-sm ${i === ps.queueIdx ? "text-green-500" : "text-zinc-500"} group-hover:hidden`}>{i + 1}</span>
-            <Play className={`w-4 h-4 hidden group-hover:block mr-4 ${i === ps.queueIdx ? "text-green-500" : "text-green-500"}`} />
-            <span className={`flex-1 text-sm truncate ${i === ps.queueIdx ? "text-green-500" : ""}`}>{t.title}</span>
-            <span className="text-xs text-zinc-500 mr-2 truncate max-w-40">{t.artist}</span>
-            <span className="w-16 text-right text-sm text-zinc-400">{formatDuration(t.duration)}</span>
-          </div>
-        ))}
+        {ps.queue.map((t, i) => {
+          const displayArtist = performerNames(t.artists)
+          return (
+            <div key={t.id + i}
+              className={`flex items-center px-4 py-2 rounded-lg cursor-pointer group ${i === ps.queueIdx ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}
+              onClick={() => ps.playIndex(i)}>
+              <span className={`w-8 text-sm ${i === ps.queueIdx ? "text-green-500" : "text-zinc-500"} group-hover:hidden`}>{i + 1}</span>
+              <Play className={`w-4 h-4 hidden group-hover:block mr-4 ${i === ps.queueIdx ? "text-green-500" : "text-green-500"}`} />
+              <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 overflow-hidden mr-3">
+                {t.cover_image_id ? (
+                  <img src={coverUrl("track", t.id, 64)} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Music className="w-4 h-4 text-zinc-600" />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className={`text-sm truncate block ${i === ps.queueIdx ? "text-green-500" : ""}`}>{t.title}</span>
+                <span className="text-xs text-zinc-500 truncate block">
+                  {displayArtist}{t.album ? ` — ${t.album}` : ""}
+                </span>
+              </div>
+              <span className="w-16 text-right text-sm text-zinc-400">{formatDuration(t.duration)}</span>
+            </div>
+          )
+        })}
         {ps.queue.length === 0 && <p className="text-zinc-500 text-center py-12">Queue is empty</p>}
       </div>
 

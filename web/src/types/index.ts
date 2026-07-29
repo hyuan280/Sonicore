@@ -30,8 +30,13 @@ export interface Album {
   cover_image_id?: string; country?: string
 }
 
+export interface TrackArtist {
+  artist_id: string; name: string; role: string
+}
+
 export interface Track {
-  id: string; title: string; artist: string; artistId: string
+  id: string; title: string; artist: string
+  artists?: TrackArtist[]
   album: string; albumId: string; track: number; discNumber: number
   duration: number; bitRate: number; suffix: string; size: number
   cover_image_id?: string

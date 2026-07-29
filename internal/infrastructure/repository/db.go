@@ -97,7 +97,6 @@ func RunMigrations(db *sql.DB) error {
 		library_id    VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
 		title         VARCHAR(255) NOT NULL,
 		album_id      VARCHAR(26) NOT NULL REFERENCES albums(id),
-		artist_id     VARCHAR(26) NOT NULL REFERENCES artists(id),
 		cover_image_id VARCHAR(26),
 		track_number  INTEGER NOT NULL DEFAULT 0,
 		disc_number   INTEGER NOT NULL DEFAULT 1,
@@ -122,10 +121,18 @@ func RunMigrations(db *sql.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_tracks_library ON tracks(library_id);
 	CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
-	CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
 	CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(hash);
 	CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
 	CREATE INDEX IF NOT EXISTS idx_tracks_filepath ON tracks(file_path);
+
+	CREATE TABLE IF NOT EXISTS track_artists (
+		track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+		artist_id  VARCHAR(26) NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+		role       VARCHAR(30) NOT NULL DEFAULT 'performer',
+		sort_order SMALLINT NOT NULL DEFAULT 0,
+		PRIMARY KEY (track_id, artist_id, role)
+	);
+	CREATE INDEX IF NOT EXISTS idx_track_artists_artist ON track_artists(artist_id);
 
 	CREATE TABLE IF NOT EXISTS images (
 		id         VARCHAR(26) PRIMARY KEY,
@@ -274,6 +281,10 @@ func RunMigrations(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("migration failed: %w", err)
 	}
+
+	// Migrate: drop legacy tracks.artist_id column and index (moved to track_artists)
+	db.Exec(`DROP INDEX IF EXISTS idx_tracks_artist`)
+	db.Exec(`ALTER TABLE tracks DROP COLUMN IF EXISTS artist_id`)
 
 	log.Println("[migrate] database migration completed")
 	return nil

@@ -166,12 +166,14 @@ type MBRecording struct {
 	Tags []MBTag `json:"tags,omitempty"`
 }
 
-func (c *MBClient) SearchRecordings(title, artist, album string) ([]MBRecording, error) {
+func (c *MBClient) SearchRecordings(title string, artists []string, album string) ([]MBRecording, error) {
 	var result MBRecordingSearch
 	q := url.Values{}
 	query := "recording:" + title
-	if artist != "" && artist != "Unknown Artist" {
-		query += " AND artist:" + artist
+	for _, a := range artists {
+		if a != "" && a != "Unknown Artist" {
+			query += " AND artist:" + a
+		}
 	}
 	if album != "" && album != "Unknown Album" {
 		query += " AND release:" + album
@@ -202,6 +204,18 @@ func (c *MBClient) SearchArtist(name string) (*MBArtistBrief, error) {
 	}
 
 	return &result.Artists[0], nil
+}
+
+func (c *MBClient) SearchArtists(name string) ([]MBArtistBrief, error) {
+	var result MBArtistSearch
+	q := url.Values{}
+	q.Set("query", fmt.Sprintf("artist:%s", name))
+	q.Set("limit", "10")
+
+	if err := c.get("/artist", q, &result); err != nil {
+		return nil, err
+	}
+	return result.Artists, nil
 }
 
 type MBArtistFull struct {

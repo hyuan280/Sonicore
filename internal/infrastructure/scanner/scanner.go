@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -175,28 +176,66 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 					existing.MBID = enrichment.TrackMBID
 					changed = true
 				}
-				if enrichment.ArtistMBID != "" && existing.ArtistID != "" {
-					if artist, err := e.artistRepo.FindByID(ctx, existing.ArtistID); err == nil {
-						updated := false
-						if enrichment.ArtistMBID != "" && (artist.MBID == "" || overwrite) {
-							artist.MBID = enrichment.ArtistMBID
-							updated = true
-						}
-						if enrichment.Artist != "" && (artist.Name == "" || artist.Name == "Unknown Artist" || overwrite) {
-							artist.Name = enrichment.Artist
-							artist.SortName = enrichment.Artist
-							updated = true
-						}
-						if enrichment.ArtistCountry != "" && (artist.Country == "" || overwrite) {
-							artist.Country = enrichment.ArtistCountry
-							updated = true
-						}
-						if updated {
-							changed = true
-							e.artistRepo.Update(ctx, artist)
-						}
+				if enrichment != nil && len(enrichment.Artists) > 0 {
+				trackArtists, _ := e.trackRepo.LoadTrackArtists(ctx, existing.ID)
+				allUnknown := true
+				for _, ta := range trackArtists {
+					artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
+					if err != nil {
+						continue
+					}
+					if artist.Name != "Unknown Artist" {
+						allUnknown = false
+					}
+					match := e.matchArtistEnrichment(artist.Name, enrichment)
+					updated := false
+					if match != nil && match.ArtistMBID != "" && (artist.MBID == "" || overwrite) {
+						artist.MBID = match.ArtistMBID
+						updated = true
+					}
+					if match != nil && match.ArtistCountry != "" && (artist.Country == "" || overwrite) {
+						artist.Country = match.ArtistCountry
+						updated = true
+					}
+					if match != nil && match.Artist != "" && (artist.Name == "" || artist.Name == "Unknown Artist" || overwrite) {
+						artist.Name = match.Artist
+						artist.SortName = match.Artist
+						updated = true
+					}
+					if updated {
+						changed = true
+						e.artistRepo.Update(ctx, artist)
 					}
 				}
+				// Replace Unknown Artist entries with enrichment artists
+				if allUnknown {
+					var newArtists []*domain.TrackArtist
+					for i, ar := range enrichment.Artists {
+						if ar.Name == "" {
+							continue
+						}
+						enrich := &metadata.EnrichmentResult{
+							ArtistMBID:    ar.MBID,
+							ArtistCountry: ar.Country,
+							Artist:        ar.Name,
+						}
+						artist, err := e.findOrCreateArtist(ctx, lib.ID, ar.Name, enrich)
+						if err != nil {
+							continue
+						}
+						newArtists = append(newArtists, &domain.TrackArtist{
+							ArtistID:  artist.ID,
+							Role:      "performer",
+							SortOrder: i,
+							Artist:    artist,
+						})
+					}
+					if len(newArtists) > 0 {
+						e.trackRepo.ReplaceTrackArtists(ctx, existing.ID, newArtists)
+						changed = true
+					}
+				}
+			}
 				if enrichment.AlbumMBID != "" && existing.AlbumID != "" {
 					if album, err := e.albumRepo.FindByID(ctx, existing.AlbumID); err == nil {
 						updated := false
@@ -268,15 +307,83 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		year := meta.Year
 		genre := meta.Genre
 
-		artist, err := e.findOrCreateArtist(ctx, lib.ID, artistName, enrichment)
-		if err != nil {
-			stats.Errors = append(stats.Errors, fmt.Sprintf("artist error: %v", err))
+		// Collect performer names from ffprobe multi-artist or fallback
+		performerNames := meta.Artists
+		// If no performers from ffprobe, use enrichment artists
+		if len(performerNames) == 0 && enrichment != nil && len(enrichment.Artists) > 0 {
+			for _, ar := range enrichment.Artists {
+				if ar.Name != "" {
+					performerNames = append(performerNames, ar.Name)
+				}
+			}
+		}
+		// Fallback to single artist name
+		if len(performerNames) == 0 && artistName != "" {
+			performerNames = []string{artistName}
+		}
+		// Last resort
+		if len(performerNames) == 0 {
+			performerNames = []string{"Unknown Artist"}
+		}
+
+		var trackArtists []*domain.TrackArtist
+		var primaryPerformerID string
+		sortOrder := 0
+		for _, pn := range performerNames {
+			enrich := e.matchArtistEnrichment(pn, enrichment)
+			a, err := e.findOrCreateArtist(ctx, lib.ID, pn, enrich)
+			if err != nil {
+				log.Printf("[scan] failed to create artist %q: %v", pn, err)
+				continue
+			}
+			if primaryPerformerID == "" {
+				primaryPerformerID = a.ID
+			}
+			trackArtists = append(trackArtists, &domain.TrackArtist{
+				ArtistID:  a.ID,
+				Role:      "performer",
+				SortOrder: sortOrder,
+				Artist:    a,
+			})
+			sortOrder++
+		}
+
+		// Helper for optional roles: silently skip on error
+		addArtist := func(name string, role string) {
+			if name == "" || name == "Unknown Artist" {
+				return
+			}
+			enrich := e.matchArtistEnrichment(name, enrichment)
+			a, err := e.findOrCreateArtist(ctx, lib.ID, name, enrich)
+			if err != nil {
+				return
+			}
+			trackArtists = append(trackArtists, &domain.TrackArtist{
+				ArtistID:  a.ID,
+				Role:      role,
+				SortOrder: sortOrder,
+				Artist:    a,
+			})
+			sortOrder++
+		}
+
+		// Album artist
+		if meta.AlbumArtist != "" && meta.AlbumArtist != meta.Artist {
+			addArtist(meta.AlbumArtist, "album_artist")
+		}
+		// Composer / Lyricist / Arranger
+		addArtist(meta.Composer, "composer")
+		addArtist(meta.Lyricist, "lyricist")
+		addArtist(meta.Arranger, "arranger")
+
+		if primaryPerformerID == "" {
+			stats.Errors = append(stats.Errors, fmt.Sprintf("no valid performer for %s", path))
 			stats.Scanned++
 			onProgress(*stats)
 			return nil
 		}
 
-		album, err := e.findOrCreateAlbum(ctx, lib.ID, albumName, artist.ID, year, genre, enrichment)
+		album, err := e.findOrCreateAlbum(ctx, lib.ID, albumName, primaryPerformerID, year, genre, enrichment)
 		if err != nil {
 			stats.Errors = append(stats.Errors, fmt.Sprintf("album error: %v", err))
 			stats.Scanned++
@@ -295,7 +402,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			LibraryID:   lib.ID,
 			Title:       title,
 			AlbumID:     album.ID,
-			ArtistID:    artist.ID,
+			Artists:     trackArtists,
 			TrackNumber: meta.TrackNumber,
 			DiscNumber:  meta.DiscNumber,
 			Duration:    meta.Duration,
@@ -401,8 +508,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
 	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
-	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
-	e.db.ExecContext(ctx, `DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
+	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
+	e.db.ExecContext(ctx, `DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks
 	lib.LastScannedAt = timePtr(time.Now())
@@ -488,8 +595,13 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 	if track.MBID == "" {
 		return false
 	}
-	if track.ArtistID != "" {
-		artist, err := e.artistRepo.FindByID(ctx, track.ArtistID)
+	// Check artists via track_artists
+	trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
+	if err != nil || len(trackArtists) == 0 {
+		return false
+	}
+	for _, ta := range trackArtists {
+		artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
 		if err != nil || artist.Name == "" || artist.Name == "Unknown Artist" ||
 			artist.MBID == "" || artist.Country == "" {
 			return false
@@ -504,6 +616,23 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 		}
 	}
 	return true
+}
+
+func (e *Engine) matchArtistEnrichment(name string, enrichment *metadata.EnrichmentResult) *metadata.EnrichmentResult {
+	if enrichment == nil || len(enrichment.Artists) == 0 {
+		return nil
+	}
+	n := strings.ToLower(strings.TrimSpace(name))
+	for _, ar := range enrichment.Artists {
+		if strings.ToLower(strings.TrimSpace(ar.Name)) == n {
+			return &metadata.EnrichmentResult{
+				ArtistMBID:    ar.MBID,
+				ArtistCountry: ar.Country,
+				Artist:        ar.Name,
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {

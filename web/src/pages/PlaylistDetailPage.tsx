@@ -5,7 +5,7 @@ import { usePlayer, type PlayerTrack } from "../stores/player"
 import { Button } from "../components/ui/button"
 import { Play, Clock, Trash2, CheckSquare, Plus, ListPlus, Heart, ListMusic, Music } from "lucide-react"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
-import { formatDuration, coverUrl } from "../lib/utils"
+import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 
 export default function PlaylistDetailPage() {
   const { id } = useParams()
@@ -42,9 +42,9 @@ export default function PlaylistDetailPage() {
 
   const playTrack = (track: any, idx: number) => {
     const tracks = (playlist?.tracks || []).map((t: any): PlayerTrack => ({
-      id: t.id, title: t.title, artist: t.artist || "", album: t.album || "",
-      album_id: t.album_id, duration: t.duration, suffix: t.suffix || "mp3",
-      cover_image_id: t.cover_image_id,
+      id: t.id, title: t.title, album: t.album || "",
+      album_id: t.album_id, duration: t.duration, suffix: t.file_format || t.suffix || "mp3",
+      cover_image_id: t.cover_image_id, artists: t.artists,
     }))
     player.setQueue(tracks, idx, id)
   }
@@ -205,7 +205,7 @@ export default function PlaylistDetailPage() {
                 <FavBtn trackId={t.id} initiallyFav={favs.has(t.id)} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{t.artist || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(t.artists) || ""}</span>
               <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
               <button onClick={e => { e.stopPropagation(); removeTrack(t.id) }}

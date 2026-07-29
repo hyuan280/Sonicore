@@ -3,7 +3,7 @@ import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music } from "lucide-react"
-import { formatDuration, coverUrl } from "../lib/utils"
+import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 
 export default function PlayerBar() {
   const ps = usePlayer()
@@ -191,7 +191,9 @@ export default function PlayerBar() {
                 </div>
                 <div className="truncate min-w-0">
                   <p className="text-sm font-medium truncate">{track.title}</p>
-                  <p className="text-xs text-zinc-400 truncate">{track.artist || ""}</p>
+                  <p className="text-xs text-zinc-400 truncate">
+                    {performerNames(track.artists)}{track.album ? ` — ${track.album}` : ""}
+                  </p>
                 </div>
               </>
             ) : (
@@ -261,21 +263,27 @@ export default function PlayerBar() {
               </button>
             </div>
             <div className="overflow-y-auto max-h-64 p-1">
-              {ps.queue.map((t, i) => (
-                <div key={t.id + i}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer hover:bg-zinc-800 group ${i === ps.queueIdx ? "text-green-500 bg-zinc-800" : "text-zinc-300"}`}
-                  onClick={() => ps.playIndex(i)}>
-                  <span className="text-xs text-zinc-500 w-5 text-right shrink-0">{i + 1}</span>
-                  <span className="truncate flex-1">{t.title}</span>
-                  <span className="flex items-center gap-1 shrink-0">
-                    <span className="text-xs text-zinc-500 group-hover:hidden">{formatDuration(t.duration)}</span>
-                    <button onClick={e => { e.stopPropagation(); ps.removeFromQueue(i) }}
-                      className="hidden group-hover:flex items-center p-0.5 rounded text-zinc-500 hover:text-red-400 cursor-pointer">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                </div>
-              ))}
+              {ps.queue.map((t, i) => {
+                const displayArtist = performerNames(t.artists)
+                return (
+                  <div key={t.id + i}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer hover:bg-zinc-800 group ${i === ps.queueIdx ? "text-green-500 bg-zinc-800" : "text-zinc-300"}`}
+                    onClick={() => ps.playIndex(i)}>
+                    <span className="text-xs text-zinc-500 w-5 text-right shrink-0">{i + 1}</span>
+                    <span className="truncate flex-1">{t.title}</span>
+                    {displayArtist && (
+                      <span className="text-xs text-zinc-500 shrink-0 group-hover:hidden">{displayArtist}</span>
+                    )}
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-zinc-500 group-hover:hidden">{formatDuration(t.duration)}</span>
+                      <button onClick={e => { e.stopPropagation(); ps.removeFromQueue(i) }}
+                        className="hidden group-hover:flex items-center p-0.5 rounded text-zinc-500 hover:text-red-400 cursor-pointer">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  </div>
+                )
+              })}
               {ps.queue.length === 0 && <p className="text-xs text-zinc-600 text-center py-4">Empty</p>}
             </div>
           </div>

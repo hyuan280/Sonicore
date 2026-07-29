@@ -4,7 +4,7 @@ import { api } from "../api/client"
 import { Button } from "../components/ui/button"
 import { Play, Trash2, Clock, Calendar, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
-import { formatDuration, coverUrl } from "../lib/utils"
+import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 
 export default function HistoryPage() {
   const player = usePlayer()
@@ -28,8 +28,7 @@ export default function HistoryPage() {
 
   const playAll = () => {
     const tracks: PlayerTrack[] = items.map(h => ({
-      id: h.track_id, title: h.title || "Unknown",
-      artist: h.artist || "", album: h.album || "",
+      id: h.track_id, title: h.title || "Unknown", album: h.album || "",
       album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
       cover_image_id: h.cover_image_id,
     }))
@@ -37,10 +36,9 @@ export default function HistoryPage() {
   }
 
   const toTrack = (h: any): PlayerTrack => ({
-    id: h.track_id, title: h.title || "Unknown",
-    artist: h.artist || "", album: h.album || "",
+    id: h.track_id, title: h.title || "Unknown", album: h.album || "",
     album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
-    cover_image_id: h.cover_image_id,
+    cover_image_id: h.cover_image_id, artists: h.artists,
   })
 
   const playTrack = (h: any) => {
@@ -193,13 +191,13 @@ export default function HistoryPage() {
             </div>
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={{ id: h.track_id, title: h.title || "", artist: h.artist || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id }} />
+                <AddQueueBtn track={{ id: h.track_id, title: h.title || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id }} />
                 <AddBtn trackId={h.track_id} />
                 <FavBtn trackId={h.track_id} initiallyFav={favoriteIds.has(h.track_id)}
                   onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{h.artist || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(h.artists) || ""}</span>
               <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.album || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{h.duration ? formatDuration(h.duration) : ""}</span>
               <span className="min-w-[80px] max-w-[140px] shrink-0 text-center hidden sm:block leading-tight">

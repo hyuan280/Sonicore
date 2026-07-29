@@ -51,6 +51,7 @@ type TrackRepository interface {
 	FindByHash(ctx context.Context, hash string) (*domain.Track, error)
 	Update(ctx context.Context, track *domain.Track) error
 	DeleteByFilePath(ctx context.Context, path, libraryID string) (string, error)
+	LoadTrackArtists(ctx context.Context, trackID string) ([]*domain.TrackArtist, error)
 }
 
 type ImageRepository interface {

@@ -7,19 +7,26 @@ import (
 	"strings"
 )
 
+type ArtistResult struct {
+	Name    string
+	MBID    string
+	Country string
+}
+
 type EnrichmentResult struct {
-	ArtistMBID   string
-	AlbumMBID    string
-	TrackMBID    string
+	ArtistMBID    string
+	AlbumMBID     string
+	TrackMBID     string
 	ArtistCountry string
 	AlbumCountry  string
-	Genre        string
-	Year         int
-	Biography    string
-	CoverArtURL  string
-	Title        string  // MB-corrected title (if ffprobe was wrong)
-	Artist       string  // MB-corrected artist
-	Album        string  // MB-corrected album
+	Artists       []ArtistResult // all matched artists from MB recording
+	Genre         string
+	Year          int
+	Biography     string
+	CoverArtURL   string
+	Title         string  // MB-corrected title (if ffprobe was wrong)
+	Artist        string  // MB-corrected artist (first performer)
+	Album         string  // MB-corrected album
 }
 
 type Resolver struct {
@@ -39,6 +46,10 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	if artist == "" {
 		artist = meta.AlbumArtist
 	}
+	artists := meta.Artists
+	if len(artists) == 0 && artist != "" && artist != "Unknown Artist" {
+		artists = []string{artist}
+	}
 	album := meta.Album
 
 	if title == "" {
@@ -50,7 +61,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		return nil, nil
 	}
 
-	recordings := r.searchRecordings(title, artist, album)
+	recordings := r.searchRecordings(title, artists, album)
 	if len(recordings) == 0 {
 		return nil, nil
 	}
@@ -62,6 +73,10 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		recording = r.scoreMatch(title, recordings)
 	} else {
 		recording = r.exactMatch(title, artist, album, recordings)
+	}
+	// Fallback: pick best by artist count match
+	if recording == nil && len(artists) > 0 {
+		recording = r.bestArtistMatch(artists, recordings)
 	}
 
 	if recording == nil {
@@ -80,6 +95,17 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	}
 
 	if len(recording.Artists) > 0 {
+		// Collect all artists from the recording
+		for _, ref := range recording.Artists {
+			ar := ArtistResult{Name: ref.Name}
+			if ref.Artist != nil {
+				ar.MBID = ref.Artist.ID
+				ar.Country = ref.Artist.Country
+			}
+			if ref.Name != "" {
+				result.Artists = append(result.Artists, ar)
+			}
+		}
 		if recording.Artists[0].Artist != nil {
 			result.ArtistMBID = recording.Artists[0].Artist.ID
 			result.ArtistCountry = recording.Artists[0].Artist.Country
@@ -172,7 +198,7 @@ func splitByDash(title string) []string {
 func (r *Resolver) scoreMatch(title string, recordings []MBRecording) *MBRecording {
 	parts := splitByDash(title)
 	if len(parts) == 0 {
-		return &recordings[0]
+		return nil
 	}
 
 	for i := range recordings {
@@ -200,15 +226,15 @@ func matchPartsScore(parts []string, rec *MBRecording) int {
 		if n == "" {
 			continue
 		}
-		if mbTitle != "" && (strings.Contains(mbTitle, n) || strings.Contains(n, mbTitle)) {
+		if mbTitle != "" && n == mbTitle {
 			hits++
 			continue
 		}
-		if mbArtist != "" && (strings.Contains(mbArtist, n) || strings.Contains(n, mbArtist)) {
+		if mbArtist != "" && n == mbArtist {
 			hits++
 			continue
 		}
-		if mbAlbum != "" && (strings.Contains(mbAlbum, n) || strings.Contains(n, mbAlbum)) {
+		if mbAlbum != "" && n == mbAlbum {
 			hits++
 			continue
 		}
@@ -228,7 +254,7 @@ func (r *Resolver) exactMatch(title, artist, album string, recordings []MBRecord
 func fieldsMatch(title, artist, album string, rec *MBRecording) bool {
 	nTitle := normalizeForMatch(title)
 	mbTitle := normalizeForMatch(rec.Title)
-	if !strings.Contains(mbTitle, nTitle) && !strings.Contains(nTitle, mbTitle) {
+	if nTitle != mbTitle {
 		return false
 	}
 
@@ -238,7 +264,7 @@ func fieldsMatch(title, artist, album string, rec *MBRecording) bool {
 		if len(rec.Artists) > 0 {
 			mbArtist = normalizeForMatch(rec.Artists[0].Name)
 		}
-		if mbArtist == "" || (!strings.Contains(mbArtist, nArtist) && !strings.Contains(nArtist, mbArtist)) {
+		if mbArtist == "" || nArtist != mbArtist {
 			return false
 		}
 	}
@@ -248,7 +274,7 @@ func fieldsMatch(title, artist, album string, rec *MBRecording) bool {
 		found := false
 		for _, rel := range rec.Releases {
 			mbAlbum := normalizeForMatch(rel.Title)
-			if strings.Contains(mbAlbum, nAlbum) || strings.Contains(nAlbum, mbAlbum) {
+			if nAlbum == mbAlbum {
 				found = true
 				break
 			}
@@ -261,8 +287,44 @@ func fieldsMatch(title, artist, album string, rec *MBRecording) bool {
 	return true
 }
 
-func (r *Resolver) searchRecordings(title, artist, album string) []MBRecording {
-	recs, err := r.mb.SearchRecordings(title, artist, album)
+// bestArtistMatch scores recordings by how many of the query artists appear in the recording.
+func (r *Resolver) bestArtistMatch(artists []string, recordings []MBRecording) *MBRecording {
+	if len(artists) == 0 {
+		return nil
+	}
+	artistSet := make(map[string]bool)
+	for _, a := range artists {
+		artistSet[normalizeForMatch(a)] = true
+	}
+
+	var best *MBRecording
+	bestScore := 0
+	for i := range recordings {
+		score := 0
+		for _, ra := range recordings[i].Artists {
+			n := normalizeForMatch(ra.Name)
+			if artistSet[n] {
+				score++
+			} else {
+				// Check substring match
+				for qa := range artistSet {
+					if strings.Contains(n, qa) || strings.Contains(qa, n) {
+						score++
+						break
+					}
+				}
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+			best = &recordings[i]
+		}
+	}
+	return best
+}
+
+func (r *Resolver) searchRecordings(title string, artists []string, album string) []MBRecording {
+	recs, err := r.mb.SearchRecordings(title, artists, album)
 	if err != nil {
 		return nil
 	}

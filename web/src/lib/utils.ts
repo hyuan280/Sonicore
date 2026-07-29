@@ -22,3 +22,12 @@ export function coverUrl(type: "track" | "album" | "artist", id: string, size?: 
   if (size) url += `?size=${size}`
   return url
 }
+
+interface TrackArtist {
+  artist_id: string; name?: string; role: string; artist?: { name?: string }
+}
+
+export function performerNames(artists?: TrackArtist[]): string {
+  if (!artists || artists.length === 0) return ""
+  return artists.filter(a => a.role === "performer").map(a => a.name || a.artist?.name || "").filter(n => n).join("/")
+}

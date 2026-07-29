@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/sonicore/server/internal/core/domain"
 )
@@ -18,14 +19,18 @@ func NewArtistRepo(db *sql.DB) *ArtistRepo {
 func scanArtist(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Artist, error) {
 	var a domain.Artist
 	var coverID sql.NullString
+	var roles string
 	err := scanner.Scan(&a.ID, &a.Name, &a.SortName,
 		&a.MBID, &a.Country, &a.Biography, &coverID, &a.TrackCount,
-		&a.CreatedAt, &a.UpdatedAt)
+		&a.CreatedAt, &a.UpdatedAt, &roles)
 	if err != nil {
 		return nil, err
 	}
 	if coverID.Valid {
 		a.CoverImageID = &coverID.String
+	}
+	if roles != "" {
+		a.Roles = strings.Split(roles, ",")
 	}
 	return &a, nil
 }
@@ -59,16 +64,19 @@ func (r *ArtistRepo) BatchCreate(ctx context.Context, artists []domain.Artist) e
 
 func (r *ArtistRepo) FindByID(ctx context.Context, id string) (*domain.Artist, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at
+		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at,
+		 COALESCE((SELECT string_agg(DISTINCT ta.role, ',' ORDER BY ta.role) FROM track_artists ta WHERE ta.artist_id = $1), '') AS roles
 		 FROM artists WHERE id = $1`, id)
 	return scanArtist(row)
 }
 
 func (r *ArtistRepo) FindByLibraryID(ctx context.Context, libraryID string) ([]domain.Artist, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT DISTINCT a.id, a.name, a.sort_name, a.mbid, a.country, a.biography, a.cover_image_id, 0 AS track_count, a.created_at, a.updated_at
+		`SELECT DISTINCT a.id, a.name, a.sort_name, a.mbid, a.country, a.biography, a.cover_image_id, 0 AS track_count, a.created_at, a.updated_at,
+		 '' AS roles
 		 FROM artists a
-		 INNER JOIN tracks t ON t.artist_id = a.id
+		 INNER JOIN track_artists ta ON ta.artist_id = a.id
+		 INNER JOIN tracks t ON t.id = ta.track_id
 		 WHERE t.library_id = $1
 		 ORDER BY a.name ASC`, libraryID)
 	if err != nil {
@@ -92,10 +100,17 @@ func (r *ArtistRepo) FindAccessible(ctx context.Context, userID string) ([]domai
 		`SELECT DISTINCT a.id, a.name, a.sort_name, a.mbid, a.country, a.biography, a.cover_image_id,
 		 (SELECT COUNT(*) FROM tracks
 		  INNER JOIN library_members lm2 ON lm2.library_id = tracks.library_id
-		  WHERE tracks.artist_id = a.id AND lm2.user_id = $1) AS track_count,
-		 a.created_at, a.updated_at
+		  INNER JOIN track_artists ta2 ON ta2.track_id = tracks.id
+		  WHERE ta2.artist_id = a.id AND lm2.user_id = $1) AS track_count,
+		 a.created_at, a.updated_at,
+		 (SELECT string_agg(DISTINCT ta3.role, ',' ORDER BY ta3.role)
+		  FROM track_artists ta3
+		  INNER JOIN tracks t3 ON t3.id = ta3.track_id
+		  INNER JOIN library_members lm3 ON lm3.library_id = t3.library_id
+		  WHERE ta3.artist_id = a.id AND lm3.user_id = $1) AS roles
 		 FROM artists a
-		 INNER JOIN tracks t ON t.artist_id = a.id
+		 INNER JOIN track_artists ta ON ta.artist_id = a.id
+		 INNER JOIN tracks t ON t.id = ta.track_id
 		 INNER JOIN library_members lm ON lm.library_id = t.library_id
 		 WHERE lm.user_id = $1
 		 ORDER BY a.name ASC`, userID)
@@ -117,21 +132,21 @@ func (r *ArtistRepo) FindAccessible(ctx context.Context, userID string) ([]domai
 
 func (r *ArtistRepo) FindByMBID(ctx context.Context, mbid string) (*domain.Artist, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at
+		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at, '' AS roles
 		 FROM artists WHERE mbid = $1`, mbid)
 	return scanArtist(row)
 }
 
 func (r *ArtistRepo) FindByNameAndLibrary(ctx context.Context, name, libraryID string) (*domain.Artist, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at
+		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at, '' AS roles
 		 FROM artists WHERE name = $1`, name)
 	return scanArtist(row)
 }
 
 func (r *ArtistRepo) FindByName(ctx context.Context, name string) (*domain.Artist, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at
+		`SELECT id, name, sort_name, mbid, country, biography, cover_image_id, 0 AS track_count, created_at, updated_at, '' AS roles
 		 FROM artists WHERE name = $1`, name)
 	return scanArtist(row)
 }

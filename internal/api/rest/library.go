@@ -207,9 +207,9 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.db.ExecContext(r.Context(),
 		`DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
 	h.db.ExecContext(r.Context(),
-		`DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
+		`DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 	h.db.ExecContext(r.Context(),
-		`DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)`)
+		`DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 
 	if libDir := filepath.Join(h.imagesDir, libID); libDir != "" {
 		os.RemoveAll(libDir)

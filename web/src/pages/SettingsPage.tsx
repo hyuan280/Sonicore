@@ -7,7 +7,8 @@ import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
 import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileEdit } from "lucide-react"
-import { formatDuration } from "../lib/utils"
+import { formatDuration, performerNames } from "../lib/utils"
+import ArtistSelector, { type SelectedArtist } from "../components/ArtistSelector"
 import DirectoryPicker from "../components/DirectoryPicker"
 
 const roleLabel = (r: string) =>
@@ -108,9 +109,9 @@ export default function SettingsPage() {
         if (data?.tracks) {
           usePlayer.setState({
             queue: data.tracks.map((t: any) => ({
-              id: t.id, title: t.title, artist: t.artist, album: t.album,
+              id: t.id, title: t.title, album: t.album,
               album_id: t.album_id, duration: t.duration, suffix: t.suffix,
-              cover_image_id: t.cover_image_id,
+              cover_image_id: t.cover_image_id, artists: t.artists,
             })),
             queueIdx: data.queue_idx ?? 0,
             shuffleOrder: data.shuffle_order ?? [],
@@ -289,7 +290,7 @@ export default function SettingsPage() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
                   <span className="flex-1 min-w-0">Title</span>
-                  <span className="w-32 shrink-0 text-center hidden sm:block">Artist</span>
+                  <span className="w-32 shrink-0 text-center hidden sm:block">Artists</span>
                   <span className="w-32 shrink-0 text-center hidden sm:block">Album</span>
                   <span className="w-16 shrink-0 text-center">Format</span>
                   <span className="w-16 shrink-0 text-center">Duration</span>
@@ -298,18 +299,18 @@ export default function SettingsPage() {
                 {manageTracks.map((t: any) => (
                   <div key={t.id} className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 text-sm group">
                     <span className="flex-1 min-w-0 truncate">{t.title}</span>
-                    <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block">{t.artist || ""}</span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block">{performerNames(t.artists)}</span>
                     <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.album || ""}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(t.duration)}</span>
-                    <span className="w-36 shrink-0 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="w-36 shrink-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={async () => {
                         setSearching(t.id); setSearchModal({ track: t, edit: {} })
                         try {
-                          const res = await fetch("/api/metadata/search", {
+                          const res = await fetch("/api/metadata/search/track", {
                             method: "POST",
                             headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
-                            body: JSON.stringify({ track_id: t.id, title: t.title, artist: t.artist || "", album: t.album || "" }),
+                            body: JSON.stringify({ track_id: t.id, title: t.title, artist: performerNames(t.artists), album: t.album || "" }),
                           })
                           setSearchModal({ track: t, result: await res.json(), edit: {} })
                         } catch { setSearchModal({ track: t, error: "Search failed" }) }
@@ -336,13 +337,28 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-      {searchModal &&       <SearchResultModal data={searchModal} onClose={() => setSearchModal(null)} onUpdate={(edit) => setSearchModal((prev: any) => ({ ...prev, edit }))} />}
+      {searchModal &&       <SearchResultModal data={searchModal} onClose={() => setSearchModal(null)} onUpdate={(edit) => setSearchModal((prev: any) => ({ ...prev, edit }))}
+        onSaved={() => {
+          if (manageLib) api.data.tracks(manageLib.id, 1, 9999).then(d => setManageTracks(d.items || [])).catch(() => {})
+        }} />}
     </div>
   )
 }
 
-function SearchResultModal({ data, onClose, onUpdate }: { data: any; onClose: () => void; onUpdate: (e: any) => void }) {
+function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
+  data: any; onClose: () => void; onUpdate: (e: any) => void
+  onSaved?: () => void
+}) {
   const [saving, setSaving] = useState(false)
+  const [selectedArtists, setSelectedArtists] = useState<SelectedArtist[]>([])
+  useEffect(() => {
+    const result = data?.result
+    if (!result?.artists?.length) return
+    setSelectedArtists(result.artists.map((a: any) => ({
+      name: a.name || a.artist?.name,
+      mbid: a.mbid || "",
+    })))
+  }, [data?.result?.artists])
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={onClose}>
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
@@ -360,15 +376,29 @@ function SearchResultModal({ data, onClose, onUpdate }: { data: any; onClose: ()
           </div>
         ) : data.error ? (
           <p className="text-sm text-red-400">{data.error}</p>
-        ) : data.result.matched ? (
+        ) : data.result.matched && data.result.track_mbid ? (
           <div className="space-y-2 text-sm">
-            {(["title","artist","album","year","genre"] as const).map(f => (
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">Title</span>
+              <span className="text-sm text-zinc-200 flex-1 min-w-0">{data.result.title || ""}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">Artists</span>
+              <span className="text-sm text-zinc-200 flex-1 min-w-0">
+                {performerNames(data.result.artists)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">Album</span>
+              <span className="text-sm text-zinc-200 flex-1 min-w-0">{data.result.album || ""}</span>
+            </div>
+            {(["year","genre"] as const).map(f => (
               <div key={f} className="flex items-center gap-2">
                 <span className="text-zinc-400 w-14 shrink-0 text-right">{f.charAt(0).toUpperCase()+f.slice(1)}</span>
                 <input
                   value={data.edit[f] ?? (data.result[f] || "")}
                   onChange={e => onUpdate({ ...data.edit, [f]: e.target.value })}
-                  className="bg-zinc-800 rounded px-2 py-0.5 text-sm text-right flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </div>
             ))}
@@ -384,32 +414,65 @@ function SearchResultModal({ data, onClose, onUpdate }: { data: any; onClose: ()
             )}
           </div>
         ) : (
-          <p className="text-sm text-zinc-400">No match found on MusicBrainz</p>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">Title</span>
+              <input
+                value={data.edit.title ?? data.result?.title ?? (data.track?.title || "")}
+                onChange={e => onUpdate({ ...data.edit, title: e.target.value })}
+                className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right text-sm">Artists</span>
+              <ArtistSelector artists={selectedArtists} onChange={setSelectedArtists} showAdd />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">Album</span>
+              <input
+                value={data.edit.album ?? data.result?.album ?? (data.track?.album || "")}
+                onChange={e => onUpdate({ ...data.edit, album: e.target.value })}
+                className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+              />
+            </div>
+            {(["year","genre"] as const).map(f => (
+              <div key={f} className="flex items-center gap-2">
+                <span className="text-zinc-400 w-14 shrink-0 text-right">{f.charAt(0).toUpperCase()+f.slice(1)}</span>
+                <input
+                  value={data.edit[f] ?? data.result?.[f] ?? (data.track?.[f] || "")}
+                  onChange={e => onUpdate({ ...data.edit, [f]: e.target.value })}
+                  className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+              </div>
+            ))}
+          </div>
         )}
-        {data.result?.matched && (
+        {data.result != null && (
           <button onClick={async () => {
             setSaving(true)
             try {
-              await fetch("/api/metadata/save", {
-                method: "POST",
-                headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
-                body: JSON.stringify({
-                  track_id: data.track?.id || "",
-                  file_hash: data.result.file_hash || data.track?.file_hash || "",
-                  track_mbid: data.result.track_mbid || "",
-                  title: data.edit.title ?? data.result.title ?? "",
-                  artist: data.edit.artist ?? data.result.artist ?? "",
-                  album: data.edit.album ?? data.result.album ?? "",
-                  year: parseInt(data.edit.year) || data.result.year || 0,
-                  genre: data.edit.genre ?? data.result.genre ?? "",
-                }),
-              })
+              const artists = selectedArtists.map(a => ({ name: a.name, mbid: a.mbid || "" }))
+                await fetch("/api/metadata/save", {
+                  method: "POST",
+                  headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
+                  body: JSON.stringify({
+                    track_id: data.track?.id || "",
+                    file_hash: data.result.file_hash || data.track?.file_hash || "",
+                    track_mbid: data.result.track_mbid || "",
+                    title: data.edit.title ?? data.result?.title ?? data.track?.title ?? "",
+                    album: data.edit.album ?? data.result?.album ?? data.track?.album ?? "",
+                    year: parseInt(data.edit.year) || data.result?.year || 0,
+                    genre: data.edit.genre ?? data.result?.genre ?? "",
+                    artists,
+                  }),
+                })
+              onSaved?.()
               onClose()
             } catch {}
             setSaving(false)
           }} disabled={saving}
             className="mt-4 w-full py-2 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
-            {saving ? "Saving..." : "Save & Use for This Track"}
+            {saving ? "Saving..." : "Save"}
           </button>
         )}
       </div>

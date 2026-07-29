@@ -333,9 +333,12 @@ func (h *Handler) getAlbumList(ctx context.Context, user *domain.User, q url.Val
 func (h *Handler) enrichTrack(ctx context.Context, track *domain.Track) map[string]interface{} {
 	out := trackToSub(track)
 	if track.Artist == nil {
-		if a, err := h.artistRepo.FindByID(ctx, track.ArtistID); err == nil {
-			out["artist"] = a.Name
+		if tas, err := h.trackRepo.LoadTrackArtists(ctx, track.ID); err == nil && len(tas) > 0 {
+			out["artist"] = tas[0].Artist.Name
+			out["artistId"] = tas[0].ArtistID
 		}
+	} else {
+		out["artistId"] = track.Artist.ID
 	}
 	if track.Album == nil {
 		if a, err := h.albumRepo.FindByID(ctx, track.AlbumID); err == nil {
@@ -518,7 +521,6 @@ func trackToSub(t *domain.Track) map[string]interface{} {
 		"id":          t.ID,
 		"title":       t.Title,
 		"artist":      "",
-		"artistId":    t.ArtistID,
 		"album":       "",
 		"albumId":     t.AlbumID,
 		"track":       t.TrackNumber,

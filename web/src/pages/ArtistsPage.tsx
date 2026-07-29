@@ -6,6 +6,17 @@ import { Card, CardGrid } from "../components/ui/card"
 import { Mic2, LayoutGrid, List, Music } from "lucide-react"
 import { coverUrl } from "../lib/utils"
 
+const roleLabels: Record<string, string> = {
+  performer: "Singer", composer: "Composer", lyricist: "Lyricist",
+  arranger: "Arranger", album_artist: "Album Artist", producer: "Producer",
+  conductor: "Conductor", remixer: "Remixer",
+}
+
+function formatRoles(roles?: string[]): string {
+  if (!roles || roles.length === 0) return ""
+  return roles.map(r => roleLabels[r] || r).join(" · ")
+}
+
 export default function ArtistsPage() {
   const { activeId } = useLibrary()
   const [artists, setArtists] = useState<any[]>([])
@@ -55,6 +66,9 @@ export default function ArtistsPage() {
                 </div>
               <p className="font-medium text-sm text-center">{a.name}</p>
               <p className="text-xs text-zinc-500 text-center">{a.track_count} tracks</p>
+              {a.roles && a.roles.length > 0 && (
+                <p className="text-xs text-zinc-500 text-center">{formatRoles(a.roles)}</p>
+              )}
               </Card>
             </Link>
           ))}
@@ -74,7 +88,7 @@ export default function ArtistsPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{a.name}</p>
-                <p className="text-xs text-zinc-500 truncate">{a.track_count} tracks</p>
+                <p className="text-xs text-zinc-500 truncate">{a.track_count} tracks{a.roles && a.roles.length > 0 ? ` · ${formatRoles(a.roles)}` : ""}</p>
               </div>
             </Link>
           ))}
