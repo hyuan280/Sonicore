@@ -206,13 +206,11 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 							os.MkdirAll(thumbDir, 0755)
 							thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", existing.ID))
 							metadata.ResizeToThumbnail(data, thumbPath, 64)
-							if _, err := os.Stat(thumbPath); err == nil {
-								if existing.CoverImageID == nil {
-									existing.CoverImageID = &existing.ID
-									changed = true
-								}
-								stats.CoversExtracted++
+							if existing.CoverImageID == nil {
+								existing.CoverImageID = &existing.ID
+								changed = true
 							}
+							stats.CoversExtracted++
 						}
 					}
 				}
@@ -307,10 +305,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 					os.MkdirAll(thumbDir, 0755)
 					thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", trackID))
 					metadata.ResizeToThumbnail(data, thumbPath, 64)
-					if _, err := os.Stat(thumbPath); err == nil {
-						track.CoverImageID = &trackID
-						stats.CoversExtracted++
-					}
+					track.CoverImageID = &trackID
+					stats.CoversExtracted++
 					if album != nil && album.CoverImageID == nil {
 						e.coverExtractor.Save("album", "album", album.ID, data, "jpg", 256)
 						album.CoverImageID = &album.ID

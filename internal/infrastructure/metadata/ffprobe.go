@@ -111,6 +111,8 @@ func Probe(path string) (*AudioMeta, error) {
 		}
 	}
 
+	meta.HasCoverArt = hasCoverArt(result.Streams)
+
 	if result.Format.Tags != nil {
 		tags := make(map[string]string, len(result.Format.Tags))
 		for k, v := range result.Format.Tags {
@@ -139,8 +141,6 @@ func Probe(path string) (*AudioMeta, error) {
 		} else if year, ok := tags["year"]; ok {
 			parseInt(year, &meta.Year)
 		}
-
-		meta.HasCoverArt = hasCoverArt(result.Streams)
 	}
 
 	// Clear garbled fields (invalid UTF-8 or replacement characters)

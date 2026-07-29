@@ -337,7 +337,7 @@ type Artist struct {
   SortName     string
   MBID         string
   Biography    string
-  CoverImageID *string    // 引用 Image 表
+  CoverImageID *string    // 非空表示有封面，值为自身 ID（标记作用），封面文件路径由实体类型+ID 构造
   AlbumCount   int
   CreatedAt    time.Time
   UpdatedAt    time.Time
@@ -351,7 +351,7 @@ type Album struct {
   MBID         string
   Year         int
   Genre        string
-  CoverImageID *string    // 引用 Image 表
+  CoverImageID *string    // 非空表示有封面，值为自身 ID（标记作用），封面文件路径由实体类型+ID 构造
   SongCount    int
   Duration     float64
   CreatedAt    time.Time
