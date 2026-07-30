@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button"
 import { Play, Clock, Trash2, CheckSquare, Plus, ListPlus, Heart, ListMusic, Music } from "lucide-react"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
+import ArtistLink from "../components/ArtistLink"
 
 export default function PlaylistDetailPage() {
   const { id } = useParams()
@@ -205,7 +206,7 @@ export default function PlaylistDetailPage() {
                 <FavBtn trackId={t.id} initiallyFav={favs.has(t.id)} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(t.artists) || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={t.artists} /></span>
               <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
               <button onClick={e => { e.stopPropagation(); removeTrack(t.id) }}

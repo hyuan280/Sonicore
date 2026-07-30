@@ -7,7 +7,7 @@ import { Disc3, LayoutGrid, List, Music } from "lucide-react"
 import { coverUrl } from "../lib/utils"
 
 interface AlbumItem {
-  id: string; title: string; name: string; artist: string; year: number
+  id: string; title: string; name: string; artist: string; artistId?: string; year: number
   song_count: number; cover_image_id?: string; country?: string
 }
 
@@ -60,7 +60,11 @@ export default function AlbumsPage() {
                 </div>
                 <div className="p-3">
                 <p className="font-medium text-sm truncate">{a.title || a.name}</p>
-                <p className="text-xs text-zinc-400 truncate">{a.artist || ""}</p>
+                {a.artistId ? (
+                  <Link to={`/artists/${a.artistId}`} className="text-xs text-zinc-400 truncate hover:text-white transition-colors block" onClick={e => e.stopPropagation()}>{a.artist || ""}</Link>
+                ) : (
+                  <p className="text-xs text-zinc-400 truncate">{a.artist || ""}</p>
+                )}
                 <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
                   <span>{a.year || ""}</span>
                   {a.country && <span>· {a.country}</span>}
@@ -86,7 +90,11 @@ export default function AlbumsPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{a.title || a.name}</p>
-                <p className="text-xs text-zinc-500 truncate">{a.artist || ""}</p>
+                {a.artistId ? (
+                  <Link to={`/artists/${a.artistId}`} className="text-xs text-zinc-500 truncate hover:text-white transition-colors block" onClick={e => e.stopPropagation()}>{a.artist || ""}</Link>
+                ) : (
+                  <p className="text-xs text-zinc-500 truncate">{a.artist || ""}</p>
+                )}
               </div>
               <span className="text-xs text-zinc-500">{a.year || ""}</span>
             </Link>

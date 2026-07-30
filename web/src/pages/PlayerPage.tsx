@@ -2,6 +2,7 @@ import { usePlayer } from "../stores/player"
 import { Button } from "../components/ui/button"
 import { SkipForward, Music, Play } from "lucide-react"
 import { formatDuration, performerNames, coverUrl } from "../lib/utils"
+import ArtistLink from "../components/ArtistLink"
 
 export default function PlayerPage() {
   const ps = usePlayer()
@@ -22,7 +23,6 @@ export default function PlayerPage() {
           <span className="w-16 text-right">Duration</span>
         </div>
         {ps.queue.map((t, i) => {
-          const displayArtist = performerNames(t.artists)
           return (
             <div key={t.id + i}
               className={`flex items-center px-4 py-2 rounded-lg cursor-pointer group ${i === ps.queueIdx ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}
@@ -41,7 +41,7 @@ export default function PlayerPage() {
               <div className="flex-1 min-w-0">
                 <span className={`text-sm truncate block ${i === ps.queueIdx ? "text-green-500" : ""}`}>{t.title}</span>
                 <span className="text-xs text-zinc-500 truncate block">
-                  {displayArtist}{t.album ? ` — ${t.album}` : ""}
+                  <ArtistLink artists={t.artists} />{t.album ? ` — ${t.album}` : ""}
                 </span>
               </div>
               <span className="w-16 text-right text-sm text-zinc-400">{formatDuration(t.duration)}</span>

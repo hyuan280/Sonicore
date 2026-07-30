@@ -6,6 +6,8 @@ import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { Button } from "../components/ui/button"
 import { Play, Clock, Disc3, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
+import { Link } from "react-router-dom"
+import ArtistLink from "../components/ArtistLink"
 
 export default function AlbumDetailPage() {
   const { albumId } = useParams()
@@ -56,7 +58,11 @@ export default function AlbumDetailPage() {
         <div className="flex flex-col justify-end">
           <p className="text-xs uppercase tracking-wider text-zinc-400">Album</p>
           <h1 className="text-3xl font-bold mt-1">{album.title}</h1>
-          {album.artist && <p className="text-sm text-zinc-300 mt-1">{album.artist}</p>}
+          {album.artist && (
+            <Link to={`/artists/${album.artist_id}`} className="text-sm text-zinc-300 mt-1 block hover:text-white transition-colors">
+              {album.artist}
+            </Link>
+          )}
           <p className="text-sm text-zinc-500 mt-1">{album.year || ""}{album.country ? ` · ${album.country}` : ""} · {tracks.length} tracks</p>
           <Button className="mt-4 w-fit" onClick={playAll}><Play className="w-4 h-4 mr-2" />Play All</Button>
         </div>
@@ -176,7 +182,7 @@ export default function AlbumDetailPage() {
                   onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(t.artists) || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={t.artists} /></span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
             </div>
           </div>

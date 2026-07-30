@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button"
 import { Play, Trash2, Clock, Calendar, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
+import ArtistLink from "../components/ArtistLink"
 
 export default function HistoryPage() {
   const player = usePlayer()
@@ -197,7 +198,7 @@ export default function HistoryPage() {
                   onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
               </span>
               <span className="flex-1 min-w-0" />
-              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(h.artists) || ""}</span>
+              <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={h.artists} /></span>
               <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.album || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{h.duration ? formatDuration(h.duration) : ""}</span>
               <span className="min-w-[80px] max-w-[140px] shrink-0 text-center hidden sm:block leading-tight">

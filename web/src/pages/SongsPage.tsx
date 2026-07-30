@@ -5,6 +5,7 @@ import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { Clock, Play, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
+import ArtistLink from "../components/ArtistLink"
 
 export default function SongsPage() {
   const { activeId, libraries } = useLibrary()
@@ -168,7 +169,7 @@ export default function SongsPage() {
                     onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
                 </span>
                 <span className="flex-1 min-w-0" />
-                <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">{performerNames(t.artists) || ""}</span>
+                <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={t.artists} /></span>
                 <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
                 <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
               </div>

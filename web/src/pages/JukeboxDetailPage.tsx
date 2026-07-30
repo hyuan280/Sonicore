@@ -11,6 +11,7 @@ import {
   Turntable, Settings, ArrowUpFromLine, Loader2,
 } from "lucide-react"
 import { formatDuration, performerNames } from "../lib/utils"
+import ArtistLink from "../components/ArtistLink"
 
 export default function JukeboxDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -27,7 +28,7 @@ export default function JukeboxDetailPage() {
   const [volume, setVolume] = useState(0.8)
   const [showSettings, setShowSettings] = useState(false)
   const [pushing, setPushing] = useState(false)
-  const [queueTracks, setQueueTracks] = useState<Record<string, { title: string; artist: string; album: string }>>({})
+  const [queueTracks, setQueueTracks] = useState<Record<string, { title: string; artist: string; album: string; artists?: any[] }>>({})
   const wsRef = useRef<WebSocket | null>(null)
   const queueIdsRef = useRef("")
 
@@ -43,12 +44,13 @@ export default function JukeboxDetailPage() {
     if (!key || key === queueIdsRef.current) return
     queueIdsRef.current = key
     api.data.tracksByIds(queue).then(d => {
-      const map: Record<string, { title: string; artist: string; album: string }> = {}
+      const map: Record<string, { title: string; artist: string; album: string; artists?: any[] }> = {}
       for (const t of d.tracks || []) {
         map[t.id] = {
           title: t.title,
           artist: performerNames(t.artists) || "",
           album: t.album?.title || "",
+          artists: t.artists,
         }
       }
       setQueueTracks(map)
@@ -253,7 +255,6 @@ export default function JukeboxDetailPage() {
             const isCurrent = i === queueIdx && isPlaying
             const qt = queueTracks[tid]
             const displayTitle = isCurrent && track ? track.title : qt?.title || tid.substring(0, 12) + "..."
-            const displayArtist = qt?.artist || ""
             const displayAlbum = qt?.album || ""
             return (
               <div key={tid + i} onClick={() => { if (!id) return; api.jukebox.play(id, tid).then(r => r && setStatus(r)) }}
@@ -265,9 +266,9 @@ export default function JukeboxDetailPage() {
                   <div className={`truncate ${isCurrent ? "text-green-400" : "text-white"}`}>
                     {displayTitle}
                   </div>
-                  {(displayArtist || displayAlbum) && (
+                  {(qt?.artists || displayAlbum) && (
                     <div className="text-xs text-zinc-500 truncate">
-                      {displayArtist}{displayArtist && displayAlbum ? " · " : ""}{displayAlbum}
+                      {qt?.artists ? <ArtistLink artists={qt.artists} /> : null}{qt?.artists && displayAlbum ? " · " : ""}{displayAlbum || ""}
                     </div>
                   )}
                 </div>

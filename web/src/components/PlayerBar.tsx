@@ -4,6 +4,7 @@ import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music } from "lucide-react"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
+import ArtistLink from "../components/ArtistLink"
 
 export default function PlayerBar() {
   const ps = usePlayer()
@@ -192,7 +193,7 @@ export default function PlayerBar() {
                 <div className="truncate min-w-0">
                   <p className="text-sm font-medium truncate">{track.title}</p>
                   <p className="text-xs text-zinc-400 truncate">
-                    {performerNames(track.artists)}{track.album ? ` — ${track.album}` : ""}
+                    <ArtistLink artists={track.artists} />{track.album ? ` — ${track.album}` : ""}
                   </p>
                 </div>
               </>
@@ -264,15 +265,14 @@ export default function PlayerBar() {
             </div>
             <div className="overflow-y-auto max-h-64 p-1">
               {ps.queue.map((t, i) => {
-                const displayArtist = performerNames(t.artists)
                 return (
                   <div key={t.id + i}
                     className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm cursor-pointer hover:bg-zinc-800 group ${i === ps.queueIdx ? "text-green-500 bg-zinc-800" : "text-zinc-300"}`}
                     onClick={() => ps.playIndex(i)}>
                     <span className="text-xs text-zinc-500 w-5 text-right shrink-0">{i + 1}</span>
                     <span className="truncate flex-1">{t.title}</span>
-                    {displayArtist && (
-                      <span className="text-xs text-zinc-500 shrink-0 group-hover:hidden">{displayArtist}</span>
+                    {t.artists && t.artists.length > 0 && (
+                      <span className="text-xs text-zinc-500 shrink-0 group-hover:hidden"><ArtistLink artists={t.artists} /></span>
                     )}
                     <span className="flex items-center gap-1 shrink-0">
                       <span className="text-xs text-zinc-500 group-hover:hidden">{formatDuration(t.duration)}</span>
