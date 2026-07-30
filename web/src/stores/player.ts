@@ -21,6 +21,8 @@ interface PlayerState {
   mode: "normal" | "all" | "one" | "shuffle"
   playEpoch: number
   currentPlaylistId: string | null
+  lyrics: string
+  lyricsFormat: string
 
   setQueue: (tracks: PlayerTrack[], startIdx?: number, playlistId?: string) => void
   play: (track: PlayerTrack) => void
@@ -37,6 +39,7 @@ interface PlayerState {
   removeFromQueue: (index: number) => void
   clearQueue: () => void
   setCurrentPlaylistId: (id: string | null) => void
+  fetchLyrics: (trackId: string) => Promise<void>
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -161,6 +164,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   mode: "normal",
   playEpoch: 0,
   currentPlaylistId: null,
+  lyrics: "",
+  lyricsFormat: "",
 
   setQueue: (tracks, startIdx = 0, playlistId) => {
     const { mode } = get()
@@ -168,6 +173,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       queue: [...tracks],
       playing: true,
       position: 0,
+      lyrics: "",
+      lyricsFormat: "",
       playEpoch: get().playEpoch + 1,
       currentPlaylistId: playlistId ?? null,
     }
@@ -186,21 +193,30 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set(update)
     savePlayerState()
     saveQueue()
+
+    const firstTrack = update.track
+    if (firstTrack) {
+      get().fetchLyrics(firstTrack.id)
+    }
   },
 
   play: (track) => {
-    set({ track, playing: true, position: 0, playEpoch: get().playEpoch + 1 })
+    set({ track, playing: true, position: 0, lyrics: "", lyricsFormat: "", playEpoch: get().playEpoch + 1 })
     savePlayerState()
+    get().fetchLyrics(track.id)
   },
 
   playIndex: (idx) => {
     const { queue, mode, shuffleOrder } = get()
     if (idx < 0 || idx >= queue.length) return
+    const track = queue[idx]
     const update: any = {
       queueIdx: idx,
-      track: queue[idx],
+      track,
       playing: true,
       position: 0,
+      lyrics: "",
+      lyricsFormat: "",
       playEpoch: get().playEpoch + 1,
     }
     if (mode === "shuffle" && shuffleOrder.length > 0) {
@@ -210,6 +226,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set(update)
     savePlayerState()
     saveQueue()
+    get().fetchLyrics(track.id)
   },
 
   advanceTrack: () => {
@@ -225,16 +242,20 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (mode === "shuffle" && shuffleOrder.length > 0) {
       const nextSi = (shuffleIdx + 1) % shuffleOrder.length
       const nextQi = shuffleOrder[nextSi]
+      const track = queue[nextQi]
       set({
         shuffleIdx: nextSi,
         queueIdx: nextQi,
-        track: queue[nextQi],
+        track,
         playing: true,
         position: 0,
+        lyrics: "",
+        lyricsFormat: "",
         playEpoch: get().playEpoch + 1,
       })
       savePlayerState()
       saveQueue()
+      get().fetchLyrics(track.id)
       return
     }
 
@@ -245,16 +266,20 @@ export const usePlayer = create<PlayerState>((set, get) => ({
         return
       }
       const nextIdx = queueIdx + 1
-      set({ queueIdx: nextIdx, track: queue[nextIdx], playing: true, position: 0, playEpoch: get().playEpoch + 1 })
+      const track = queue[nextIdx]
+      set({ queueIdx: nextIdx, track, playing: true, position: 0, lyrics: "", lyricsFormat: "", playEpoch: get().playEpoch + 1 })
       savePlayerState()
       saveQueue()
+      get().fetchLyrics(track.id)
       return
     }
 
     const nextIdx = (queueIdx + 1) % queue.length
-    set({ queueIdx: nextIdx, track: queue[nextIdx], playing: true, position: 0, playEpoch: get().playEpoch + 1 })
+    const track = queue[nextIdx]
+    set({ queueIdx: nextIdx, track, playing: true, position: 0, lyrics: "", lyricsFormat: "", playEpoch: get().playEpoch + 1 })
     savePlayerState()
     saveQueue()
+    get().fetchLyrics(track.id)
   },
 
   next: () => {
@@ -264,23 +289,29 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (mode === "shuffle" && shuffleOrder.length > 0) {
       const nextSi = (shuffleIdx + 1) % shuffleOrder.length
       const nextQi = shuffleOrder[nextSi]
+      const track = queue[nextQi]
       set({
         shuffleIdx: nextSi,
         queueIdx: nextQi,
-        track: queue[nextQi],
+        track,
         playing: true,
         position: 0,
+        lyrics: "",
+        lyricsFormat: "",
         playEpoch: get().playEpoch + 1,
       })
       savePlayerState()
       saveQueue()
+      get().fetchLyrics(track.id)
       return
     }
 
     const nextIdx = (queueIdx + 1) % queue.length
-    set({ queueIdx: nextIdx, track: queue[nextIdx], playing: true, position: 0, playEpoch: get().playEpoch + 1 })
+    const track = queue[nextIdx]
+    set({ queueIdx: nextIdx, track, playing: true, position: 0, lyrics: "", lyricsFormat: "", playEpoch: get().playEpoch + 1 })
     savePlayerState()
     saveQueue()
+    get().fetchLyrics(track.id)
   },
 
   prev: () => {
@@ -290,23 +321,29 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (mode === "shuffle" && shuffleOrder.length > 0) {
       const prevSi = (shuffleIdx - 1 + shuffleOrder.length) % shuffleOrder.length
       const prevQi = shuffleOrder[prevSi]
+      const track = queue[prevQi]
       set({
         shuffleIdx: prevSi,
         queueIdx: prevQi,
-        track: queue[prevQi],
+        track,
         playing: true,
         position: 0,
+        lyrics: "",
+        lyricsFormat: "",
         playEpoch: get().playEpoch + 1,
       })
       savePlayerState()
       saveQueue()
+      get().fetchLyrics(track.id)
       return
     }
 
     const prevIdx = (queueIdx - 1 + queue.length) % queue.length
-    set({ queueIdx: prevIdx, track: queue[prevIdx], playing: true, position: 0, playEpoch: get().playEpoch + 1 })
+    const track = queue[prevIdx]
+    set({ queueIdx: prevIdx, track, playing: true, position: 0, lyrics: "", lyricsFormat: "", playEpoch: get().playEpoch + 1 })
     savePlayerState()
     saveQueue()
+    get().fetchLyrics(track.id)
   },
 
   setPosition: (pos) => set({ position: pos }),
@@ -398,4 +435,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   setCurrentPlaylistId: (id) => set({ currentPlaylistId: id }),
+
+  fetchLyrics: async (trackId) => {
+    try {
+      const res = await api.data.lyrics(trackId)
+      set({ lyrics: res.lyrics || "", lyricsFormat: res.format || "" })
+    } catch {
+      set({ lyrics: "", lyricsFormat: "" })
+    }
+  },
 }))

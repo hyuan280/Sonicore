@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react"
 import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music } from "lucide-react"
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText } from "lucide-react"
 import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
@@ -28,6 +28,7 @@ export default function PlayerBar() {
   const progressRef = useRef<HTMLDivElement>(null)
   const currentTrackRef = useRef<string | null>(null)
   const [showQueue, setShowQueue] = useState(false)
+  const [showLyrics, setShowLyrics] = useState(false)
   const [showQuality, setShowQuality] = useState(false)
   const [fav, setFav] = useState(false)
   const [quality, setQuality] = useState(loadQuality)
@@ -306,6 +307,13 @@ export default function PlayerBar() {
                 onChange={e => ps.setVolume(parseFloat(e.target.value))}
                 className="w-20 accent-green-500" />
             </div>
+            {track && (
+              <button onClick={() => setShowLyrics(!showLyrics)}
+                className={`p-1 cursor-pointer ${showLyrics ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
+                title="Lyrics">
+                <FileText className="w-4 h-4" />
+              </button>
+            )}
             <button onClick={() => setShowQueue(!showQueue)}
               className={`p-1 cursor-pointer ${showQueue ? "text-green-500" : "text-zinc-400 hover:text-white"}`}>
               <ListMusic className="w-4 h-4" />
@@ -313,6 +321,20 @@ export default function PlayerBar() {
           </div>
         </div>
 
+        {showLyrics && (
+          <div className="absolute bottom-full left-0 w-96 max-h-96 bg-zinc-900 border border-zinc-800 rounded-t-xl shadow-xl flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+              <span className="text-xs text-zinc-500">Lyrics</span>
+              <button onClick={() => setShowLyrics(false)}
+                className="p-1 rounded text-zinc-500 hover:text-white cursor-pointer" title="Close">
+                <span className="text-sm">&times;</span>
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-80 p-4 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">
+              {ps.lyrics || <span className="text-zinc-600 italic">No lyrics available</span>}
+            </div>
+          </div>
+        )}
         {showQueue && (
           <div className="absolute bottom-full right-0 w-96 max-h-80 bg-zinc-900 border border-zinc-800 rounded-t-xl shadow-xl flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">

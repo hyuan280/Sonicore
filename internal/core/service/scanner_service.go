@@ -33,20 +33,22 @@ type ScannerService struct {
 	libRepo    *repository.LibraryRepo
 	settingsRepo *repository.SettingsRepo
 	imagesDir  string
+	lyricsDir  string
 	mbCfg      metadata.MBConfig
 
 	mu         sync.RWMutex
 	activeScan map[string]*ScanProgress
 }
 
-func NewScannerService(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig) *ScannerService {
+func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.MBConfig) *ScannerService {
 	return &ScannerService{
 		db:           db,
-		engine:       scanner.NewEngine(db, imagesDir, mbCfg),
+		engine:       scanner.NewEngine(db, imagesDir, mbCfg, lyricsDir),
 		scanRepo:     repository.NewScanJobRepo(db),
 		libRepo:      repository.NewLibraryRepo(db),
 		settingsRepo: repository.NewSettingsRepo(db),
 		imagesDir:    imagesDir,
+		lyricsDir:    lyricsDir,
 		mbCfg:       mbCfg,
 		activeScan:   make(map[string]*ScanProgress),
 	}
@@ -64,7 +66,7 @@ func (s *ScannerService) rebuildEngine(ctx context.Context) {
 	if rl, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
 		fmt.Sscanf(rl, "%d", &cfg.RateLimit)
 	}
-	s.engine = scanner.NewEngine(s.db, s.imagesDir, cfg)
+	s.engine = scanner.NewEngine(s.db, s.imagesDir, cfg, s.lyricsDir)
 }
 
 func (s *ScannerService) GetProgress(libraryID string) *ScanProgress {

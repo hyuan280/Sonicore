@@ -72,11 +72,11 @@ export const api = {
     scan: (id: string, mode?: string) => request(`/api/libraries/${id}/scan${mode ? `?mode=${mode}` : ""}`, { method: "POST" }),
     scanStatus: (id: string) => request(`/api/libraries/${id}/scan/status`),
   },
-  data: {
-    tracks: (libId: string, page = 1, perPage = 50) =>
-      request(`/api/data/${libId}/tracks?page=${page}&per_page=${perPage}`),
-    tracksByIds: (ids: string[]) =>
-      request("/api/data/tracks/byids", { method: "POST", body: JSON.stringify({ ids }) }),
+	data: {
+		tracks: (libId: string, page = 1, perPage = 50) =>
+			request(`/api/data/${libId}/tracks?page=${page}&per_page=${perPage}`),
+		tracksByIds: (ids: string[]) =>
+			request("/api/data/tracks/byids", { method: "POST", body: JSON.stringify({ ids }) }),
 		artists: (page = 1, perPage = 9999) =>
 			request(`/api/data/artists?page=${page}&per_page=${perPage}`),
 		artist: (artistId: string) =>
@@ -85,7 +85,9 @@ export const api = {
 			request(`/api/data/albums?page=${page}&per_page=${perPage}`),
 		album: (albumId: string) =>
 			request(`/api/data/albums/${albumId}`),
-  },
+		lyrics: (trackId: string) =>
+			request(`/api/data/tracks/lyrics?trackid=${encodeURIComponent(trackId)}`),
+	},
   user: {
     favorites: (type?: string) => request(`/api/user/favorites/list${type ? `?type=${type}` : ""}`),
     addFavorites: (itemType: string, itemIds: string[]) =>

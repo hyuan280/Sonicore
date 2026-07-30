@@ -109,7 +109,7 @@ func RunMigrations(db *sql.DB) error {
 		mbid          VARCHAR(36) NOT NULL DEFAULT '',
 		acoust_id     VARCHAR(36) NOT NULL DEFAULT '',
 		hash          VARCHAR(64) NOT NULL DEFAULT '',
-		has_lyrics    BOOLEAN NOT NULL DEFAULT FALSE,
+		lyrics_mask   SMALLINT NOT NULL DEFAULT 0,
 		lyrics        TEXT NOT NULL DEFAULT '',
 		rating        INTEGER NOT NULL DEFAULT 0,
 		play_count    INTEGER NOT NULL DEFAULT 0,
@@ -284,9 +284,8 @@ func RunMigrations(db *sql.DB) error {
 		ON CONFLICT (key) DO NOTHING;
 	`
 
-	_, err := db.Exec(schema)
-	if err != nil {
-		return fmt.Errorf("migration failed: %w", err)
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
 	log.Println("[migrate] database migration completed")

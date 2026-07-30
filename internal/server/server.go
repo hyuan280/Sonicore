@@ -22,6 +22,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/download"
+	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -86,7 +87,7 @@ func New(cfg *config.Config) (*Server, error) {
 		AppName:   cfg.Metadata.MusicBrainzAppName,
 		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
 	}
-	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, mbCfg)
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
@@ -191,6 +192,10 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/data/albums", browseHandler.Albums).Methods("GET")
 	protected.HandleFunc("/data/albums/{albumId}", browseHandler.AlbumDetail).Methods("GET")
 	protected.HandleFunc("/data/tracks/byids", browseHandler.TracksByIDs).Methods("POST")
+
+	lyricsStore := lyrics.NewStore(cfg.Data.LyricsDir)
+	lyricsHandler := rest.NewLyricsHandler(db, lyricsStore)
+	protected.HandleFunc("/data/tracks/lyrics", lyricsHandler.GetLyrics).Methods("GET")
 
 	streamHandler := rest.NewStreamHandler(db, sessionStore)
 	api.HandleFunc("/s/{session}/{id}", streamHandler.ServeStream).Methods("GET")

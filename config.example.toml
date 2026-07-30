@@ -34,6 +34,8 @@ music_dir = "/opt/sonicore/music"
 data_dir = "/opt/sonicore/data"
 images_dir = "/opt/sonicore/data/images"
 cache_dir = "/opt/sonicore/data/cache"
+# 歌词文件存储目录
+lyrics_dir = "/opt/sonicore/data/lyrics"
 
 [jwt]
 # 重要：部署时请用 openssl rand -hex 32 生成新密钥

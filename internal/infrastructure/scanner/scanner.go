@@ -15,6 +15,7 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -27,9 +28,10 @@ type Engine struct {
 	umRepo         *repository.UserMetadataRepo
 	coverExtractor *metadata.CoverExtractor
 	resolver       *metadata.Resolver
+	lyricsStore    *lyrics.Store
 }
 
-func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig) *Engine {
+func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig, lyricsDir string) *Engine {
 	var resolver *metadata.Resolver
 	if mbCfg.Enabled {
 		resolver = metadata.NewResolver(mbCfg)
@@ -45,6 +47,7 @@ func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig) *Engine {
 		umRepo:         repository.NewUserMetadataRepo(db),
 		coverExtractor: metadata.NewCoverExtractor(imagesDir),
 		resolver:       resolver,
+		lyricsStore:    lyrics.NewStore(lyricsDir),
 	}
 }
 
@@ -188,6 +191,14 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 
 			if ApplyEnrichment(ctx, existing, meta, enrichment, lib.ID, overwrite, e.trackRepo, e.artistRepo, e.albumRepo) {
 				changed = true
+			}
+
+			if sContent, sFmt := e.findSidecarLyrics(path); sContent != "" {
+				e.lyricsStore.Save(lib.ID, existing.ID, lyrics.PrioritySidecar, sContent)
+				if existing.LyricsMask&lyrics.PriorityBit(lyrics.PrioritySidecar) == 0 || sFmt == "lrc" {
+					existing.LyricsMask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
+					changed = true
+				}
 			}
 
 			if changed {
@@ -362,6 +373,18 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			}
 		}
 
+		// Extract lyrics: embedded (priority 0) then sidecar (priority 1)
+		mask := 0
+		if meta.Lyrics != "" {
+			e.lyricsStore.Save(lib.ID, trackID, lyrics.PriorityEmbedded, meta.Lyrics)
+			mask |= lyrics.PriorityBit(lyrics.PriorityEmbedded)
+		}
+		if sContent, _ := e.findSidecarLyrics(path); sContent != "" {
+			e.lyricsStore.Save(lib.ID, trackID, lyrics.PrioritySidecar, sContent)
+			mask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
+		}
+		track.LyricsMask = mask
+
 		if existing != nil {
 			if err := e.trackRepo.Update(ctx, track); err != nil {
 				stats.Errors = append(stats.Errors, fmt.Sprintf("update error %s: %v", path, err))
@@ -482,6 +505,24 @@ func thumbnailExists(ce *metadata.CoverExtractor, libraryID, trackID string, siz
 	p := filepath.Join(ce.ImagesDir(), libraryID, fmt.Sprintf("track_%s_%d.jpg", trackID, size))
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func (e *Engine) findSidecarLyrics(audioPath string) (content string, format string) {
+	dir := filepath.Dir(audioPath)
+	base := strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath))
+
+	for _, ext := range []string{".lrc", ".txt"} {
+		path := filepath.Join(dir, base+ext)
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			f := "txt"
+			if ext == ".lrc" {
+				f = "lrc"
+			}
+			return string(data), f
+		}
+	}
+	return "", ""
 }
 
 func (e *Engine) ensureThumbnail(libraryID, trackID string) error {

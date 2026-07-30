@@ -56,6 +56,7 @@ type DataConfig struct {
 	DataDir   string `mapstructure:"data_dir"`
 	ImagesDir string `mapstructure:"images_dir"`
 	CacheDir  string `mapstructure:"cache_dir"`
+	LyricsDir string `mapstructure:"lyrics_dir"`
 }
 
 type JWTConfig struct {
@@ -112,6 +113,7 @@ func Load() *Config {
 	v.SetDefault("data.data_dir", "/opt/sonicore/data")
 	v.SetDefault("data.images_dir", "/opt/sonicore/data/images")
 	v.SetDefault("data.cache_dir", "/opt/sonicore/data/cache")
+	v.SetDefault("data.lyrics_dir", "/opt/sonicore/data/lyrics")
 	v.SetDefault("jwt.secret", "change-me-in-production")
 	v.SetDefault("jwt.expiration", "24h")
 	v.SetDefault("jwt.refresh_expiration", "720h")
@@ -143,7 +145,7 @@ func Load() *Config {
 }
 
 func (c *Config) InitDirs() error {
-	dirs := []string{c.Data.DataDir, c.Data.ImagesDir, c.Data.CacheDir}
+	dirs := []string{c.Data.DataDir, c.Data.ImagesDir, c.Data.CacheDir, c.Data.LyricsDir}
 	var errs []string
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {

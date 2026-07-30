@@ -49,6 +49,7 @@ type AudioMeta struct {
 	Composer    string
 	Lyricist    string
 	Arranger    string
+	Lyrics      string
 	FilePath    string
 	FileSize    int64
 	FileFormat  string
@@ -134,6 +135,7 @@ func Probe(path string) (*AudioMeta, error) {
 		meta.Comment = tags["comment"]
 	meta.Composer = tags["composer"]
 	meta.Lyricist = tags["lyricist"]
+	meta.Lyrics = tags["lyrics"]
 	meta.Arranger = tags["arranger"]
 	meta.MBID = tags["musicbrainz_trackid"]
 		if meta.MBID == "" {

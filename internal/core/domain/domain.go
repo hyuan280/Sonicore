@@ -112,7 +112,7 @@ type Track struct {
 	MBID         string         `json:"mbid"`
 	AcoustID     string         `json:"acoust_id"`
 	Hash         string         `json:"hash"`
-	HasLyrics    bool           `json:"has_lyrics"`
+	LyricsMask   int            `json:"lyrics_mask"`
 	Lyrics       string         `json:"lyrics"`
 	Rating       int            `json:"rating"`
 	PlayCount    int            `json:"play_count"`
