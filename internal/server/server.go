@@ -174,6 +174,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/metadata/search/track", metadataHandler.SearchTrack).Methods("POST")
 	protected.HandleFunc("/metadata/save", metadataHandler.Save).Methods("POST")
 	protected.HandleFunc("/metadata/search/artist", metadataHandler.SearchArtist).Methods("POST")
+	protected.HandleFunc("/metadata/search/album", metadataHandler.SearchRelease).Methods("POST")
 
 	userHandler := rest.NewUserHandler(db)
 	protected.HandleFunc("/user/me", userHandler.Me).Methods("GET")

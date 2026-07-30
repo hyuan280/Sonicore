@@ -203,9 +203,9 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.libraryRepo.Delete(r.Context(), libID)
 
 	h.db.ExecContext(r.Context(),
-		`DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+		`DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	h.db.ExecContext(r.Context(),
-		`DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+		`DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	h.db.ExecContext(r.Context(),
 		`DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 	h.db.ExecContext(r.Context(),

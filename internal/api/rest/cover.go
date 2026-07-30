@@ -79,14 +79,20 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		if track.CoverImageID != nil && tryCover(track.LibraryID, "track", track.ID) {
 			return
 		}
-		if album, err := h.albumRepo.FindByID(ctx, track.AlbumID); err == nil {
-			if album.CoverImageID != nil && tryCover("album", "album", album.ID) {
-				return
-			}
-			if tracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
-				for i := range tracks {
-					if tracks[i].CoverImageID != nil && tryCover("album", "track", tracks[i].ID) {
-						return
+		var albumID string
+		if len(track.Albums) > 0 {
+			albumID = track.Albums[0].AlbumID
+		}
+		if albumID != "" {
+			if album, err := h.albumRepo.FindByID(ctx, albumID); err == nil {
+				if album.CoverImageID != nil && tryCover("album", "album", album.ID) {
+					return
+				}
+				if tracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
+					for i := range tracks {
+						if tracks[i].CoverImageID != nil && tryCover("album", "track", tracks[i].ID) {
+							return
+						}
 					}
 				}
 			}

@@ -69,7 +69,8 @@ func (r *AlbumRepo) FindByLibraryID(ctx context.Context, libraryID string) ([]do
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT DISTINCT a.id, a.title, a.artist_id, a.mbid, a.country, a.year, a.genre, a.cover_image_id, a.song_count, a.duration, a.created_at, a.updated_at
 		 FROM albums a
-		 INNER JOIN tracks t ON t.album_id = a.id
+		 INNER JOIN track_albums ta ON ta.album_id = a.id
+		 INNER JOIN tracks t ON t.id = ta.track_id
 		 WHERE t.library_id = $1
 		 ORDER BY a.year DESC, a.title ASC`, libraryID)
 	if err != nil {
@@ -141,7 +142,8 @@ func (r *AlbumRepo) FindAccessible(ctx context.Context, userID string) ([]domain
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT DISTINCT al.id, al.title, al.artist_id, al.mbid, al.country, al.year, al.genre, al.cover_image_id, al.song_count, al.duration, al.created_at, al.updated_at
 		 FROM albums al
-		 INNER JOIN tracks t ON t.album_id = al.id
+		 INNER JOIN track_albums ta ON ta.album_id = al.id
+		 INNER JOIN tracks t ON t.id = ta.track_id
 		 INNER JOIN library_members lm ON lm.library_id = t.library_id
 		 WHERE lm.user_id = $1
 		 ORDER BY al.year DESC, al.title ASC`, userID)

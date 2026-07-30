@@ -72,6 +72,12 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			Name string `json:"name"`
 			MBID string `json:"mbid"`
 		} `json:"artists"`
+		Albums    []struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			MBID   string `json:"mbid"`
+			Artist string `json:"artist"`
+		} `json:"albums"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FileHash == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file_hash required"})
@@ -160,7 +166,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				track.MBID = req.TrackMBID
 			}
 			if req.Title != "" {
-				track.Title = req.Title
+				track.Title = metadata.TrimParenSuffix(req.Title)
 			}
 			h.trackRepo.Update(r.Context(), track)
 
@@ -188,22 +194,165 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, newArtists)
 			}
 
-			// Update album
-			if track.AlbumID != "" {
-				if album, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil {
-					if req.Album != "" {
-						album.Title = req.Album
+			// Resolve artist helper for new albums
+			resolveArtistID := func(artistName, artistMBID string) string {
+				if artistMBID != "" {
+					if a := h.findOrCreateArtist(r.Context(), artistName, artistMBID); a != nil {
+						return a.ID
 					}
-					if req.AlbumMBID != "" {
-						album.MBID = req.AlbumMBID
+				}
+				if artistName != "" {
+					if a := h.findOrCreateArtist(r.Context(), artistName, ""); a != nil {
+						return a.ID
 					}
-					if req.Year != 0 {
-						album.Year = req.Year
+				}
+				if len(track.Artists) > 0 {
+					return track.Artists[0].ArtistID
+				}
+				if a := h.findOrCreateArtist(r.Context(), "Unknown Artist", ""); a != nil {
+					return a.ID
+				}
+				return ""
+			}
+			// Resolve or create album from request entry
+			resolveAlbum := func(al struct {
+				ID     string `json:"id"`
+				Title  string `json:"title"`
+				MBID   string `json:"mbid"`
+				Artist string `json:"artist"`
+			}) (string, bool) {
+				if al.ID != "" {
+					return al.ID, true
+				}
+				artistID := ""
+				var year int
+				var country, genre string
+				if al.MBID != "" {
+					if release, err := h.newMBClient(r.Context()).LookupRelease(al.MBID); err == nil {
+						if len(release.Date) >= 4 {
+							fmt.Sscanf(release.Date[:4], "%d", &year)
+						}
+						country = release.Country
+						genre = metadata.GenreFromTags(release.Tags)
+						if len(release.Artists) > 0 {
+							mbid := ""
+							if release.Artists[0].Artist != nil {
+								mbid = release.Artists[0].Artist.ID
+							}
+							artistID = resolveArtistID(release.Artists[0].Name, mbid)
+						}
 					}
-					if req.Genre != "" {
-						album.Genre = req.Genre
+				} else {
+					artistID = resolveArtistID(al.Artist, "")
+				}
+				if artistID == "" {
+					return "", false
+				}
+				if al.MBID != "" {
+					if album, err := h.albumRepo.FindByMBID(r.Context(), al.MBID); err == nil {
+						// Update missing metadata
+						updated := false
+						if album.Year == 0 && year != 0 {
+							album.Year = year; updated = true
+						}
+						if album.Country == "" && country != "" {
+							album.Country = country; updated = true
+						}
+						if album.Genre == "" && genre != "" {
+							album.Genre = genre; updated = true
+						}
+						if updated {
+							h.albumRepo.Update(r.Context(), album)
+						}
+						return album.ID, true
 					}
-					h.albumRepo.Update(r.Context(), album)
+					album := &domain.Album{
+						ID: domain.NewID(), Title: metadata.TrimParenSuffix(al.Title),
+						MBID: al.MBID, ArtistID: artistID,
+						Year: year, Country: country, Genre: genre,
+					}
+					if err := h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album}); err != nil {
+						return "", false
+					}
+					return album.ID, true
+				}
+				if al.Title != "" {
+					if album, err := h.albumRepo.FindByName(r.Context(), al.Title); err == nil {
+						return album.ID, true
+					}
+					album := &domain.Album{ID: domain.NewID(), Title: metadata.TrimParenSuffix(al.Title), ArtistID: artistID}
+					if err := h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album}); err != nil {
+						return "", false
+					}
+					return album.ID, true
+				}
+				return "", false
+			}
+
+			// Process albums: if user sent the field (even empty), replace track_albums
+			if req.Albums != nil {
+				var trackAlbums []*domain.TrackAlbum
+				for _, al := range req.Albums {
+					if albumID, ok := resolveAlbum(al); ok {
+						trackAlbums = append(trackAlbums, &domain.TrackAlbum{
+							AlbumID:      albumID,
+							TrackNumber:  len(trackAlbums) + 1,
+							DiscNumber:   1,
+						})
+					}
+				}
+				if len(trackAlbums) == 0 {
+					// Fallback: ensure at least Unknown Album
+					if album, err := h.albumRepo.FindByName(r.Context(), "Unknown Album"); err == nil {
+						trackAlbums = append(trackAlbums, &domain.TrackAlbum{AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1})
+					} else {
+						artistID := resolveArtistID("", "")
+						album := &domain.Album{ID: domain.NewID(), Title: "Unknown Album", ArtistID: artistID}
+						h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album})
+						trackAlbums = append(trackAlbums, &domain.TrackAlbum{AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1})
+					}
+				}
+				if err := h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, trackAlbums); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to save albums: %v", err)})
+					return
+				}
+				// Apply user-edited year/genre to first album
+				if len(trackAlbums) > 0 && (req.Year != 0 || req.Genre != "") {
+					if album, err := h.albumRepo.FindByID(r.Context(), trackAlbums[0].AlbumID); err == nil {
+						updated := false
+						if req.Year != 0 && album.Year == 0 {
+							album.Year = req.Year; updated = true
+						}
+						if req.Genre != "" {
+							album.Genre = req.Genre; updated = true
+						}
+						if updated {
+							h.albumRepo.Update(r.Context(), album)
+						}
+					}
+				}
+			} else {
+				// Backward compat: update first album metadata
+				var albumID string
+				if len(track.Albums) > 0 {
+					albumID = track.Albums[0].AlbumID
+				}
+				if albumID != "" {
+					if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
+						if req.Album != "" {
+							album.Title = req.Album
+						}
+						if req.AlbumMBID != "" {
+							album.MBID = req.AlbumMBID
+						}
+						if req.Year != 0 {
+							album.Year = req.Year
+						}
+						if req.Genre != "" {
+							album.Genre = req.Genre
+						}
+						h.albumRepo.Update(r.Context(), album)
+					}
 				}
 			}
 		}
@@ -250,21 +399,26 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 							"role": ta.Role,
 						})
 					}
-					if allComplete && track.AlbumID != "" {
-						if album, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil &&
+					albumID := ""
+					if len(track.Albums) > 0 {
+						albumID = track.Albums[0].AlbumID
+					}
+					if allComplete && albumID != "" {
+						if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil &&
 							album.MBID != "" && album.Country != "" && album.Year != 0 && album.Genre != "" &&
 							album.Title != "" && album.Title != "Unknown Album" {
+							albums := h.buildTrackAlbums(r.Context(), track)
 							writeJSON(w, http.StatusOK, map[string]interface{}{
 								"matched":    true,
 								"cached":     true,
 								"file_hash":  fileHash,
 								"title":      track.Title,
-								"album":      album.Title,
 								"year":       album.Year,
 								"genre":      album.Genre,
 								"track_mbid": track.MBID,
 								"album_mbid": album.MBID,
 								"artists":    artists,
+								"albums":     albums,
 							})
 							return
 						}
@@ -335,17 +489,25 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		resp := map[string]interface{}{
 			"matched":    true,
 			"cached":     true,
 			"file_hash":  fileHash,
 			"title":      cached.Title,
-			"album":      cached.Album,
+
 			"year":       cached.Year,
 			"genre":      cached.Genre,
 			"track_mbid": cached.TrackMBID,
 			"artists":    artists,
-		})
+		}
+		if req.TrackID != "" {
+			if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
+				if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
+					resp["albums"] = als
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
@@ -384,21 +546,24 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		if req.TrackID != "" {
 			if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
 				resp["title"] = track.Title
-				if album, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil {
-					resp["album"] = album.Title
-					resp["year"] = album.Year
-					resp["genre"] = album.Genre
+				resp["artists"] = h.buildTrackArtists(r.Context(), track.ID)
+				if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
+					resp["albums"] = als
 				}
-				if cached != nil {
-					if cached.Title != "" {
-						resp["title"] = cached.Title
-					}
-					if cached.Artist != "" {
-						resp["artist"] = cached.Artist
-					}
-					if cached.Album != "" {
-						resp["album"] = cached.Album
-					}
+		var albumID string
+		if len(track.Albums) > 0 {
+			albumID = track.Albums[0].AlbumID
+		}
+		if albumID != "" {
+			if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
+				resp["year"] = album.Year
+				resp["genre"] = album.Genre
+			}
+		}
+		if cached != nil {
+			if cached.Title != "" {
+				resp["title"] = cached.Title
+			}
 					if cached.Year != 0 {
 						resp["year"] = cached.Year
 					}
@@ -432,8 +597,14 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 	}
 	if yr == 0 && req.TrackID != "" {
 		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
-			if album, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil {
-				yr = album.Year
+			var albumID string
+			if len(track.Albums) > 0 {
+				albumID = track.Albums[0].AlbumID
+			}
+			if albumID != "" {
+				if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
+					yr = album.Year
+				}
 			}
 		}
 	}
@@ -455,17 +626,24 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"matched":    true,
 		"file_hash":  fileHash,
 		"title":      t,
-		"album":      al,
 		"year":       yr,
 		"genre":      gen,
 		"track_mbid": tmbid,
 		"album_mbid": result.AlbumMBID,
 		"artists":    artists,
-	})
+	}
+	if req.TrackID != "" {
+		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
+			if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
+				resp["albums"] = als
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
@@ -499,7 +677,7 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 
 	track.MBID = result.TrackMBID
 	if result.Title != "" {
-		track.Title = result.Title
+		track.Title = metadata.TrimParenSuffix(result.Title)
 	}
 	if err := h.trackRepo.Update(r.Context(), track); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
@@ -516,15 +694,21 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.AlbumMBID != "" {
-		if album, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil && album.MBID == "" {
-			album.MBID = result.AlbumMBID
-			if result.Year != 0 {
-				album.Year = result.Year
+		var albumID string
+		if len(track.Albums) > 0 {
+			albumID = track.Albums[0].AlbumID
+		}
+		if albumID != "" {
+			if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil && album.MBID == "" {
+				album.MBID = result.AlbumMBID
+				if result.Year != 0 {
+					album.Year = result.Year
+				}
+				if result.Genre != "" {
+					album.Genre = result.Genre
+				}
+				h.albumRepo.Update(r.Context(), album)
 			}
-			if result.Genre != "" {
-				album.Genre = result.Genre
-			}
-			h.albumRepo.Update(r.Context(), album)
 		}
 	}
 
@@ -597,6 +781,15 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			track.Title = enrichment.Title
 		}
 		h.trackRepo.Update(r.Context(), track)
+
+		// Reset track_albums to the enriched album
+		if enrichment.AlbumMBID != "" {
+			if album, err := h.albumRepo.FindByMBID(r.Context(), enrichment.AlbumMBID); err == nil {
+				h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, []*domain.TrackAlbum{{
+					AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1,
+				}})
+			}
+		}
 	} else {
 		// No MB match — apply probe data directly (fresh first-scan state)
 		track.MBID = ""
@@ -635,25 +828,32 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if track.AlbumID != "" {
-			if album, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil {
-				if meta.Album != "" {
-					album.Title = meta.Album
-				}
-				album.MBID = ""
-				if meta.Year != 0 {
-					album.Year = meta.Year
-				} else {
-					album.Year = 0
-				}
-				if meta.Genre != "" {
-					album.Genre = meta.Genre
-				} else {
-					album.Genre = ""
-				}
-				album.Country = ""
-				h.albumRepo.Update(r.Context(), album)
+		// Reset track_albums to single "Unknown Album"
+		albumName := meta.Album
+		if albumName == "" {
+			albumName = "Unknown Album"
+		}
+		artistID := ""
+		if len(track.Artists) > 0 {
+			artistID = track.Artists[0].ArtistID
+		}
+		if artistID == "" {
+			if a := h.findOrCreateArtist(r.Context(), "Unknown Artist", ""); a != nil {
+				artistID = a.ID
 			}
+		}
+		var album *domain.Album
+		album, _ = h.albumRepo.FindByName(r.Context(), albumName)
+		if album == nil {
+			album = &domain.Album{ID: domain.NewID(), Title: albumName, ArtistID: artistID}
+			h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album})
+		}
+		if album != nil {
+			h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, []*domain.TrackAlbum{{
+				AlbumID:     album.ID,
+				TrackNumber: 1,
+				DiscNumber:  1,
+			}})
 		}
 	}
 
@@ -682,6 +882,79 @@ func (h *MetadataHandler) SearchArtist(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"artists": result})
+}
+
+func (h *MetadataHandler) SearchRelease(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		return
+	}
+	client := h.newMBClient(r.Context())
+	releases, _ := client.SearchReleases(req.Name)
+	var result []map[string]interface{}
+	// Always prepend the query text as an unmatched entry (no MBID)
+	result = append(result, map[string]interface{}{
+		"title":  req.Name,
+		"mbid":   "",
+		"artist": "",
+		"status": "",
+	})
+	for _, rel := range releases {
+		artistName := ""
+		if len(rel.Artists) > 0 {
+			artistName = rel.Artists[0].Name
+		}
+		result = append(result, map[string]interface{}{
+			"title":    rel.Title,
+			"mbid":     rel.ID,
+			"artist":   artistName,
+			"status":   rel.Status,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"releases": result})
+}
+
+func (h *MetadataHandler) buildTrackArtists(ctx context.Context, trackID string) []map[string]interface{} {
+	tas, err := h.trackRepo.LoadTrackArtists(ctx, trackID)
+	if err != nil || len(tas) == 0 {
+		return []map[string]interface{}{}
+	}
+	result := make([]map[string]interface{}, len(tas))
+	for i, ta := range tas {
+		entry := map[string]interface{}{
+			"artist_id": ta.ArtistID,
+			"role":      ta.Role,
+		}
+		if ta.Artist != nil {
+			entry["name"] = ta.Artist.Name
+			entry["mbid"] = ta.Artist.MBID
+		}
+		result[i] = entry
+	}
+	return result
+}
+
+func (h *MetadataHandler) buildTrackAlbums(ctx context.Context, track *domain.Track) []map[string]interface{} {
+	tals, err := h.trackRepo.LoadTrackAlbums(ctx, track.ID)
+	if err != nil || len(tals) == 0 {
+		return []map[string]interface{}{}
+	}
+	result := make([]map[string]interface{}, len(tals))
+	for i, tal := range tals {
+		entry := map[string]interface{}{
+			"id":          tal.AlbumID,
+			"track":       tal.TrackNumber,
+			"disc_number": tal.DiscNumber,
+		}
+		if tal.Album != nil {
+			entry["title"] = tal.Album.Title
+		}
+		result[i] = entry
+	}
+	return result
 }
 
 func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, mbid string) *domain.Artist {

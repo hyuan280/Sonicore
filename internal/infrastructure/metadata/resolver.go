@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 type ArtistResult struct {
@@ -75,9 +76,9 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	} else {
 		recording = r.exactMatch(title, artist, album, recordings)
 	}
-	// Fallback: pick best by artist count match
+	// Fallback: pick best by artist + title substring match
 	if recording == nil && len(artists) > 0 {
-		recording = r.bestArtistMatch(artists, recordings)
+		recording = r.bestArtistMatch(title, artists, recordings)
 	}
 
 	if recording == nil {
@@ -91,14 +92,12 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		TrackMBID: recording.ID,
 	}
 
-	if meta.TitleFromFilename {
-		result.Title = cleanTitle(recording.Title)
-	}
+	result.Title = TrimParenSuffix(recording.Title)
 
 	if len(recording.Artists) > 0 {
 		// Collect all artists from the recording
 		for _, ref := range recording.Artists {
-			ar := ArtistResult{Name: ref.Name}
+			ar := ArtistResult{Name: TrimParenSuffix(ref.Name)}
 			if ref.Artist != nil {
 				ar.MBID = ref.Artist.ID
 				ar.Country = ref.Artist.Country
@@ -123,9 +122,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		}
 		relIdx = i
 		result.AlbumMBID = rel.ID
-		if meta.Album == "" {
-			result.Album = rel.Title
-		}
+		result.Album = rel.Title
 		if len(rel.Date) >= 4 {
 			fmt.Sscanf(rel.Date[:4], "%d", &result.Year)
 		}
@@ -211,14 +208,14 @@ func (r *Resolver) scoreMatch(title string, recordings []MBRecording) *MBRecordi
 }
 
 func matchPartsScore(parts []string, rec *MBRecording) int {
-	mbTitle := normalizeForMatch(rec.Title)
+	mbTitle := normalizeForMatch(TrimParenSuffix(rec.Title))
 	mbArtist := ""
 	if len(rec.Artists) > 0 {
-		mbArtist = normalizeForMatch(rec.Artists[0].Name)
+		mbArtist = normalizeForMatch(TrimParenSuffix(rec.Artists[0].Name))
 	}
 	mbAlbum := ""
 	if len(rec.Releases) > 0 {
-		mbAlbum = normalizeForMatch(rec.Releases[0].Title)
+		mbAlbum = normalizeForMatch(TrimParenSuffix(rec.Releases[0].Title))
 	}
 
 	hits := 0
@@ -252,30 +249,49 @@ func (r *Resolver) exactMatch(title, artist, album string, recordings []MBRecord
 	return nil
 }
 
+func splitArtists(s string) []string {
+	var parts []string
+	for _, p := range strings.FieldsFunc(s, func(r rune) bool {
+		return r == '/' || r == ',' || r == '、' || r == '&'
+	}) {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			parts = append(parts, normalizeForMatch(p))
+		}
+	}
+	return parts
+}
+
 func fieldsMatch(title, artist, album string, rec *MBRecording) bool {
-	nTitle := normalizeForMatch(title)
-	mbTitle := normalizeForMatch(rec.Title)
+	nTitle := normalizeForMatch(TrimParenSuffix(title))
+	mbTitle := normalizeForMatch(TrimParenSuffix(rec.Title))
 	if nTitle != mbTitle {
 		return false
 	}
 
 	if artist != "" && artist != "Unknown Artist" {
-		nArtist := normalizeForMatch(artist)
-		mbArtist := ""
-		if len(rec.Artists) > 0 {
-			mbArtist = normalizeForMatch(rec.Artists[0].Name)
-		}
-		if mbArtist == "" || nArtist != mbArtist {
+		queryArtists := splitArtists(artist)
+		if len(rec.Artists) == 0 {
 			return false
+		}
+		for _, qa := range queryArtists {
+			matched := false
+			for _, ra := range rec.Artists {
+				if normalizeForMatch(TrimParenSuffix(ra.Name)) == qa {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return false
+			}
 		}
 	}
 
 	if album != "" && album != "Unknown Album" {
-		nAlbum := normalizeForMatch(album)
 		found := false
 		for _, rel := range rec.Releases {
-			mbAlbum := normalizeForMatch(rel.Title)
-			if nAlbum == mbAlbum {
+			if titlesMatch(album, rel.Title) {
 				found = true
 				break
 			}
@@ -288,8 +304,46 @@ func fieldsMatch(title, artist, album string, rec *MBRecording) bool {
 	return true
 }
 
+// titlesMatch checks whether two track titles should be considered a match.
+// For strings with CJK characters, minimum meaningful length is 2; for others, 4.
+// When both are long enough, does substring containment check.
+// Otherwise, splits the longer string by separators and checks equality with the shorter.
+func titlesMatch(a, b string) bool {
+	na := normalizeForMatch(a)
+	nb := normalizeForMatch(b)
+
+	minLen := func(s string) int {
+		for _, r := range s {
+			if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) ||
+				unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
+				return 2
+			}
+		}
+		return 4
+	}
+
+	if len(na) >= minLen(na) && len(nb) >= minLen(nb) {
+		return strings.Contains(na, nb) || strings.Contains(nb, na)
+	}
+
+	longer, shorter := na, nb
+	if len(longer) < len(shorter) {
+		longer, shorter = shorter, longer
+	}
+	for _, tok := range strings.FieldsFunc(longer, func(r rune) bool {
+		return r == ' ' || r == '-' || r == '\u2013' || r == '_' || r == '/' ||
+			r == '.' || r == ',' || r == '(' || r == ')' || r == '[' || r == ']'
+	}) {
+		if tok == shorter {
+			return true
+		}
+	}
+	return false
+}
+
 // bestArtistMatch scores recordings by how many of the query artists appear in the recording.
-func (r *Resolver) bestArtistMatch(artists []string, recordings []MBRecording) *MBRecording {
+// The recording title must pass titlesMatch against the query title.
+func (r *Resolver) bestArtistMatch(queryTitle string, artists []string, recordings []MBRecording) *MBRecording {
 	if len(artists) == 0 {
 		return nil
 	}
@@ -301,13 +355,15 @@ func (r *Resolver) bestArtistMatch(artists []string, recordings []MBRecording) *
 	var best *MBRecording
 	bestScore := 0
 	for i := range recordings {
+		if !titlesMatch(queryTitle, TrimParenSuffix(recordings[i].Title)) {
+			continue
+		}
 		score := 0
 		for _, ra := range recordings[i].Artists {
 			n := normalizeForMatch(ra.Name)
 			if artistSet[n] {
 				score++
 			} else {
-				// Check substring match
 				for qa := range artistSet {
 					if strings.Contains(n, qa) || strings.Contains(qa, n) {
 						score++
@@ -316,7 +372,7 @@ func (r *Resolver) bestArtistMatch(artists []string, recordings []MBRecording) *
 				}
 			}
 		}
-		if score > bestScore {
+		if score > 0 && score > bestScore {
 			bestScore = score
 			best = &recordings[i]
 		}
@@ -343,12 +399,12 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 
 	result := &EnrichmentResult{
 		TrackMBID: rec.ID,
-		Title:     rec.Title,
+		Title:     TrimParenSuffix(rec.Title),
 	}
 
 	if len(rec.Artists) > 0 {
 		for _, ref := range rec.Artists {
-			ar := ArtistResult{Name: ref.Name}
+			ar := ArtistResult{Name: TrimParenSuffix(ref.Name)}
 			if ref.Artist != nil {
 				ar.MBID = ref.Artist.ID
 				ar.Country = ref.Artist.Country
@@ -369,7 +425,7 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 			continue
 		}
 		result.AlbumMBID = rel.ID
-		result.Album = rel.Title
+		result.Album = TrimParenSuffix(rel.Title)
 		if len(rel.Date) >= 4 {
 			fmt.Sscanf(rel.Date[:4], "%d", &result.Year)
 		}
@@ -428,11 +484,14 @@ func (r *Resolver) Close() {
 	r.mb.Close()
 }
 
-// cleanTitle removes parenthetical descriptions from MB titles.
+// TrimParenSuffix removes parenthetical descriptions from MB data.
 // "奢香夫人 (展现一代彝族巾帼英雄奢香夫人的异域风情歌曲)" → "奢香夫人"
-func cleanTitle(title string) string {
-	if idx := strings.Index(title, " ("); idx > 0 {
-		title = title[:idx]
+// "自由飞翔 （album version）" → "自由飞翔"
+func TrimParenSuffix(s string) string {
+	for _, sep := range []string{" (", "（"} {
+		if idx := strings.Index(s, sep); idx > 0 {
+			s = s[:idx]
+		}
 	}
-	return title
+	return s
 }

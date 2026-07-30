@@ -20,9 +20,10 @@ export default function FavoritesPage() {
 
   const playAll = () => {
     const tracks: PlayerTrack[] = items.map(h => ({
-      id: h.item_id, title: h.title || "Unknown", album: h.album || "",
-      album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+      id: h.item_id, title: h.title || "Unknown",
+      duration: h.duration || 0, suffix: h.suffix || "mp3",
       cover_image_id: h.cover_image_id, artists: h.artists,
+      albums: h.albums,
     }))
     if (tracks.length > 0) player.setQueue(tracks, 0)
   }
@@ -35,9 +36,10 @@ export default function FavoritesPage() {
 
   const playTrack = (h: any) => {
     const track: PlayerTrack = {
-      id: h.item_id, title: h.title || "Unknown", album: h.album || "",
-      album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
+      id: h.item_id, title: h.title || "Unknown",
+      duration: h.duration || 0, suffix: h.suffix || "mp3",
       cover_image_id: h.cover_image_id, artists: h.artists,
+      albums: h.albums,
     }
     const existingIdx = player.queue.findIndex(t => t.id === track.id)
     if (existingIdx >= 0) { player.playIndex(existingIdx); return }
@@ -70,9 +72,9 @@ export default function FavoritesPage() {
         {multi && selected.size > 0 && (
           <div className="flex items-center gap-2">
             <button onClick={() => player.addToQueue(items.filter(h => selected.has(h.item_id)).map(h => ({
-              id: h.item_id, title: h.title || "Unknown", artist: performerNames(h.artists) || "", album: h.album || "",
-              album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3",
-              cover_image_id: h.cover_image_id,
+              id: h.item_id, title: h.title || "Unknown", artist: performerNames(h.artists) || "",
+              duration: h.duration || 0, suffix: h.suffix || "mp3",
+              cover_image_id: h.cover_image_id, albums: h.albums,
             })))}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
               <Plus className="w-4 h-4" /> Queue
@@ -175,14 +177,14 @@ export default function FavoritesPage() {
             </div>
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={{ id: h.item_id, title: h.title || "", album: h.album || "", album_id: h.album_id || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id }} />
+                <AddQueueBtn track={{ id: h.item_id, title: h.title || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id, albums: h.albums }} />
                 <AddBtn trackId={h.item_id} />
                 <FavBtn trackId={h.item_id} initiallyFav={!removed.has(h.item_id)}
                   onToggle={(id, nowFav) => { setRemoved(prev => { const n = new Set(prev); nowFav ? n.delete(id) : n.add(id); return n }) }} />
               </span>
               <span className="flex-1 min-w-0" />
               <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={h.artists} /></span>
-              <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.album || ""}</span>
+              <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{h.albums?.[0]?.title || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{h.duration ? formatDuration(h.duration) : ""}</span>
             </div>
           </div>

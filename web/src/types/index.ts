@@ -12,7 +12,8 @@ export interface AuthResponse {
 export interface Library {
   id: string; name: string; path: string; owner_id: string
   metadata_storage_mode: string; track_count: number; duration: number
-  last_scanned_at: string | null; created_at: string
+  last_scanned_at: string | null; last_scan_errors?: number
+  created_at: string
 }
 
 export interface Artist {

@@ -40,6 +40,7 @@ type Library struct {
 	MetadataStorageMode string     `json:"metadata_storage_mode"`
 	ScanInterval        string     `json:"scan_interval"`
 	LastScannedAt       *time.Time `json:"last_scanned_at"`
+	LastScanErrors      int        `json:"last_scan_errors"`
 	TrackCount          int        `json:"track_count"`
 	Duration            float64    `json:"duration"`
 	CreatedAt           time.Time  `json:"created_at"`
@@ -87,14 +88,19 @@ type Album struct {
 	Artist *Artist `json:"artist,omitempty"`
 }
 
+type TrackAlbum struct {
+	TrackID     string `json:"-"`
+	AlbumID     string `json:"id"`
+	TrackNumber int    `json:"track"`
+	DiscNumber  int    `json:"disc_number"`
+	Album       *Album `json:"album,omitempty"`
+}
+
 type Track struct {
 	ID           string         `json:"id"`
 	LibraryID    string         `json:"library_id"`
 	Title        string         `json:"title"`
-	AlbumID      string         `json:"album_id"`
-	CoverImageID *string   `json:"cover_image_id,omitempty"`
-	TrackNumber  int            `json:"track_number"`
-	DiscNumber   int            `json:"disc_number"`
+	CoverImageID *string        `json:"cover_image_id,omitempty"`
 	Duration     float64        `json:"duration"`
 	BitRate      int            `json:"bit_rate"`
 	SampleRate   int            `json:"sample_rate"`
@@ -114,8 +120,8 @@ type Track struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 
-	Album  *Album         `json:"album,omitempty"`
-	Artist *Artist        `json:"-"`
+	Albums  []*TrackAlbum  `json:"albums,omitempty"`
+	Artist  *Artist        `json:"-"`
 	Artists []*TrackArtist `json:"artists,omitempty"`
 }
 

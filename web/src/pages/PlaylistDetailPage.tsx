@@ -43,9 +43,10 @@ export default function PlaylistDetailPage() {
 
   const playTrack = (track: any, idx: number) => {
     const tracks = (playlist?.tracks || []).map((t: any): PlayerTrack => ({
-      id: t.id, title: t.title, album: t.album || "",
-      album_id: t.album_id, duration: t.duration, suffix: t.file_format || t.suffix || "mp3",
+      id: t.id, title: t.title,
+      duration: t.duration, suffix: t.file_format || t.suffix || "mp3",
       cover_image_id: t.cover_image_id, artists: t.artists,
+      albums: t.albums,
     }))
     player.setQueue(tracks, idx, id)
   }
@@ -207,7 +208,7 @@ export default function PlaylistDetailPage() {
               </span>
               <span className="flex-1 min-w-0" />
               <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={t.artists} /></span>
-              <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
+              <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.albums?.[0]?.title || ""}</span>
               <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
               <button onClick={e => { e.stopPropagation(); removeTrack(t.id) }}
                 className="w-10 shrink-0 text-center text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 cursor-pointer">

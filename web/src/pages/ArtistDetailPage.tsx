@@ -13,9 +13,10 @@ const roleLabels: Record<string, string> = {
 }
 
 interface RawTrack {
-  id: string; title: string; album: string; album_id: string; duration: number
-  file_format: string; cover_image_id?: string; track: number
+  id: string; title: string; duration: number
+  file_format: string; cover_image_id?: string
   artists: { artist_id: string; name: string; role: string }[]
+  albums?: { id: string; title?: string; track?: number; disc_number?: number }[]
 }
 
 interface RoleGroup { role: string; label: string; tracks: RawTrack[] }
@@ -63,8 +64,10 @@ export default function ArtistDetailPage() {
 
   const allPlayerTracks: PlayerTrack[] = useMemo(() =>
     rawTracks.map(t => ({
-      id: t.id, title: t.title, album: t.album || "", album_id: t.album_id, duration: t.duration,
-      suffix: t.file_format || "mp3", cover_image_id: t.cover_image_id, artists: t.artists,
+      id: t.id, title: t.title,
+      duration: t.duration, suffix: t.file_format || "mp3",
+      cover_image_id: t.cover_image_id, artists: t.artists,
+      albums: t.albums,
     })), [rawTracks, artist])
 
   const toggleSelect = (id: string) => {
@@ -149,8 +152,10 @@ export default function ArtistDetailPage() {
 
       {roleGroups.map(group => {
         const groupTracks: PlayerTrack[] = group.tracks.map(t => ({
-          id: t.id, title: t.title, album: t.album || "", album_id: t.album_id, duration: t.duration,
-          suffix: t.file_format || "mp3", cover_image_id: t.cover_image_id, artists: t.artists,
+          id: t.id, title: t.title,
+          duration: t.duration, suffix: t.file_format || "mp3",
+          cover_image_id: t.cover_image_id, artists: t.artists,
+          albums: t.albums,
         }))
         return (
           <div key={group.role} className="space-y-1">
@@ -213,7 +218,7 @@ export default function ArtistDetailPage() {
                         onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
                     </span>
                     <span className="flex-1 min-w-0" />
-                    <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.album || ""}</span>
+                    <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.albums?.[0]?.title || ""}</span>
                     <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
                   </div>
                 </div>

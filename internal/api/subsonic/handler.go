@@ -340,8 +340,10 @@ func (h *Handler) enrichTrack(ctx context.Context, track *domain.Track) map[stri
 	} else {
 		out["artistId"] = track.Artist.ID
 	}
-	if track.Album == nil {
-		if a, err := h.albumRepo.FindByID(ctx, track.AlbumID); err == nil {
+	if len(track.Albums) > 0 && track.Albums[0].Album != nil {
+		out["album"] = track.Albums[0].Album.Title
+	} else if len(track.Albums) > 0 {
+		if a, err := h.albumRepo.FindByID(ctx, track.Albums[0].AlbumID); err == nil {
 			out["album"] = a.Title
 		}
 	}
@@ -460,8 +462,8 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 	}
 
 	var album *domain.Album
-	if track != nil {
-		album, _ = h.albumRepo.FindByID(ctx, track.AlbumID)
+	if track != nil && len(track.Albums) > 0 {
+		album, _ = h.albumRepo.FindByID(ctx, track.Albums[0].AlbumID)
 	} else {
 		album, _ = h.albumRepo.FindByID(ctx, id)
 	}
@@ -517,14 +519,26 @@ func albumToSub(a *domain.Album) map[string]interface{} {
 }
 
 func trackToSub(t *domain.Track) map[string]interface{} {
+	albumID := ""
+	trackNum := 0
+	discNum := 0
+	albumTitle := ""
+	if len(t.Albums) > 0 {
+		albumID = t.Albums[0].AlbumID
+		trackNum = t.Albums[0].TrackNumber
+		discNum = t.Albums[0].DiscNumber
+		if t.Albums[0].Album != nil {
+			albumTitle = t.Albums[0].Album.Title
+		}
+	}
 	out := map[string]interface{}{
 		"id":          t.ID,
 		"title":       t.Title,
 		"artist":      "",
-		"album":       "",
-		"albumId":     t.AlbumID,
-		"track":       t.TrackNumber,
-		"discNumber":  t.DiscNumber,
+		"album":       albumTitle,
+		"albumId":     albumID,
+		"track":       trackNum,
+		"discNumber":  discNum,
 		"duration":    t.Duration,
 		"bitRate":     t.BitRate / 1000,
 		"size":        t.FileSize,
@@ -534,9 +548,6 @@ func trackToSub(t *domain.Track) map[string]interface{} {
 	}
 	if t.Artist != nil {
 		out["artist"] = t.Artist.Name
-	}
-	if t.Album != nil {
-		out["album"] = t.Album.Title
 	}
 	return out
 }

@@ -41,7 +41,7 @@ export default function PlayerPage() {
               <div className="flex-1 min-w-0">
                 <span className={`text-sm truncate block ${i === ps.queueIdx ? "text-green-500" : ""}`}>{t.title}</span>
                 <span className="text-xs text-zinc-500 truncate block">
-                  <ArtistLink artists={t.artists} />{t.album ? ` — ${t.album}` : ""}
+                  <ArtistLink artists={t.artists} />{t.albums?.[0]?.title ? ` — ${t.albums[0].title}` : ""}
                 </span>
               </div>
               <span className="w-16 text-right text-sm text-zinc-400">{formatDuration(t.duration)}</span>

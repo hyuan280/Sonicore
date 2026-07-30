@@ -193,7 +193,7 @@ export default function PlayerBar() {
                 <div className="truncate min-w-0">
                   <p className="text-sm font-medium truncate">{track.title}</p>
                   <p className="text-xs text-zinc-400 truncate">
-                    <ArtistLink artists={track.artists} />{track.album ? ` — ${track.album}` : ""}
+                    <ArtistLink artists={track.artists} />{track.albums?.[0]?.title ? ` — ${track.albums[0].title}` : ""}
                   </p>
                 </div>
               </>

@@ -147,6 +147,7 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string) {
 	}
 	s.scanRepo.Update(ctx, job)
 
+	lib.LastScanErrors = len(stats.Errors)
 	lib.UpdatedAt = time.Now()
 	s.libRepo.UpdateStats(ctx, lib)
 

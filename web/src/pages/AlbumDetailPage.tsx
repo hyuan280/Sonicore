@@ -24,9 +24,10 @@ export default function AlbumDetailPage() {
     if (!albumId) return
     api.data.album(albumId).then(async d => {
       const items: PlayerTrack[] = (d.tracks || []).map((t: any) => ({
-        id: t.id, title: t.title, album: d.album?.title || "",
-        album_id: albumId!, duration: t.duration, suffix: t.file_format || "mp3",
+        id: t.id, title: t.title,
+        duration: t.duration, suffix: t.file_format || "mp3",
         cover_image_id: t.cover_image_id, artists: t.artists,
+        albums: t.albums,
       }))
       setTracks(items)
       setAlbum(d.album)

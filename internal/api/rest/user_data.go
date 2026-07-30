@@ -46,12 +46,19 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 	if itemType == "track" {
 		rows, err := h.db.QueryContext(r.Context(),
 			`SELECT f.item_type, f.item_id, f.created_at,
-			        COALESCE(t.title, ''), COALESCE(al.title, ''),
-			        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
+			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
 			        t.cover_image_id
 			 FROM favorites f
 			 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
-			 LEFT JOIN albums al ON al.id = t.album_id
+			 LEFT JOIN LATERAL (
+			     SELECT tal.album_id, al.title AS album_title
+			     FROM track_albums tal
+			     JOIN albums al ON al.id = tal.album_id
+			     WHERE tal.track_id = t.id
+			     ORDER BY tal.disc_number, tal.track_number
+			     LIMIT 1
+			 ) sub ON true
 			 WHERE f.user_id = $1 AND f.item_type = 'track'
 			 ORDER BY f.created_at DESC`, userID)
 		if err != nil {
@@ -69,8 +76,10 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID)
 			item := map[string]interface{}{
 				"item_type": t, "item_id": id, "created_at": ca,
-				"title": title, "album": album,
-				"album_id": albumID, "duration": duration, "suffix": fileFormat,
+				"title": title, "duration": duration, "suffix": fileFormat,
+			}
+			if albumID != "" {
+				item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
 			}
 			if coverID.Valid {
 				item["cover_image_id"] = coverID.String
@@ -213,12 +222,19 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT ph.id, ph.track_id, ph.played_at,
-		        COALESCE(t.title, ''), COALESCE(al.title, ''),
-		        COALESCE(t.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+		        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
+		        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
 		        t.cover_image_id
 		 FROM play_history ph
 		 INNER JOIN tracks t ON t.id = ph.track_id
-		 LEFT JOIN albums al ON al.id = t.album_id
+		 LEFT JOIN LATERAL (
+		     SELECT tal.album_id, al.title AS album_title
+		     FROM track_albums tal
+		     JOIN albums al ON al.id = tal.album_id
+		     WHERE tal.track_id = t.id
+		     ORDER BY tal.disc_number, tal.track_number
+		     LIMIT 1
+		 ) sub ON true
 		 WHERE ph.user_id = $1
 		 ORDER BY ph.played_at DESC LIMIT 100`,
 		userID)
@@ -230,19 +246,21 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 
 	var items []map[string]interface{}
 	var trackIDs []string
-	for rows.Next() {
-		var id, tid string
-		var pa time.Time
-		var title, album, albumID, fileFormat string
-		var duration float64
-		var coverID sql.NullString
-		rows.Scan(&id, &tid, &pa, &title, &album,
-			&albumID, &duration, &fileFormat, &coverID)
-		item := map[string]interface{}{
-			"id": id, "track_id": tid, "played_at": pa,
-			"title": title, "album": album,
-			"album_id": albumID, "duration": duration, "suffix": fileFormat,
-		}
+		for rows.Next() {
+			var id, tid string
+			var pa time.Time
+			var title, album, albumID, fileFormat string
+			var duration float64
+			var coverID sql.NullString
+			rows.Scan(&id, &tid, &pa, &title, &album,
+				&albumID, &duration, &fileFormat, &coverID)
+			item := map[string]interface{}{
+				"id": id, "track_id": tid, "played_at": pa,
+				"title": title, "duration": duration, "suffix": fileFormat,
+			}
+			if albumID != "" {
+				item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
+			}
 		if coverID.Valid {
 			item["cover_image_id"] = coverID.String
 		}
@@ -408,12 +426,25 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 		t := map[string]interface{}{
 			"id":             track.ID,
 			"title":          track.Title,
-			"album_id":       track.AlbumID,
 			"cover_image_id": track.CoverImageID,
-			"track":          track.TrackNumber,
 			"duration":       track.Duration,
 			"bit_rate":       track.BitRate,
 			"suffix":         track.FileFormat,
+		}
+		if len(track.Albums) > 0 {
+			albums := make([]map[string]interface{}, len(track.Albums))
+			for i, tal := range track.Albums {
+				entry := map[string]interface{}{
+					"id": tal.AlbumID,
+					"track": tal.TrackNumber,
+					"disc_number": tal.DiscNumber,
+				}
+				if tal.Album != nil {
+					entry["title"] = tal.Album.Title
+				}
+				albums[i] = entry
+			}
+			t["albums"] = albums
 		}
 		if tas, err := h.trackRepo.LoadTrackArtists(r.Context(), track.ID); err == nil && len(tas) > 0 {
 			artists := make([]map[string]interface{}, len(tas))
@@ -425,9 +456,6 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			t["artists"] = artists
-		}
-		if a, err := h.albumRepo.FindByID(r.Context(), track.AlbumID); err == nil {
-			t["album"] = a.Title
 		}
 		tracks = append(tracks, t)
 	}
@@ -641,6 +669,8 @@ type trackSummary struct {
 	Duration      float64 `json:"duration"`
 	Suffix        string  `json:"suffix"`
 	CoverImageID  *string `json:"cover_image_id,omitempty"`
+	DiscNumber    int     `json:"disc_number,omitempty"`
+	TrackNumber   int     `json:"track,omitempty"`
 }
 
 func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
@@ -667,11 +697,19 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve track metadata (maintain order)
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(al.title, ''), t.album_id, t.duration, t.file_format, t.cover_image_id
+		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(sub.album_title, ''), COALESCE(sub.album_id, ''), t.duration, t.file_format, t.cover_image_id,
+		 COALESCE(sub.track_number, 0), COALESCE(sub.disc_number, 0)
 		 FROM tracks t
 		 LEFT JOIN track_artists ta ON ta.track_id = t.id AND ta.role = 'performer' AND ta.sort_order = 0
 		 LEFT JOIN artists ar ON ta.artist_id = ar.id
-		 LEFT JOIN albums al ON t.album_id = al.id
+		 LEFT JOIN LATERAL (
+		     SELECT tal.album_id, al.title AS album_title, tal.track_number, tal.disc_number
+		     FROM track_albums tal
+		     JOIN albums al ON al.id = tal.album_id
+		     WHERE tal.track_id = t.id
+		     ORDER BY tal.disc_number, tal.track_number
+		     LIMIT 1
+		 ) sub ON true
 		 WHERE t.id = ANY($1)
 		 ORDER BY array_position($1::text[], t.id)`, pq.Array(q.TrackIDs))
 	if err != nil {
@@ -685,17 +723,18 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t trackSummary
 		var coverID sql.NullString
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber); err != nil {
 			continue
 		}
 		item := map[string]interface{}{
 			"id":       t.ID,
 			"title":    t.Title,
 			"artist":   t.Artist,
-			"album":    t.Album,
-			"album_id": t.AlbumID,
 			"duration": t.Duration,
 			"suffix":   t.Suffix,
+		}
+		if t.AlbumID != "" {
+			item["albums"] = []map[string]interface{}{{"id": t.AlbumID, "title": t.Album, "track": t.TrackNumber, "disc_number": t.DiscNumber}}
 		}
 		if coverID.Valid {
 			item["cover_image_id"] = coverID.String

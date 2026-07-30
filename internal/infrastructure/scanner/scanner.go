@@ -163,9 +163,33 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			changed := false
 			overwrite := opts.Mode == "overwrite"
 
+			// Ensure track_albums entry exists (set before ApplyEnrichment so album enrichment can find it)
+			if len(existing.Albums) == 0 {
+				albumName := meta.Album
+				if albumName == "" && enrichment != nil && enrichment.Album != "" {
+					albumName = enrichment.Album
+				}
+				var primaryID string
+				if tas, err := e.trackRepo.LoadTrackArtists(ctx, existing.ID); err == nil && len(tas) > 0 {
+					primaryID = tas[0].ArtistID
+				}
+				if primaryID != "" && albumName != "" {
+					album, err := e.findOrCreateAlbum(ctx, lib.ID, albumName, primaryID, meta.Year, meta.Genre, enrichment)
+					if err == nil {
+						existing.Albums = []*domain.TrackAlbum{{
+							AlbumID:     album.ID,
+							TrackNumber: meta.TrackNumber,
+							DiscNumber:  meta.DiscNumber,
+						}}
+						changed = true
+					}
+				}
+			}
+
 			if ApplyEnrichment(ctx, existing, meta, enrichment, lib.ID, overwrite, e.trackRepo, e.artistRepo, e.albumRepo) {
 				changed = true
 			}
+
 			if changed {
 				e.trackRepo.Update(ctx, existing)
 			}
@@ -175,7 +199,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		title := meta.Title
-		if meta.TitleFromFilename && enrichment != nil && enrichment.Title != "" {
+		if enrichment != nil && enrichment.Title != "" {
 			title = enrichment.Title
 		}
 
@@ -185,7 +209,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		albumName := meta.Album
-		if meta.Album == "" && enrichment != nil && enrichment.Album != "" {
+		if enrichment != nil && enrichment.Album != "" {
 			albumName = enrichment.Album
 		}
 
@@ -283,23 +307,25 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		track := &domain.Track{
-			ID:          trackID,
-			LibraryID:   lib.ID,
-			Title:       title,
-			AlbumID:     album.ID,
-			Artists:     trackArtists,
-			TrackNumber: meta.TrackNumber,
-			DiscNumber:  meta.DiscNumber,
-			Duration:    meta.Duration,
-			BitRate:     meta.BitRate,
-			SampleRate:  meta.SampleRate,
-			Channels:    meta.Channels,
-			FilePath:    path,
-			FileSize:    meta.FileSize,
-			FileFormat:  meta.FileFormat,
-			Hash:        fileHash,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:         trackID,
+			LibraryID:  lib.ID,
+			Title:      title,
+			Artists:    trackArtists,
+			Duration:   meta.Duration,
+			BitRate:    meta.BitRate,
+			SampleRate: meta.SampleRate,
+			Channels:   meta.Channels,
+			FilePath:   path,
+			FileSize:   meta.FileSize,
+			FileFormat: meta.FileFormat,
+			Hash:       fileHash,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Albums: []*domain.TrackAlbum{{
+				AlbumID:     album.ID,
+				TrackNumber: meta.TrackNumber,
+				DiscNumber:  meta.DiscNumber,
+			}},
 		}
 
 		if enrichment != nil {
@@ -391,8 +417,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 				shuffle_idx = 0`, pq.Array(deletedIDs))
 	}
 
-	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
-	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)`)
+	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
+	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 	e.db.ExecContext(ctx, `DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 
@@ -492,8 +518,8 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 			return false
 		}
 	}
-	if track.AlbumID != "" {
-		album, err := e.albumRepo.FindByID(ctx, track.AlbumID)
+	for _, tal := range track.Albums {
+		album, err := e.albumRepo.FindByID(ctx, tal.AlbumID)
 		if err != nil || album.Title == "" || album.Title == "Unknown Album" ||
 			album.MBID == "" || album.Country == "" ||
 			album.Year == 0 || album.Genre == "" {
@@ -690,7 +716,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 		changed = true
 	}
 	if enrichment != nil {
-		if meta.TitleFromFilename && enrichment.Title != "" && (track.Title != enrichment.Title || overwrite) {
+		if enrichment.Title != "" && (track.Title != enrichment.Title || overwrite) {
 			track.Title = enrichment.Title
 			changed = true
 		}
@@ -759,14 +785,15 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 				}
 			}
 		}
-		if enrichment.AlbumMBID != "" && track.AlbumID != "" {
-			if album, err := albumRepo.FindByID(ctx, track.AlbumID); err == nil {
+		if enrichment.AlbumMBID != "" && len(track.Albums) > 0 {
+			album, err := albumRepo.FindByID(ctx, track.Albums[0].AlbumID)
+			if err == nil {
 				updated := false
 				if enrichment.AlbumMBID != "" && (album.MBID == "" || overwrite) {
 					album.MBID = enrichment.AlbumMBID
 					updated = true
 				}
-				if enrichment.Album != "" && (album.Title == "" || album.Title == "Unknown Album" || overwrite) {
+				if enrichment.Album != "" && album.Title != enrichment.Album {
 					album.Title = enrichment.Album
 					updated = true
 				}

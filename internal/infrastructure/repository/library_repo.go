@@ -19,6 +19,7 @@ func scanLibrary(scanner interface{ Scan(dest ...interface{}) error }) (*domain.
 	var l domain.Library
 	err := scanner.Scan(&l.ID, &l.Name, &l.Path, &l.OwnerID,
 		&l.MetadataStorageMode, &l.ScanInterval, &l.LastScannedAt,
+		&l.LastScanErrors,
 		&l.TrackCount, &l.Duration, &l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -40,7 +41,7 @@ func (r *LibraryRepo) Create(ctx context.Context, lib *domain.Library) error {
 func (r *LibraryRepo) FindByID(ctx context.Context, id string) (*domain.Library, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
-		 last_scanned_at, track_count, duration, created_at, updated_at
+		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
 		 FROM libraries WHERE id = $1`, id)
 	return scanLibrary(row)
 }
@@ -48,7 +49,7 @@ func (r *LibraryRepo) FindByID(ctx context.Context, id string) (*domain.Library,
 func (r *LibraryRepo) FindByOwnerID(ctx context.Context, ownerID string) ([]domain.Library, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
-		 last_scanned_at, track_count, duration, created_at, updated_at
+		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
 		 FROM libraries WHERE owner_id = $1 ORDER BY name`, ownerID)
 	if err != nil {
 		return nil, err
@@ -69,7 +70,7 @@ func (r *LibraryRepo) FindByOwnerID(ctx context.Context, ownerID string) ([]doma
 func (r *LibraryRepo) FindByUserID(ctx context.Context, userID string) ([]domain.Library, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT l.id, l.name, l.path, l.owner_id, l.metadata_storage_mode, l.scan_interval,
-		 l.last_scanned_at, l.track_count, l.duration, l.created_at, l.updated_at
+		 l.last_scanned_at, l.last_scan_errors, l.track_count, l.duration, l.created_at, l.updated_at
 		 FROM libraries l
 		 JOIN library_members lm ON lm.library_id = l.id
 		 WHERE lm.user_id = $1
@@ -134,8 +135,8 @@ func (r *LibraryRepo) GetMembers(ctx context.Context, libraryID string) ([]domai
 
 func (r *LibraryRepo) UpdateStats(ctx context.Context, lib *domain.Library) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE libraries SET track_count=$2, duration=$3, last_scanned_at=$4, updated_at=$5 WHERE id=$1`,
-		lib.ID, lib.TrackCount, lib.Duration, lib.LastScannedAt, lib.UpdatedAt)
+		`UPDATE libraries SET track_count=$2, duration=$3, last_scanned_at=$4, last_scan_errors=$5, updated_at=$6 WHERE id=$1`,
+		lib.ID, lib.TrackCount, lib.Duration, lib.LastScannedAt, lib.LastScanErrors, lib.UpdatedAt)
 	return err
 }
 

@@ -218,6 +218,19 @@ func (c *MBClient) SearchArtists(name string) ([]MBArtistBrief, error) {
 	return result.Artists, nil
 }
 
+func (c *MBClient) SearchReleases(name string) ([]MBRelease, error) {
+	var result MBReleaseSearch
+	q := url.Values{}
+	q.Set("query", fmt.Sprintf("release:%s", name))
+	q.Set("limit", "10")
+	q.Set("inc", "artists")
+
+	if err := c.get("/release", q, &result); err != nil {
+		return nil, err
+	}
+	return result.Releases, nil
+}
+
 type MBArtistFull struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`

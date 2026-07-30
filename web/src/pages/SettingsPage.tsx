@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
-import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan } from "lucide-react"
+import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert } from "lucide-react"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 import ArtistSelector, { type SelectedArtist } from "../components/ArtistSelector"
@@ -21,7 +21,7 @@ export default function SettingsPage() {
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState("")
   const [path, setPath] = useState("")
-  const [scanning, setScanning] = useState<Record<string, { scanned: number; total: number }>>({})
+  const [scanning, setScanning] = useState<Record<string, { scanned: number; total: number; errors?: number }>>({})
   const pollingRef = useRef<Record<string, boolean>>({})
 
   const [dirPickerOpen, setDirPickerOpen] = useState(false)
@@ -58,7 +58,7 @@ export default function SettingsPage() {
       api.libraries.scanStatus(lib.id).then(status => {
         if (status.status === "running") {
           pollingRef.current[lib.id] = true
-          setScanning(prev => ({ ...prev, [lib.id]: { scanned: status.scanned, total: status.total_files } }))
+          setScanning(prev => ({ ...prev, [lib.id]: { scanned: status.scanned, total: status.total_files, errors: status.errors } }))
           setTimeout(() => pollScan(lib.id), 1000)
         }
       }).catch(() => {})
@@ -71,7 +71,7 @@ export default function SettingsPage() {
       const status = await api.libraries.scanStatus(libId)
       if (!pollingRef.current[libId]) return
       if (status.status === "running") {
-        setScanning(prev => ({ ...prev, [libId]: { scanned: status.scanned, total: status.total_files } }))
+        setScanning(prev => ({ ...prev, [libId]: { scanned: status.scanned, total: status.total_files, errors: status.errors } }))
         setTimeout(() => pollScan(libId), 1000)
       } else {
         setScanning(prev => { const n = { ...prev }; delete n[libId]; return n })
@@ -110,9 +110,10 @@ export default function SettingsPage() {
         if (data?.tracks) {
           usePlayer.setState({
             queue: data.tracks.map((t: any) => ({
-              id: t.id, title: t.title, album: t.album,
-              album_id: t.album_id, duration: t.duration, suffix: t.suffix,
+              id: t.id, title: t.title,
+              duration: t.duration, suffix: t.suffix,
               cover_image_id: t.cover_image_id, artists: t.artists,
+              albums: t.albums,
             })),
             queueIdx: data.queue_idx ?? 0,
             shuffleOrder: data.shuffle_order ?? [],
@@ -184,15 +185,31 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3 min-w-0">
                     <Music className="w-4 h-4 text-green-500 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{lib.name}</p>
+                      <p className="text-sm font-medium truncate flex items-center gap-2">
+                        {lib.name}
+                        {(lib.last_scan_errors || 0) > 0 && (
+                          <span className="text-yellow-500 text-xs flex items-center gap-0.5 shrink-0" title={`${lib.last_scan_errors} scan error(s)`}>
+                            <TriangleAlert className="w-4 h-4" />
+                            {lib.last_scan_errors}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-zinc-500 truncate">{lib.track_count} tracks · {lib.path}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {prog ? (
-                      <span className="text-sm font-semibold text-zinc-300 tabular-nums">
-                        {prog.scanned}/{prog.total || "?"}
-                      </span>
+                      <>
+                        {(prog.errors ?? 0) > 0 && (
+                          <span className="text-yellow-500 text-xs font-semibold tabular-nums flex items-center gap-0.5">
+                            <TriangleAlert className="w-3.5 h-3.5" />
+                            {prog.errors}
+                          </span>
+                        )}
+                        <span className="text-sm font-semibold text-zinc-300 tabular-nums">
+                          {prog.scanned}/{prog.total || "?"}
+                        </span>
+                      </>
                     ) : null}
                     <Button variant="ghost" size="sm" onClick={() => setManageLib(lib)} disabled={!!prog}>
                       <ColumnsSettings className="w-4 h-4" />
@@ -301,7 +318,7 @@ export default function SettingsPage() {
                   <div key={t.id} className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 text-sm group">
                     <span className="flex-1 min-w-0 truncate">{t.title}</span>
                     <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block"><ArtistLink artists={t.artists} /></span>
-                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.album || ""}</span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.albums?.[0]?.title || ""}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(t.duration)}</span>
                     <span className="w-36 shrink-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -315,7 +332,7 @@ export default function SettingsPage() {
                               track_id: t.id,
                               title: t.title,
                               artist: performerNames(t.artists),
-                              album: t.album || "",
+                              album: t.albums?.[0]?.title || "",
                               mbid: t.mbid || "",
                             }),
                           })
@@ -363,6 +380,10 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
   const [mbidSearching, setMbidSearching] = useState(false)
   const [mbidError, setMbidError] = useState(false)
   const [reidentifying, setReidentifying] = useState(false)
+  const [selectedAlbums, setSelectedAlbums] = useState<{id?: string; title: string; mbid?: string; artist?: string}[]>([])
+  const [albumQuery, setAlbumQuery] = useState("")
+  const [albumResults, setAlbumResults] = useState<any[]>([])
+  const [albumSearching, setAlbumSearching] = useState(false)
 
   useEffect(() => {
     const result = data?.result
@@ -377,6 +398,21 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
     setMbidValue(data?.result?.track_mbid ?? data?.track?.mbid ?? "")
     setSaveError("")
   }, [data?.result?.track_mbid, data?.track?.mbid])
+
+  useEffect(() => {
+    if (data?.result?.albums?.length > 0) {
+      setSelectedAlbums(data.result.albums.map((a: any) => ({ id: a.id, title: a.title, mbid: "" })))
+    } else if (data?.result?.album) {
+      const initial = [{ title: data.result.album, mbid: data.result.album_mbid || "" }]
+      if (data.result.album_mbid) {
+        setSelectedAlbums(initial)
+      } else if (!data.edit?.album) {
+        setSelectedAlbums(initial)
+      }
+    } else if (data?.edit?.album) {
+      setSelectedAlbums([{ title: data.edit.album, mbid: data.edit.album_mbid || "" }])
+    }
+  }, [data?.result?.album, data?.result?.album_mbid, data?.result?.albums])
 
   const handleMbidSearch = async () => {
     if (!mbidValue) return
@@ -421,8 +457,41 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
     setMbidSearching(false)
   }
 
+  const doAlbumSearch = async () => {
+    if (!albumQuery.trim()) return
+    setAlbumSearching(true)
+    try {
+      const res = await fetch("/api/metadata/search/album", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem("token") },
+        body: JSON.stringify({ name: albumQuery.trim() }),
+      })
+      const d = await res.json()
+      setAlbumResults(d.releases || [])
+    } catch {
+      setAlbumResults([])
+    }
+    setAlbumSearching(false)
+  }
+
+  const addAlbum = (al: { title: string; mbid: string; artist?: string }) => {
+    const exists = al.mbid
+      ? selectedAlbums.some(a => a.mbid === al.mbid)
+      : selectedAlbums.some(a => a.title === al.title && !a.mbid)
+    if (!exists) {
+      setSelectedAlbums([...selectedAlbums, al])
+    }
+    setAlbumQuery("")
+    setAlbumResults([])
+  }
+
+  const removeAlbum = (idx: number) => {
+    setSelectedAlbums(selectedAlbums.filter((_, i) => i !== idx))
+  }
+
   const display = localResult ?? data.result
   const isMatched = display?.matched && display?.track_mbid
+  const locked = !!data?.result?.track_mbid
 
   useEffect(() => {
     if (data?.result && !(data.result.matched && data.result.track_mbid)) {
@@ -487,9 +556,50 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                 {performerNames(display.artists)}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">Album</span>
-              <span className="text-sm text-zinc-200 flex-1 min-w-0">{display.album || ""}</span>
+            <div className="flex items-start gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right mt-1">Albums</span>
+              <div className="flex-1 min-w-0 bg-zinc-800 rounded-lg p-1.5 space-y-1">
+                {selectedAlbums.map((a, i) => (
+                  <div key={i} className="flex items-center gap-1 text-sm w-full">
+                    <span className="text-zinc-200 truncate flex-1 min-w-0">{a.title}</span>
+                    {a.mbid && <span className="text-xs text-zinc-500 font-mono shrink-0">{a.mbid.substring(0, 8)}</span>}
+                    {(!locked || i > 0) && (
+                      <button onClick={() => removeAlbum(i)} className="p-0.5 text-zinc-500 hover:text-red-400 cursor-pointer shrink-0">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                    {locked && i === 0 && <span className="text-xs text-green-500 shrink-0">primary</span>}
+                  </div>
+                ))}
+                <div className="border-t border-zinc-700 pt-1">
+                  <div className="flex gap-1">
+                    <input value={albumQuery} onChange={e => setAlbumQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") doAlbumSearch() }}
+                      placeholder="Search album..." className="bg-zinc-800 rounded px-2 py-1 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500" />
+                    <button onClick={doAlbumSearch} disabled={albumSearching} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
+                      {albumSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  {albumResults.length > 0 && (
+                    <div className="mt-1 border border-zinc-700 rounded-lg max-h-32 overflow-y-auto">
+                      {albumResults.map((r, i) => {
+                        const added = r.mbid
+                          ? selectedAlbums.some(a => a.mbid === r.mbid)
+                          : selectedAlbums.some(a => a.title === r.title && !a.mbid)
+                        return (
+                          <button key={i} onClick={() => { addAlbum({ title: r.title, mbid: r.mbid }) }}
+                            className="w-full flex items-center gap-1 px-2 py-1 text-left text-sm hover:bg-zinc-700 cursor-pointer">
+                            <span className="text-zinc-200 truncate min-w-0">{r.title}</span>
+                            {!r.mbid && <X className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
+                            {r.artist && <span className="text-xs text-zinc-500 shrink-0">({r.artist})</span>}
+                            {r.mbid ? <span className="text-xs text-zinc-500 font-mono shrink-0 ml-auto">{r.mbid.substring(0, 8)}</span> : <span className="text-xs text-green-400 shrink-0 ml-auto">click to select</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
             {(["year","genre"] as const).map(f => (
               <div key={f} className="flex items-center gap-2">
@@ -544,13 +654,47 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
               <span className="text-zinc-400 w-14 shrink-0 text-right text-sm">Artists</span>
               <ArtistSelector artists={selectedArtists} onChange={setSelectedArtists} showAdd />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">Album</span>
-              <input
-                value={data.edit.album ?? data.result?.album ?? (data.track?.album || "")}
-                onChange={e => onUpdate({ ...data.edit, album: e.target.value })}
-                className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
-              />
+            <div className="flex items-start gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right mt-1">Albums</span>
+              <div className="flex-1 min-w-0 bg-zinc-800 rounded-lg p-1.5 space-y-1">
+                {selectedAlbums.map((a, i) => (
+                  <div key={i} className="flex items-center gap-1 text-sm w-full">
+                    <span className="text-zinc-200 truncate flex-1 min-w-0">{a.title}</span>
+                    {a.mbid && <span className="text-xs text-zinc-500 font-mono shrink-0">{a.mbid.substring(0, 8)}</span>}
+                    <button onClick={() => removeAlbum(i)} className="p-0.5 text-zinc-500 hover:text-red-400 cursor-pointer shrink-0">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                <div className="border-t border-zinc-700 pt-1">
+                  <div className="flex gap-1">
+                    <input value={albumQuery} onChange={e => setAlbumQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") doAlbumSearch() }}
+                      placeholder="Search album..." className="bg-zinc-800 rounded px-2 py-1 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500" />
+                    <button onClick={doAlbumSearch} disabled={albumSearching} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
+                      {albumSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  {albumResults.length > 0 && (
+                    <div className="mt-1 border border-zinc-700 rounded-lg max-h-32 overflow-y-auto">
+                      {albumResults.map((r, i) => {
+                        const added = r.mbid
+                          ? selectedAlbums.some(a => a.mbid === r.mbid)
+                          : selectedAlbums.some(a => a.title === r.title && !a.mbid)
+                        return (
+                          <button key={i} onClick={() => { addAlbum({ title: r.title, mbid: r.mbid }) }}
+                            className="w-full flex items-center gap-1 px-2 py-1 text-left text-sm hover:bg-zinc-700 cursor-pointer">
+                            <span className="text-zinc-200 truncate min-w-0">{r.title}</span>
+                            {!r.mbid && <X className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
+                            {r.artist && <span className="text-xs text-zinc-500 shrink-0">({r.artist})</span>}
+                            {r.mbid ? <span className="text-xs text-zinc-500 font-mono shrink-0 ml-auto">{r.mbid.substring(0, 8)}</span> : <span className="text-xs text-green-400 shrink-0 ml-auto">click to select</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
             {(["year","genre"] as const).map(f => (
               <div key={f} className="flex items-center gap-2">
@@ -601,6 +745,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                   year: parseInt(data.edit.year) || display?.year || 0,
                   genre: data.edit.genre ?? display?.genre ?? "",
                   artists,
+                  albums: selectedAlbums.map(a => ({ id: a.id || "", title: a.title, mbid: a.mbid || "", artist: a.artist || "" })),
                 }),
               })
               if (!res.ok) {

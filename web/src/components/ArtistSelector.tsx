@@ -18,20 +18,23 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
   const [results, setResults] = useState<SelectedArtist[]>([])
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
+  const [lastQuery, setLastQuery] = useState("")
 
   const doSearch = async () => {
-    if (!searchQuery.trim()) return
+    const q = searchQuery.trim()
+    if (!q) return
+    setLastQuery(q)
     setSearching(true)
     setSearched(false)
     try {
       const res = await fetch("/api/metadata/search/artist", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem("token") },
-        body: JSON.stringify({ name: searchQuery.trim() }),
+        body: JSON.stringify({ name: q }),
       })
       const data = await res.json()
       const list = (data.artists || []).filter(
-        (a: any) => a.name.toLowerCase() === searchQuery.trim().toLowerCase()
+        (a: any) => a.name.toLowerCase() === q.toLowerCase()
       )
       setResults(list)
       setSearched(true)
@@ -50,13 +53,13 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
     setSearchQuery("")
     setResults([])
     setSearched(false)
+    setLastQuery("")
     onAddToggle?.(false)
   }
 
   const selectUnmatched = () => {
-    const name = searchQuery.trim()
-    if (!name) return
-    selectArtist({ name, mbid: "" })
+    if (!lastQuery) return
+    selectArtist({ name: lastQuery, mbid: "" })
   }
 
   const removeArtist = (idx: number) => {
@@ -71,10 +74,11 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
     setShowSearch(false)
     setResults([])
     setSearched(false)
+    setLastQuery("")
     onAddToggle?.(false)
   }
 
-  const showCreate = searched && !searching && results.length === 0 && searchQuery.trim()
+  const showCreate = searched && !searching && results.length === 0 && lastQuery
 
   return (
     <div className="flex-1 min-w-0 bg-zinc-800 rounded-lg p-1.5 space-y-1">
@@ -116,7 +120,7 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
           {showCreate && (
             <button onClick={selectUnmatched}
               className="w-full flex items-center gap-1 px-2 py-1 rounded text-left text-sm hover:bg-zinc-700 cursor-pointer">
-              <span className="text-zinc-200 truncate min-w-0">{searchQuery.trim()}</span>
+              <span className="text-zinc-200 truncate min-w-0">{lastQuery}</span>
               <X className="w-3 h-3 text-zinc-500 shrink-0" />
               <span className="text-xs text-green-400 ml-auto shrink-0">click to select</span>
             </button>

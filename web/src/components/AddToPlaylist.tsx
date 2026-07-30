@@ -100,7 +100,7 @@ export function FavBtn({ trackId, initiallyFav, onToggle }: FavProps) {
 }
 
 interface AddQueueProps {
-  track: { id: string; title: string; album?: string; album_id?: string; duration: number; suffix?: string; cover_image_id?: string; artists?: { artist_id: string; name: string; role: string }[] }
+  track: { id: string; title: string; duration: number; suffix?: string; cover_image_id?: string; artists?: { artist_id: string; name: string; role: string }[]; albums?: { id?: string; title?: string }[] }
 }
 
 export function AddQueueBtn({ track }: AddQueueProps) {
@@ -110,9 +110,9 @@ export function AddQueueBtn({ track }: AddQueueProps) {
       e.stopPropagation()
         ps.addToQueue([{
           id: track.id, title: track.title,
-          album: track.album || "", album_id: track.album_id || "",
           duration: track.duration, suffix: track.suffix || "mp3",
           cover_image_id: track.cover_image_id, artists: (track as any).artists,
+          albums: (track as any).albums,
         }])
     }}
       className="p-1 text-zinc-500 hover:text-blue-400 cursor-pointer" title="Add to queue">
