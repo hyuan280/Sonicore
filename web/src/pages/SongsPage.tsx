@@ -4,6 +4,7 @@ import { useLibrary } from "../stores/library"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { Clock, Play, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
+import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
@@ -170,7 +171,7 @@ export default function SongsPage() {
                 </span>
                 <span className="flex-1 min-w-0" />
                 <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block"><ArtistLink artists={t.artists} /></span>
-                <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.albums?.[0]?.title || ""}</span>
+                <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">{t.albums?.[0]?.id ? <Link to={`/albums/${t.albums[0].id}`} className="text-sm text-zinc-500 truncate hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{t.albums[0].title || ""}</Link> : <span className="text-sm text-zinc-500 truncate">{t.albums?.[0]?.title || ""}</span>}</span>
                 <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
               </div>
             </div>

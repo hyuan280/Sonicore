@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react"
-import { useParams } from "react-router-dom"
+import { useParams, Link } from "react-router-dom"
 import { api } from "../api/client"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
@@ -218,7 +218,7 @@ export default function ArtistDetailPage() {
                         onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
                     </span>
                     <span className="flex-1 min-w-0" />
-                    <span className="min-w-[120px] max-w-[280px] shrink-0 text-sm text-zinc-500 truncate text-center hidden sm:block">{t.albums?.[0]?.title || ""}</span>
+                    <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">{t.albums?.[0]?.id ? <Link to={`/albums/${t.albums[0].id}`} className="text-sm text-zinc-500 truncate hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{t.albums[0].title || ""}</Link> : <span className="text-sm text-zinc-500 truncate">{t.albums?.[0]?.title || ""}</span>}</span>
                     <span className="w-16 shrink-0 text-center text-sm text-zinc-400">{formatDuration(t.duration)}</span>
                   </div>
                 </div>

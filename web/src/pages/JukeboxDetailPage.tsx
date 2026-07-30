@@ -10,6 +10,7 @@ import {
   Play, Pause, SkipBack, SkipForward, Shuffle, Trash2, Repeat, Repeat1,
   Turntable, Settings, ArrowUpFromLine, Loader2,
 } from "lucide-react"
+import { Link } from "react-router-dom"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
@@ -257,6 +258,7 @@ export default function JukeboxDetailPage() {
             const qt = queueTracks[tid]
             const displayTitle = isCurrent && track ? track.title : qt?.title || tid.substring(0, 12) + "..."
             const displayAlbum = qt?.albums?.[0]?.title || qt?.album || ""
+            const albumLink = qt?.albums?.[0]?.id ? `/albums/${qt.albums[0].id}` : ""
             return (
               <div key={tid + i} onClick={() => { if (!id) return; api.jukebox.play(id, tid).then(r => r && setStatus(r)) }}
                 className={`flex items-center gap-3 px-3 py-2 text-sm cursor-pointer transition-colors ${
@@ -269,7 +271,7 @@ export default function JukeboxDetailPage() {
                   </div>
                   {(qt?.artists || displayAlbum) && (
                     <div className="text-xs text-zinc-500 truncate">
-                      {qt?.artists ? <ArtistLink artists={qt.artists} /> : null}{qt?.artists && displayAlbum ? " · " : ""}{displayAlbum || ""}
+                      {qt?.artists ? <ArtistLink artists={qt.artists} /> : null}{qt?.artists && displayAlbum ? " · " : ""}{albumLink ? <Link to={albumLink} className="hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{displayAlbum}</Link> : displayAlbum || ""}
                     </div>
                   )}
                 </div>

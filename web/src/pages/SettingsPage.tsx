@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
+import { Link } from "react-router-dom"
 import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert } from "lucide-react"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
@@ -318,7 +319,7 @@ export default function SettingsPage() {
                   <div key={t.id} className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 text-sm group">
                     <span className="flex-1 min-w-0 truncate">{t.title}</span>
                     <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block"><ArtistLink artists={t.artists} /></span>
-                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.albums?.[0]?.title || ""}</span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.albums?.[0]?.id ? <Link to={`/albums/${t.albums[0].id}`} className="hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{t.albums[0].title || ""}</Link> : <span>{t.albums?.[0]?.title || ""}</span>}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(t.duration)}</span>
                     <span className="w-36 shrink-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

@@ -3,6 +3,7 @@ import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music } from "lucide-react"
+import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
@@ -193,7 +194,15 @@ export default function PlayerBar() {
                 <div className="truncate min-w-0">
                   <p className="text-sm font-medium truncate">{track.title}</p>
                   <p className="text-xs text-zinc-400 truncate">
-                    <ArtistLink artists={track.artists} />{track.albums?.[0]?.title ? ` — ${track.albums[0].title}` : ""}
+                    <ArtistLink artists={track.artists} />
+                    {track.albums && track.albums.length > 0 && (
+                      <span className="truncate"> — {track.albums.map((a, i) => (
+                        <span key={a.id || i}>
+                          {i > 0 && <span className="mx-0.5 text-zinc-600">/</span>}
+                          {a.id ? <Link to={`/albums/${a.id}`} className="hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{a.title || ""}</Link> : <span>{a.title || ""}</span>}
+                        </span>
+                      ))}</span>
+                    )}
                   </p>
                 </div>
               </>
