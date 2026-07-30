@@ -170,6 +170,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
 	})
 	protected.HandleFunc("/metadata/identify", metadataHandler.Identify).Methods("POST")
+	protected.HandleFunc("/metadata/reidentify", metadataHandler.Reidentify).Methods("POST")
 	protected.HandleFunc("/metadata/search/track", metadataHandler.SearchTrack).Methods("POST")
 	protected.HandleFunc("/metadata/save", metadataHandler.Save).Methods("POST")
 	protected.HandleFunc("/metadata/search/artist", metadataHandler.SearchArtist).Methods("POST")

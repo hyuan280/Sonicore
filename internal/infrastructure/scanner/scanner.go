@@ -163,123 +163,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			changed := false
 			overwrite := opts.Mode == "overwrite"
 
-			if meta.MBID != "" && (existing.MBID == "" || overwrite) {
-				existing.MBID = meta.MBID
+			if ApplyEnrichment(ctx, existing, meta, enrichment, lib.ID, overwrite, e.trackRepo, e.artistRepo, e.albumRepo) {
 				changed = true
-			}
-			if enrichment != nil {
-				if meta.TitleFromFilename && enrichment.Title != "" && (existing.Title != enrichment.Title || overwrite) {
-					existing.Title = enrichment.Title
-					changed = true
-				}
-				if enrichment.TrackMBID != "" && (existing.MBID == "" || overwrite) {
-					existing.MBID = enrichment.TrackMBID
-					changed = true
-				}
-				if enrichment != nil && len(enrichment.Artists) > 0 {
-				trackArtists, _ := e.trackRepo.LoadTrackArtists(ctx, existing.ID)
-				allUnknown := true
-				for _, ta := range trackArtists {
-					artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
-					if err != nil {
-						continue
-					}
-					if artist.Name != "Unknown Artist" {
-						allUnknown = false
-					}
-					match := e.matchArtistEnrichment(artist.Name, enrichment)
-					updated := false
-					if match != nil && match.ArtistMBID != "" && (artist.MBID == "" || overwrite) {
-						artist.MBID = match.ArtistMBID
-						updated = true
-					}
-					if match != nil && match.ArtistCountry != "" && (artist.Country == "" || overwrite) {
-						artist.Country = match.ArtistCountry
-						updated = true
-					}
-					if match != nil && match.Artist != "" && (artist.Name == "" || artist.Name == "Unknown Artist" || overwrite) {
-						artist.Name = match.Artist
-						artist.SortName = match.Artist
-						updated = true
-					}
-					if updated {
-						changed = true
-						e.artistRepo.Update(ctx, artist)
-					}
-				}
-				// Replace Unknown Artist entries with enrichment artists
-				if allUnknown {
-					var newArtists []*domain.TrackArtist
-					for i, ar := range enrichment.Artists {
-						if ar.Name == "" {
-							continue
-						}
-						enrich := &metadata.EnrichmentResult{
-							ArtistMBID:    ar.MBID,
-							ArtistCountry: ar.Country,
-							Artist:        ar.Name,
-						}
-						artist, err := e.findOrCreateArtist(ctx, lib.ID, ar.Name, enrich)
-						if err != nil {
-							continue
-						}
-						newArtists = append(newArtists, &domain.TrackArtist{
-							ArtistID:  artist.ID,
-							Role:      "performer",
-							SortOrder: i,
-							Artist:    artist,
-						})
-					}
-					if len(newArtists) > 0 {
-						e.trackRepo.ReplaceTrackArtists(ctx, existing.ID, newArtists)
-						changed = true
-					}
-				}
-			}
-				if enrichment.AlbumMBID != "" && existing.AlbumID != "" {
-					if album, err := e.albumRepo.FindByID(ctx, existing.AlbumID); err == nil {
-						updated := false
-						if enrichment.AlbumMBID != "" && (album.MBID == "" || overwrite) {
-							album.MBID = enrichment.AlbumMBID
-							updated = true
-						}
-						if enrichment.Album != "" && (album.Title == "" || album.Title == "Unknown Album" || overwrite) {
-							album.Title = enrichment.Album
-							updated = true
-						}
-						if enrichment.Year != 0 && (album.Year == 0 || overwrite) {
-							album.Year = enrichment.Year
-							updated = true
-						}
-						if enrichment.Genre != "" && (album.Genre == "" || overwrite) {
-							album.Genre = enrichment.Genre
-							updated = true
-						}
-						if enrichment.AlbumCountry != "" && (album.Country == "" || overwrite) {
-							album.Country = enrichment.AlbumCountry
-							updated = true
-						}
-						if updated {
-							changed = true
-							e.albumRepo.Update(ctx, album)
-						}
-					}
-				}
-			}
-			if meta.HasCoverArt {
-				if !thumbnailExists(e.coverExtractor, lib.ID, existing.ID, 64) {
-					if data, _, err := e.coverExtractor.ExtractFromFile(path); err == nil {
-						thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), lib.ID)
-						os.MkdirAll(thumbDir, 0755)
-						thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", existing.ID))
-						metadata.ResizeToThumbnail(data, thumbPath, 64)
-						if existing.CoverImageID == nil {
-							existing.CoverImageID = &existing.ID
-							changed = true
-						}
-						stats.CoversExtracted++
-					}
-				}
 			}
 			if changed {
 				e.trackRepo.Update(ctx, existing)
@@ -330,7 +215,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		var primaryPerformerID string
 		sortOrder := 0
 		for _, pn := range performerNames {
-			enrich := e.matchArtistEnrichment(pn, enrichment)
+			enrich := matchArtistEnrichment(pn, enrichment)
 			a, err := e.findOrCreateArtist(ctx, lib.ID, pn, enrich)
 			if err != nil {
 				log.Printf("[scan] failed to create artist %q: %v", pn, err)
@@ -353,7 +238,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			if name == "" || name == "Unknown Artist" {
 				return
 			}
-			enrich := e.matchArtistEnrichment(name, enrichment)
+			enrich := matchArtistEnrichment(name, enrichment)
 			a, err := e.findOrCreateArtist(ctx, lib.ID, name, enrich)
 			if err != nil {
 				return
@@ -618,7 +503,7 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 	return true
 }
 
-func (e *Engine) matchArtistEnrichment(name string, enrichment *metadata.EnrichmentResult) *metadata.EnrichmentResult {
+func matchArtistEnrichment(name string, enrichment *metadata.EnrichmentResult) *metadata.EnrichmentResult {
 	if enrichment == nil || len(enrichment.Artists) == 0 {
 		return nil
 	}
@@ -636,34 +521,38 @@ func (e *Engine) matchArtistEnrichment(name string, enrichment *metadata.Enrichm
 }
 
 func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
+	return findOrCreateArtist(ctx, e.artistRepo, libraryID, name, enrichment)
+}
+
+func findOrCreateArtist(ctx context.Context, artistRepo *repository.ArtistRepo, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
 	if name == "" {
 		name = "Unknown Artist"
 	}
 
 	if enrichment != nil && enrichment.ArtistMBID != "" {
-		if artist, err := e.artistRepo.FindByMBID(ctx, enrichment.ArtistMBID); err == nil {
+		if artist, err := artistRepo.FindByMBID(ctx, enrichment.ArtistMBID); err == nil {
 			if artist.Name == "" && enrichment.Artist != "" {
 				artist.Name = enrichment.Artist
 				artist.SortName = enrichment.Artist
-				e.artistRepo.Update(ctx, artist)
+				artistRepo.Update(ctx, artist)
 			}
 			if artist.Country == "" && enrichment.ArtistCountry != "" {
 				artist.Country = enrichment.ArtistCountry
-				e.artistRepo.Update(ctx, artist)
+				artistRepo.Update(ctx, artist)
 			}
 			return artist, nil
 		}
 	}
 
-	artist, err := e.artistRepo.FindByName(ctx, name)
+	artist, err := artistRepo.FindByName(ctx, name)
 	if err == nil {
 		if artist.MBID == "" && enrichment != nil && enrichment.ArtistMBID != "" {
 			artist.MBID = enrichment.ArtistMBID
-			e.artistRepo.Update(ctx, artist)
+			artistRepo.Update(ctx, artist)
 		}
 		if artist.Country == "" && enrichment != nil && enrichment.ArtistCountry != "" {
 			artist.Country = enrichment.ArtistCountry
-			e.artistRepo.Update(ctx, artist)
+			artistRepo.Update(ctx, artist)
 		}
 		return artist, nil
 	}
@@ -681,7 +570,7 @@ func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string,
 		artist.Country = enrichment.ArtistCountry
 	}
 
-	err = e.artistRepo.BatchCreate(ctx, []domain.Artist{*artist})
+	err = artistRepo.BatchCreate(ctx, []domain.Artist{*artist})
 	if err != nil {
 		return nil, err
 	}
@@ -791,4 +680,114 @@ func hashFile(path string) (string, error) {
 
 func timePtr(t time.Time) *time.Time {
 	return &t
+}
+
+// ApplyEnrichment applies enrichment results to an existing track. When overwrite is true,
+// all fields are replaced; when false, only empty/unknown fields are filled.
+func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.AudioMeta, enrichment *metadata.EnrichmentResult, libraryID string, overwrite bool, trackRepo *repository.TrackRepo, artistRepo *repository.ArtistRepo, albumRepo *repository.AlbumRepo) (changed bool) {
+	if meta.MBID != "" && (track.MBID == "" || overwrite) {
+		track.MBID = meta.MBID
+		changed = true
+	}
+	if enrichment != nil {
+		if meta.TitleFromFilename && enrichment.Title != "" && (track.Title != enrichment.Title || overwrite) {
+			track.Title = enrichment.Title
+			changed = true
+		}
+		if enrichment.TrackMBID != "" && (track.MBID == "" || overwrite) {
+			track.MBID = enrichment.TrackMBID
+			changed = true
+		}
+		if len(enrichment.Artists) > 0 {
+			trackArtists, err := trackRepo.LoadTrackArtists(ctx, track.ID)
+			if err == nil {
+				allUnknown := true
+				for _, ta := range trackArtists {
+					artist, err := artistRepo.FindByID(ctx, ta.ArtistID)
+					if err != nil {
+						continue
+					}
+					if artist.Name != "Unknown Artist" {
+						allUnknown = false
+					}
+					match := matchArtistEnrichment(artist.Name, enrichment)
+					updated := false
+					if match != nil && match.ArtistMBID != "" && (artist.MBID == "" || overwrite) {
+						artist.MBID = match.ArtistMBID
+						updated = true
+					}
+					if match != nil && match.ArtistCountry != "" && (artist.Country == "" || overwrite) {
+						artist.Country = match.ArtistCountry
+						updated = true
+					}
+					if match != nil && match.Artist != "" && (artist.Name == "" || artist.Name == "Unknown Artist" || overwrite) {
+						artist.Name = match.Artist
+						artist.SortName = match.Artist
+						updated = true
+					}
+					if updated {
+						changed = true
+						artistRepo.Update(ctx, artist)
+					}
+				}
+				if allUnknown {
+					var newArtists []*domain.TrackArtist
+					for i, ar := range enrichment.Artists {
+						if ar.Name == "" {
+							continue
+						}
+						enrich := &metadata.EnrichmentResult{
+							ArtistMBID:    ar.MBID,
+							ArtistCountry: ar.Country,
+							Artist:        ar.Name,
+						}
+						artist, err := findOrCreateArtist(ctx, artistRepo, libraryID, ar.Name, enrich)
+						if err != nil {
+							continue
+						}
+						newArtists = append(newArtists, &domain.TrackArtist{
+							ArtistID:  artist.ID,
+							Role:      "performer",
+							SortOrder: i,
+							Artist:    artist,
+						})
+					}
+					if len(newArtists) > 0 {
+						trackRepo.ReplaceTrackArtists(ctx, track.ID, newArtists)
+						changed = true
+					}
+				}
+			}
+		}
+		if enrichment.AlbumMBID != "" && track.AlbumID != "" {
+			if album, err := albumRepo.FindByID(ctx, track.AlbumID); err == nil {
+				updated := false
+				if enrichment.AlbumMBID != "" && (album.MBID == "" || overwrite) {
+					album.MBID = enrichment.AlbumMBID
+					updated = true
+				}
+				if enrichment.Album != "" && (album.Title == "" || album.Title == "Unknown Album" || overwrite) {
+					album.Title = enrichment.Album
+					updated = true
+				}
+				if enrichment.Year != 0 && (album.Year == 0 || overwrite) {
+					album.Year = enrichment.Year
+					updated = true
+				}
+				if enrichment.Genre != "" && (album.Genre == "" || overwrite) {
+					album.Genre = enrichment.Genre
+					updated = true
+				}
+				if enrichment.AlbumCountry != "" && (album.Country == "" || overwrite) {
+					album.Country = enrichment.AlbumCountry
+					updated = true
+				}
+				if updated {
+					changed = true
+					albumRepo.Update(ctx, album)
+				}
+			}
+		}
+	}
+	return
 }

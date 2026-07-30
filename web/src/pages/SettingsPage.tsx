@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
-import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileEdit } from "lucide-react"
+import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan } from "lucide-react"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistSelector, { type SelectedArtist } from "../components/ArtistSelector"
 import DirectoryPicker from "../components/DirectoryPicker"
@@ -310,24 +310,28 @@ export default function SettingsPage() {
                           const res = await fetch("/api/metadata/search/track", {
                             method: "POST",
                             headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
-                            body: JSON.stringify({ track_id: t.id, title: t.title, artist: performerNames(t.artists), album: t.album || "" }),
+                            body: JSON.stringify({
+                              track_id: t.id,
+                              title: t.title,
+                              artist: performerNames(t.artists),
+                              album: t.album || "",
+                              mbid: t.mbid || "",
+                            }),
                           })
                           setSearchModal({ track: t, result: await res.json(), edit: {} })
                         } catch { setSearchModal({ track: t, error: "Search failed" }) }
                         setSearching("")
                       }}
                         className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Identify with MusicBrainz">
-                        {searching === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
+                        {searching === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
                       </button>
-                      <button onClick={() => {
-                        const mbid = prompt("Enter MusicBrainz recording ID:")
-                        if (mbid) fetch("/api/metadata/identify", { method: "POST", headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")}, body: JSON.stringify({ track_id: t.id, mbid }) }).then(r => r.ok ? alert("Updated!") : alert("Failed")).catch(() => {})
-                      }} className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Manual identify (enter MBID)">
-                        <FileEdit className="w-4 h-4" />
+                      <button
+                        className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Edit lyrics">
+                        <FileText className="w-4 h-4" />
                       </button>
-                      <button onClick={() => {/* TODO: edit metadata (cover, lyrics) */}}
-                        className="p-1 rounded text-zinc-500 hover:text-yellow-400 cursor-pointer" title="Edit metadata (cover / lyrics)">
-                        <Upload className="w-4 h-4" />
+                      <button onClick={() => {/* TODO: edit cover art */}}
+                        className="p-1 rounded text-zinc-500 hover:text-yellow-400 cursor-pointer" title="Change cover art">
+                        <Image className="w-4 h-4" />
                       </button>
                     </span>
                   </div>
@@ -350,7 +354,15 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
   onSaved?: () => void
 }) {
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState("")
   const [selectedArtists, setSelectedArtists] = useState<SelectedArtist[]>([])
+  const [localResult, setLocalResult] = useState<any>(null)
+  const [mbidValue, setMbidValue] = useState("")
+  const [mbidEditing, setMbidEditing] = useState(false)
+  const [mbidSearching, setMbidSearching] = useState(false)
+  const [mbidError, setMbidError] = useState(false)
+  const [reidentifying, setReidentifying] = useState(false)
+
   useEffect(() => {
     const result = data?.result
     if (!result?.artists?.length) return
@@ -359,6 +371,64 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
       mbid: a.mbid || "",
     })))
   }, [data?.result?.artists])
+
+  useEffect(() => {
+    setMbidValue(data?.result?.track_mbid ?? data?.track?.mbid ?? "")
+    setSaveError("")
+  }, [data?.result?.track_mbid, data?.track?.mbid])
+
+  const handleMbidSearch = async () => {
+    if (!mbidValue) return
+    setMbidSearching(true)
+    setMbidError(false)
+    try {
+      const res = await fetch("/api/metadata/search/track", {
+        method: "POST",
+        headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
+        body: JSON.stringify({ mbid: mbidValue }),
+      })
+      const result = await res.json()
+      if (result.matched && result.track_mbid) {
+        if (isMatched) {
+          setLocalResult(result)
+          setMbidEditing(false)
+        } else {
+          onUpdate({
+            ...data.edit,
+            title: result.title ?? "",
+            album: result.album ?? "",
+            year: result.year ?? 0,
+            genre: result.genre ?? "",
+            track_mbid: result.track_mbid ?? "",
+            album_mbid: result.album_mbid ?? "",
+          })
+        }
+        if (result.artists?.length) {
+          setSelectedArtists(result.artists.map((a: any) => ({
+            name: a.name || a.artist?.name,
+            mbid: a.mbid || "",
+          })))
+        }
+      } else {
+        setMbidError(true)
+        if (!isMatched) setMbidValue("")
+      }
+    } catch {
+      setMbidError(true)
+      if (!isMatched) setMbidValue("")
+    }
+    setMbidSearching(false)
+  }
+
+  const display = localResult ?? data.result
+  const isMatched = display?.matched && display?.track_mbid
+
+  useEffect(() => {
+    if (data?.result && !(data.result.matched && data.result.track_mbid)) {
+      setMbidEditing(true)
+    }
+  }, [data?.result?.matched, data?.result?.track_mbid])
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={onClose}>
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
@@ -366,7 +436,31 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
           <h3 className="font-bold">MusicBrainz Match</h3>
           <button onClick={onClose} className="p-1 rounded hover:bg-zinc-800 cursor-pointer"><X className="w-4 h-4" /></button>
         </div>
-        <p className="text-xs text-zinc-500 mb-4 truncate">{data.track?.title}</p>
+        <div className="flex items-center gap-2 mb-4">
+          <p className="text-xs text-zinc-500 truncate flex-1">{data.track?.title}</p>
+          {isMatched && (
+            <button onClick={async () => {
+              setReidentifying(true)
+              try {
+                await fetch("/api/metadata/reidentify", {
+                  method: "POST",
+                  headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
+                  body: JSON.stringify({
+                    track_id: data.track?.id,
+                    file_hash: data.result?.file_hash || data.track?.file_hash || "",
+                  }),
+                })
+                onSaved?.()
+                onClose()
+              } catch {}
+              setReidentifying(false)
+            }} disabled={reidentifying}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer disabled:opacity-50 shrink-0">
+              {reidentifying ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              Restore defaults
+            </button>
+          )}
+        </div>
         {data.result == null ? (
           <div className="space-y-3">
             <div className="w-full h-1 bg-zinc-700 rounded-full overflow-hidden">
@@ -376,45 +470,67 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
           </div>
         ) : data.error ? (
           <p className="text-sm text-red-400">{data.error}</p>
-        ) : data.result.matched && data.result.track_mbid ? (
+        ) : isMatched ? (
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">File</span>
+              <span className="text-sm text-zinc-600 truncate flex-1 min-w-0">{data.track?.file_name || ""}</span>
+            </div>
+            <div className="flex items-center gap-2">
               <span className="text-zinc-400 w-14 shrink-0 text-right">Title</span>
-              <span className="text-sm text-zinc-200 flex-1 min-w-0">{data.result.title || ""}</span>
+              <span className="text-sm text-zinc-200 flex-1 min-w-0">{display.title || ""}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-zinc-400 w-14 shrink-0 text-right">Artists</span>
               <span className="text-sm text-zinc-200 flex-1 min-w-0">
-                {performerNames(data.result.artists)}
+                {performerNames(display.artists)}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-zinc-400 w-14 shrink-0 text-right">Album</span>
-              <span className="text-sm text-zinc-200 flex-1 min-w-0">{data.result.album || ""}</span>
+              <span className="text-sm text-zinc-200 flex-1 min-w-0">{display.album || ""}</span>
             </div>
             {(["year","genre"] as const).map(f => (
               <div key={f} className="flex items-center gap-2">
                 <span className="text-zinc-400 w-14 shrink-0 text-right">{f.charAt(0).toUpperCase()+f.slice(1)}</span>
                 <input
-                  value={data.edit[f] ?? (data.result[f] || "")}
+                  value={data.edit[f] ?? (display[f] || "")}
                   onChange={e => onUpdate({ ...data.edit, [f]: e.target.value })}
                   className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </div>
             ))}
-            <div className="flex justify-between">
-              <span className="text-zinc-400">MBID</span>
-              <span className="text-xs font-mono text-zinc-500">{data.result.track_mbid}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">MBID</span>
+              {!mbidEditing && !mbidError ? (
+                <>
+                  <span className="text-xs font-mono text-zinc-500 flex-1">{mbidValue}</span>
+                  <button onClick={() => setMbidEditing(true)} className="p-1 rounded hover:bg-zinc-700 cursor-pointer">
+                    <Pen className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <input
+                    value={mbidValue}
+                    onChange={e => { setMbidValue(e.target.value); setMbidError(false) }}
+                    className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${mbidError ? 'focus:ring-red-500 border border-red-500' : 'focus:ring-green-500'}`}
+                    placeholder="MusicBrainz Recording ID"
+                    onKeyDown={e => e.key === "Enter" && handleMbidSearch()}
+                  />
+                  <button onClick={handleMbidSearch} disabled={mbidSearching || !mbidValue} className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50">
+                    {mbidSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  </button>
+                </>
+              )}
             </div>
-            {data.result.file_hash && (
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Hash</span>
-                <span className="text-xs font-mono text-zinc-600 truncate ml-2 max-w-[200px]">{data.result.file_hash}</span>
-              </div>
-            )}
           </div>
         ) : (
           <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">File</span>
+              <span className="text-sm text-zinc-600 truncate flex-1 min-w-0">{data.track?.file_name || ""}</span>
+            </div>
             <div className="flex items-center gap-2">
               <span className="text-zinc-400 w-14 shrink-0 text-right">Title</span>
               <input
@@ -445,32 +561,59 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                 />
               </div>
             ))}
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">MBID</span>
+              <input
+                value={mbidValue}
+                onChange={e => { setMbidValue(e.target.value); setMbidError(false) }}
+                className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${mbidError ? 'focus:ring-red-500 border border-red-500' : 'focus:ring-green-500'}`}
+                placeholder="MusicBrainz Recording ID"
+                onKeyDown={e => e.key === "Enter" && handleMbidSearch()}
+              />
+              <button onClick={handleMbidSearch} disabled={mbidSearching || !mbidValue} className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50">
+                {mbidSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
+        )}
+        {saveError && (
+          <p className="text-sm text-red-400 mt-2">{saveError}</p>
         )}
         {data.result != null && (
           <button onClick={async () => {
             setSaving(true)
+            setSaveError("")
             try {
-              const artists = selectedArtists.map(a => ({ name: a.name, mbid: a.mbid || "" }))
-                await fetch("/api/metadata/save", {
-                  method: "POST",
-                  headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
-                  body: JSON.stringify({
-                    track_id: data.track?.id || "",
-                    file_hash: data.result.file_hash || data.track?.file_hash || "",
-                    track_mbid: data.result.track_mbid || "",
-                    title: data.edit.title ?? data.result?.title ?? data.track?.title ?? "",
-                    album: data.edit.album ?? data.result?.album ?? data.track?.album ?? "",
-                    year: parseInt(data.edit.year) || data.result?.year || 0,
-                    genre: data.edit.genre ?? data.result?.genre ?? "",
-                    artists,
-                  }),
-                })
+              const artists = isMatched
+                ? (display.artists?.map((a: any) => ({ name: a.name || a.artist?.name, mbid: a.mbid || "" })) ?? [])
+                : selectedArtists.map(a => ({ name: a.name, mbid: a.mbid || "" }))
+              const res = await fetch("/api/metadata/save", {
+                method: "POST",
+                headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
+                body: JSON.stringify({
+                  track_id: data.track?.id || "",
+                  file_hash: data.result.file_hash || data.track?.file_hash || "",
+                  track_mbid: mbidValue || (data.edit.track_mbid ?? data.result?.track_mbid ?? data.track?.mbid ?? ""),
+                  album_mbid: data.edit.album_mbid ?? display?.album_mbid ?? data.result?.album_mbid ?? "",
+                  title: isMatched ? (display.title || "") : (data.edit.title ?? data.result?.title ?? data.track?.title ?? ""),
+                  album: isMatched ? (display.album || "") : (data.edit.album ?? data.result?.album ?? data.track?.album ?? ""),
+                  year: parseInt(data.edit.year) || display?.year || 0,
+                  genre: data.edit.genre ?? display?.genre ?? "",
+                  artists,
+                }),
+              })
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: "Save failed" }))
+                setSaveError(err.error || "Save failed")
+                return
+              }
               onSaved?.()
               onClose()
-            } catch {}
+            } catch {
+              setSaveError("Network error")
+            }
             setSaving(false)
-          }} disabled={saving}
+          }} disabled={saving || (isMatched && mbidError)}
             className="mt-4 w-full py-2 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
             {saving ? "Saving..." : "Save"}
           </button>

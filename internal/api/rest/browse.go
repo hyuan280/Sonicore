@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -89,6 +90,8 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 			"suffix":         t.FileFormat,
 			"file_size":      t.FileSize,
 			"file_hash":      t.Hash,
+			"file_name":      filepath.Base(t.FilePath),
+			"mbid":           t.MBID,
 		}
 		if album, err := h.albumRepo.FindByID(r.Context(), t.AlbumID); err == nil {
 			entry["album"] = album.Title

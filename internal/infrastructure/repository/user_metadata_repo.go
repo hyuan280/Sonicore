@@ -52,3 +52,10 @@ func (r *UserMetadataRepo) Upsert(ctx context.Context, m *UserMetadata) error {
 		m.TrackNumber, m.DiscNumber, m.Year, m.Genre)
 	return err
 }
+
+func (r *UserMetadataRepo) DeleteByUserAndHash(ctx context.Context, userID, fileHash string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM user_metadata WHERE user_id = $1 AND file_hash = $2`,
+		userID, fileHash)
+	return err
+}

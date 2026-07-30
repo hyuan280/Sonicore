@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 )
 
@@ -117,7 +118,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 
 	var relIdx = -1
 	for i, rel := range recording.Releases {
-		if rel.Status != "" && rel.Status != "official" {
+		if rel.Status != "" && !strings.EqualFold(rel.Status, "official") {
 			continue
 		}
 		relIdx = i
@@ -334,8 +335,9 @@ func (r *Resolver) searchRecordings(title string, artists []string, album string
 // IdentifyTrack does a full MB lookup by recording MBID for manual identification.
 func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentResult, error) {
 	var rec MBRecording
-	q := fmt.Sprintf("/recording/%s?inc=artists+releases+tags&fmt=json", mbid)
-	if err := r.mb.get(q, nil, &rec); err != nil {
+	q := url.Values{}
+	q.Set("inc", "artists+releases+tags")
+	if err := r.mb.get("/recording/"+mbid, q, &rec); err != nil {
 		return nil, err
 	}
 
@@ -345,6 +347,16 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 	}
 
 	if len(rec.Artists) > 0 {
+		for _, ref := range rec.Artists {
+			ar := ArtistResult{Name: ref.Name}
+			if ref.Artist != nil {
+				ar.MBID = ref.Artist.ID
+				ar.Country = ref.Artist.Country
+			}
+			if ref.Name != "" {
+				result.Artists = append(result.Artists, ar)
+			}
+		}
 		if rec.Artists[0].Artist != nil {
 			result.ArtistMBID = rec.Artists[0].Artist.ID
 			result.ArtistCountry = rec.Artists[0].Artist.Country
@@ -353,7 +365,7 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 	}
 
 	for _, rel := range rec.Releases {
-		if rel.Status != "" && rel.Status != "official" {
+		if rel.Status != "" && !strings.EqualFold(rel.Status, "official") {
 			continue
 		}
 		result.AlbumMBID = rel.ID
