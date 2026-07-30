@@ -108,6 +108,7 @@ type Track struct {
 	FilePath     string         `json:"file_path"`
 	FileSize     int64          `json:"file_size"`
 	FileFormat   string         `json:"file_format"`
+	AudioCodec   string         `json:"audio_codec"`
 	MBID         string         `json:"mbid"`
 	AcoustID     string         `json:"acoust_id"`
 	Hash         string         `json:"hash"`

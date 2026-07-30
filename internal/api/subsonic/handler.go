@@ -20,6 +20,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/internal/infrastructure/transcoder"
 )
 
 type Handler struct {
@@ -426,6 +427,11 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, q url.Valu
 	track, err := h.trackRepo.FindByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "track not found", http.StatusNotFound)
+		return
+	}
+	quality := transcoder.ParseQuality(r.URL.Query().Get("quality"))
+	if transcoder.Decide(track.BitRate, track.AudioCodec, quality).Transcode {
+		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
 		return
 	}
 	w.Header().Set("Content-Type", "audio/"+track.FileFormat)

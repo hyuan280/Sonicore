@@ -25,6 +25,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/internal/infrastructure/transcoder"
 )
 
 type Server struct {
@@ -47,6 +48,9 @@ func New(cfg *config.Config) (*Server, error) {
 
 	if err := cfg.InitDirs(); err != nil {
 		return nil, fmt.Errorf("init dirs: %w", err)
+	}
+	if err := transcoder.Init(cfg.Data.CacheDir); err != nil {
+		return nil, fmt.Errorf("transcoder init: %w", err)
 	}
 
 	vk := cache.NewValkey(cfg.Redis)

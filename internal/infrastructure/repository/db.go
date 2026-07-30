@@ -105,6 +105,7 @@ func RunMigrations(db *sql.DB) error {
 		file_path     TEXT NOT NULL,
 		file_size     BIGINT NOT NULL DEFAULT 0,
 		file_format   VARCHAR(10) NOT NULL DEFAULT '',
+		audio_codec   VARCHAR(32) NOT NULL DEFAULT '',
 		mbid          VARCHAR(36) NOT NULL DEFAULT '',
 		acoust_id     VARCHAR(36) NOT NULL DEFAULT '',
 		hash          VARCHAR(64) NOT NULL DEFAULT '',

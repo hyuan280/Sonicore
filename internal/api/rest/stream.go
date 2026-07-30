@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/internal/infrastructure/transcoder"
 )
 
 type StreamHandler struct {
@@ -41,6 +42,12 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 	track, err := h.trackRepo.FindByID(r.Context(), trackID)
 	if err != nil {
 		http.Error(w, "track not found", http.StatusNotFound)
+		return
+	}
+
+	quality := transcoder.ParseQuality(r.URL.Query().Get("quality"))
+	if transcoder.Decide(track.BitRate, track.AudioCodec, quality).Transcode {
+		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
 		return
 	}
 

@@ -7,6 +7,20 @@ import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
+const qualityOptions = [
+  { key: "standard", label: "SQ", title: "AAC 256k", desc: "Standard" },
+  { key: "high", label: "HQ", title: "AAC 320k", desc: "High" },
+  { key: "lossless", label: "LOS", title: "FLAC", desc: "Lossless" },
+] as const
+
+function loadQuality(): string {
+  try { return localStorage.getItem("playback_quality") || "standard" } catch { return "standard" }
+}
+
+function saveQuality(q: string) {
+  try { localStorage.setItem("playback_quality", q) } catch {}
+}
+
 export default function PlayerBar() {
   const ps = usePlayer()
   const { logout } = useAuth()
@@ -14,7 +28,9 @@ export default function PlayerBar() {
   const progressRef = useRef<HTMLDivElement>(null)
   const currentTrackRef = useRef<string | null>(null)
   const [showQueue, setShowQueue] = useState(false)
+  const [showQuality, setShowQuality] = useState(false)
   const [fav, setFav] = useState(false)
+  const [quality, setQuality] = useState(loadQuality)
   const lastHistoryRef = useRef(0)
   const session = localStorage.getItem("session_token")
 
@@ -62,7 +78,8 @@ export default function PlayerBar() {
     lastHistoryRef.current = 0
 
     const session = localStorage.getItem("session_token")
-    el.src = session ? `/api/s/${session}/${ps.track.id}` : ""
+    const q = quality === "standard" ? "" : `?quality=${quality}`
+    el.src = session ? `/api/s/${session}/${ps.track.id}${q}` : ""
     el.volume = ps.volume
 
     const onEnded = () => {
@@ -136,7 +153,7 @@ export default function PlayerBar() {
       el.removeEventListener("pause", onPause)
       el.removeEventListener("error", onError)
     }
-  }, [ps.track?.id, ps.playEpoch])
+  }, [ps.track?.id, ps.playEpoch, quality])
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = ps.volume
@@ -163,6 +180,21 @@ export default function PlayerBar() {
     const target = pct * ps.track.duration
     el.currentTime = Math.min(target, ps.track.duration - 0.5)
   }, [ps.track])
+
+  const qualityRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showQuality) return
+    const handle = (e: MouseEvent) => {
+      if (qualityRef.current && !qualityRef.current.contains(e.target as Node)) {
+        setShowQuality(false)
+      }
+    }
+    document.addEventListener("mousedown", handle)
+    return () => document.removeEventListener("mousedown", handle)
+  }, [showQuality])
+
+  const currentQ = qualityOptions.find(o => o.key === quality)!
 
   const track = ps.track
 
@@ -212,6 +244,24 @@ export default function PlayerBar() {
           </div>
 
           <div className="flex-1 flex items-center justify-center gap-3">
+            <div className="relative" ref={qualityRef}>
+              <button onClick={() => setShowQuality(!showQuality)}
+                className="text-[11px] font-semibold px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 cursor-pointer"
+                title={currentQ.desc}>
+                {currentQ.label}
+              </button>
+              {showQuality && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-28 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+                  {qualityOptions.map(o => (
+                    <button key={o.key}
+                      onClick={() => { setShowQuality(false); setQuality(o.key); saveQuality(o.key) }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 cursor-pointer ${quality === o.key ? "text-green-500" : "text-zinc-400"}`}>
+                      {o.label} <span className="text-zinc-600 ml-1">{o.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button onClick={ps.prev} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
               <SkipBack className="w-5 h-5" />
             </button>

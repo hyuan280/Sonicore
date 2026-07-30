@@ -52,6 +52,7 @@ type AudioMeta struct {
 	FilePath    string
 	FileSize    int64
 	FileFormat  string
+	AudioCodec  string
 	MBID        string
 	AcoustID    string
 
@@ -108,6 +109,7 @@ func Probe(path string) (*AudioMeta, error) {
 
 	for _, s := range result.Streams {
 		if s.CodecType == "audio" {
+			meta.AudioCodec = s.CodecName
 			parseInt(s.SampleRate, &meta.SampleRate)
 			meta.Channels = s.Channels
 			break
