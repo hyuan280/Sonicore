@@ -2,10 +2,13 @@ import { useRef, useEffect, useState, useCallback } from "react"
 import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText } from "lucide-react"
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText, PictureInPicture2 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
+import LyricsPanel from "../components/LyricsPanel"
+import { isDesktopLyricsSupported, isDesktopLyricsOpen, openDesktopLyrics, closeDesktopLyrics, subscribeDesktopLyrics } from "../lib/desktopLyrics"
+import { setMediaSessionMetadata, setMediaSessionPlaybackState, setMediaSessionPositionState, bindMediaSessionActions, clearMediaSessionActions } from "../lib/mediaSession"
 
 const qualityOptions = [
   { key: "standard", label: "SQ", title: "AAC 256k", desc: "Standard" },
@@ -29,6 +32,7 @@ export default function PlayerBar() {
   const currentTrackRef = useRef<string | null>(null)
   const [showQueue, setShowQueue] = useState(false)
   const [showLyrics, setShowLyrics] = useState(false)
+  const [desktopLyricsOpen, setDesktopLyricsOpen] = useState(isDesktopLyricsOpen)
   const [showQuality, setShowQuality] = useState(false)
   const [fav, setFav] = useState(false)
   const [quality, setQuality] = useState(loadQuality)
@@ -40,6 +44,18 @@ export default function PlayerBar() {
       api.user.checkFavorites([ps.track.id]).then(d => setFav(!!d.favorites?.[ps.track!.id])).catch(() => {})
     }
   }, [ps.track?.id])
+
+  useEffect(() => {
+    return subscribeDesktopLyrics(setDesktopLyricsOpen)
+  }, [])
+
+  const toggleDesktopLyrics = () => {
+    if (isDesktopLyricsOpen()) {
+      closeDesktopLyrics()
+    } else {
+      openDesktopLyrics()
+    }
+  }
 
   useEffect(() => {
     if (ps.queue.length === 0 && ps.track) {
@@ -171,6 +187,36 @@ export default function PlayerBar() {
       el.pause()
     }
   }, [ps.track?.id, ps.playing])
+
+  // Media Session API (OS media controls / system flyout)
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return
+    bindMediaSessionActions({
+      play: () => audioRef.current?.play(),
+      pause: () => audioRef.current?.pause(),
+      next: () => usePlayer.getState().next(),
+      prev: () => usePlayer.getState().prev(),
+      seekTo: (time) => { if (audioRef.current) audioRef.current.currentTime = time },
+    })
+    return () => {
+      setMediaSessionMetadata(null)
+      clearMediaSessionActions()
+    }
+  }, [])
+
+  useEffect(() => {
+    setMediaSessionMetadata(ps.track)
+  }, [ps.track])
+
+  useEffect(() => {
+    setMediaSessionPlaybackState(ps.playing ? "playing" : "paused")
+  }, [ps.playing])
+
+  useEffect(() => {
+    if (ps.track) {
+      setMediaSessionPositionState(ps.position, ps.track.duration)
+    }
+  }, [ps.position, ps.track])
 
   const seek = useCallback((e: React.MouseEvent) => {
     const el = audioRef.current
@@ -314,6 +360,13 @@ export default function PlayerBar() {
                 <FileText className="w-4 h-4" />
               </button>
             )}
+            {isDesktopLyricsSupported() && (
+              <button onClick={toggleDesktopLyrics}
+                className={`p-1 cursor-pointer ${desktopLyricsOpen ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
+                title="桌面歌词">
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
             <button onClick={() => setShowQueue(!showQueue)}
               className={`p-1 cursor-pointer ${showQueue ? "text-green-500" : "text-zinc-400 hover:text-white"}`}>
               <ListMusic className="w-4 h-4" />
@@ -321,20 +374,7 @@ export default function PlayerBar() {
           </div>
         </div>
 
-        {showLyrics && (
-          <div className="absolute bottom-full left-0 w-96 max-h-96 bg-zinc-900 border border-zinc-800 rounded-t-xl shadow-xl flex flex-col">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-              <span className="text-xs text-zinc-500">Lyrics</span>
-              <button onClick={() => setShowLyrics(false)}
-                className="p-1 rounded text-zinc-500 hover:text-white cursor-pointer" title="Close">
-                <span className="text-sm">&times;</span>
-              </button>
-            </div>
-            <div className="overflow-y-auto max-h-80 p-4 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap font-mono">
-              {ps.lyrics || <span className="text-zinc-600 italic">No lyrics available</span>}
-            </div>
-          </div>
-        )}
+        {showLyrics && <LyricsPanel onClose={() => setShowLyrics(false)} />}
         {showQueue && (
           <div className="absolute bottom-full right-0 w-96 max-h-80 bg-zinc-900 border border-zinc-800 rounded-t-xl shadow-xl flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
