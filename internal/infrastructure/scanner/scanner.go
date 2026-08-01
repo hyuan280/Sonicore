@@ -907,7 +907,7 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 			} else {
 				version = i + 1
 			}
-			label := extractVersionLabel(ctx, e.db, id)
+			label := ExtractVersionLabel(ctx, e.db, id)
 			res, err := e.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, label, id)
 			if err != nil {
 				log.Printf("[scan] version update error: mbid=%s ver=%d id=%s err=%v", mbid, version, id, err)
@@ -930,8 +930,8 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 	return nil
 }
 
-// extractVersionLabel extracts a human-readable version description from a track's file path.
-func extractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string {
+// ExtractVersionLabel extracts a human-readable version description from a track's file path.
+func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string {
 	var filePath, fileFormat, title, artist, album string
 	var bitRate int
 	if err := db.QueryRowContext(ctx,

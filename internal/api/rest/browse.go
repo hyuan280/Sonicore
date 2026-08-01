@@ -68,9 +68,10 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	showAll := r.URL.Query().Get("all") == "1"
 	var filtered []domain.Track
 	for _, t := range allTracks {
-		if t.Version <= 1 {
+		if showAll || t.Version <= 1 {
 			filtered = append(filtered, t)
 		}
 	}

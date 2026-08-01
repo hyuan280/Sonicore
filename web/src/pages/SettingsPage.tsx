@@ -37,7 +37,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!manageLib) { setManageTracks([]); return }
-    api.data.tracks(manageLib.id, 1, 9999).then(d => setManageTracks(d.items || [])).catch(() => {})
+    fetch(`/api/data/${manageLib.id}/tracks?page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
+      .then(r => r.json()).then(d => setManageTracks(d.items || [])).catch(() => {})
   }, [manageLib?.id])
 
   const [showPwModal, setShowPwModal] = useState(false)
@@ -287,7 +288,7 @@ export default function SettingsPage() {
 
       {/* Library manage modal (full-screen) */}
       {manageLib && (
-        <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col">
+        <div className="fixed inset-0 bottom-16 z-50 bg-zinc-950 flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
             <div>
@@ -309,6 +310,7 @@ export default function SettingsPage() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
                   <span className="flex-1 min-w-0">Title</span>
+                  <span className="w-24 shrink-0 text-center">Version</span>
                   <span className="w-32 shrink-0 text-center hidden sm:block">Artists</span>
                   <span className="w-32 shrink-0 text-center hidden sm:block">Album</span>
                   <span className="w-16 shrink-0 text-center">Format</span>
@@ -318,6 +320,7 @@ export default function SettingsPage() {
                 {manageTracks.map((t: any) => (
                   <div key={t.id} className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 text-sm group">
                     <span className="flex-1 min-w-0 truncate">{t.title}</span>
+                    <span className={`w-24 shrink-0 text-center truncate text-xs ${t.version >= 1 ? "text-blue-400" : "text-zinc-600"}`}>{t.version_label || (t.version ? `V${t.version}` : "")}</span>
                     <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block"><ArtistLink artists={t.artists} /></span>
                     <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.albums?.[0]?.id ? <Link to={`/albums/${t.albums[0].id}`} className="hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{t.albums[0].title || ""}</Link> : <span>{t.albums?.[0]?.title || ""}</span>}</span>
                     <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
@@ -362,7 +365,8 @@ export default function SettingsPage() {
       )}
       {searchModal &&       <SearchResultModal data={searchModal} onClose={() => setSearchModal(null)} onUpdate={(edit) => setSearchModal((prev: any) => ({ ...prev, edit }))}
         onSaved={() => {
-          if (manageLib) api.data.tracks(manageLib.id, 1, 9999).then(d => setManageTracks(d.items || [])).catch(() => {})
+          if (manageLib) fetch(`/api/data/${manageLib.id}/tracks?page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
+            .then(r => r.json()).then(d => setManageTracks(d.items || [])).catch(() => {})
         }} />}
     </div>
   )
@@ -613,6 +617,15 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
               </div>
             ))}
             <div className="flex items-center gap-2">
+              <span className="text-zinc-400 w-14 shrink-0 text-right">Label</span>
+              <input
+                value={data.edit.version_label ?? data.track?.version_label ?? ""}
+                onChange={e => onUpdate({ ...data.edit, version_label: e.target.value })}
+                className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+                placeholder="e.g. FLAC 900kbps"
+              />
+            </div>
+            <div className="flex items-center gap-2">
               <span className="text-zinc-400 w-14 shrink-0 text-right">MBID</span>
               {!mbidEditing && !mbidError ? (
                 <>
@@ -746,6 +759,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                   year: parseInt(data.edit.year) || display?.year || 0,
                   genre: data.edit.genre ?? display?.genre ?? "",
                   artists,
+                  version_label: data.edit.version_label ?? data.track?.version_label ?? "",
                   albums: selectedAlbums.map(a => ({ id: a.id || "", title: a.title, mbid: a.mbid || "", artist: a.artist || "" })),
                 }),
               })

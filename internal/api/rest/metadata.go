@@ -68,6 +68,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		Year       int    `json:"year"`
 		Genre      string `json:"genre"`
 		AlbumMBID  string `json:"album_mbid"`
+		VersionLabel string `json:"version_label"`
 		Artists   []struct {
 			Name string `json:"name"`
 			MBID string `json:"mbid"`
@@ -161,12 +162,18 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 
 	// Immediately update all metadata in DB
 	if req.TrackID != "" {
-		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
+		track, err := h.trackRepo.FindByID(r.Context(), req.TrackID)
+		var oldMBID string
+		if err == nil {
+			oldMBID = track.MBID
 			if req.TrackMBID != "" {
 				track.MBID = req.TrackMBID
 			}
 			if req.Title != "" {
 				track.Title = metadata.TrimParenSuffix(req.Title)
+			}
+			if req.VersionLabel != "" {
+				track.VersionLabel = req.VersionLabel
 			}
 			h.trackRepo.Update(r.Context(), track)
 
@@ -355,6 +362,10 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+
+		if err == nil && oldMBID != track.MBID && track.MBID != "" {
+			h.reResolveVersions(r.Context(), track.LibraryID, oldMBID, track.MBID, track.ID)
 		}
 	}
 
@@ -1009,4 +1020,63 @@ func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, m
 		h.artistRepo.Update(ctx, a)
 	}
 	return a
+}
+
+// reResolveVersions handles version grouping after a track's MBID changes.
+func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldMBID, newMBID, trackID string) {
+	if oldMBID != "" {
+		ids := h.mbidGroupIDs(ctx, oldMBID, libraryID)
+		if len(ids) < 2 {
+			for _, id := range ids {
+				h.db.ExecContext(ctx, `UPDATE tracks SET version = 0, version_label = '' WHERE id = $1`, id)
+			}
+			h.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE mbid = $1 AND library_id = $2`, oldMBID, libraryID)
+		} else {
+			h.renumberGroup(ctx, ids, oldMBID, libraryID)
+		}
+	}
+
+	ids := h.mbidGroupIDs(ctx, newMBID, libraryID)
+	if len(ids) >= 2 {
+		h.renumberGroup(ctx, ids, newMBID, libraryID)
+	}
+}
+
+func (h *MetadataHandler) mbidGroupIDs(ctx context.Context, mbid, libraryID string) []string {
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT id FROM tracks WHERE mbid = $1 AND library_id = $2 ORDER BY
+		 CASE file_format
+		 WHEN 'flac' THEN 0 WHEN 'alac' THEN 1 WHEN 'wav' THEN 2
+		 WHEN 'aiff' THEN 3 WHEN 'mp3' THEN 4 WHEN 'aac' THEN 5
+		 WHEN 'ogg' THEN 6 WHEN 'opus' THEN 7 ELSE 8 END,
+		 bit_rate DESC, file_path`, mbid, libraryID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (h *MetadataHandler) renumberGroup(ctx context.Context, ids []string, mbid, libraryID string) {
+	for i, id := range ids {
+		version := 1
+		if i > 0 {
+			version = i + 1
+		}
+		var existingLabel string
+		h.db.QueryRowContext(ctx, `SELECT version_label FROM tracks WHERE id = $1`, id).Scan(&existingLabel)
+		if existingLabel == "" {
+			existingLabel = scanner.ExtractVersionLabel(ctx, h.db, id)
+		}
+		h.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, existingLabel, id)
+		h.db.ExecContext(ctx,
+			`INSERT INTO track_version_groups (mbid, library_id, track_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+			mbid, libraryID, id)
+	}
 }
