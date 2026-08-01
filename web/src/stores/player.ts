@@ -7,6 +7,8 @@ export interface PlayerTrack {
   cover_image_id?: string; track?: number; disc_number?: number
   artists?: { artist_id: string; name: string; role: string }[]
   albums?: { id: string; title?: string; track?: number; disc_number?: number; cover_image_id?: string }[]
+  version?: number; version_label?: string
+  versions?: { id: string; version: number; version_label: string; suffix: string; bit_rate: number; duration: number; library_id: string }[]
 }
 
 interface PlayerState {
@@ -54,11 +56,11 @@ function shuffleArray<T>(arr: T[]): T[] {
 const SYNC_KEY = "player_state"
 
 function serializeTrack(t: PlayerTrack) {
-  return { id: t.id, title: t.title, duration: t.duration, suffix: t.suffix, cover_image_id: t.cover_image_id, artists: t.artists, albums: t.albums }
+  return { id: t.id, title: t.title, duration: t.duration, suffix: t.suffix, cover_image_id: t.cover_image_id, artists: t.artists, albums: t.albums, version: t.version, version_label: t.version_label, versions: t.versions }
 }
 
 function unserializeTrack(t: any): PlayerTrack {
-  return { id: t.id, title: t.title, duration: t.duration, suffix: t.suffix, cover_image_id: t.cover_image_id, artists: t.artists, albums: t.albums }
+  return { id: t.id, title: t.title, duration: t.duration, suffix: t.suffix, cover_image_id: t.cover_image_id, artists: t.artists, albums: t.albums, version: t.version ?? 0, version_label: t.version_label ?? "", versions: t.versions }
 }
 
 export function savePlayerState() {

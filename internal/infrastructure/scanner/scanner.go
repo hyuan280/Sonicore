@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/lib/pq"
 	"github.com/sonicore/server/internal/core/domain"
@@ -353,6 +354,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			track.PlayCount = existing.PlayCount
 			track.LastPlayedAt = existing.LastPlayedAt
 			track.CoverImageID = existing.CoverImageID
+			track.Version = existing.Version
+			track.VersionLabel = existing.VersionLabel
 		}
 
 		if meta.HasCoverArt {
@@ -445,6 +448,10 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 	e.db.ExecContext(ctx, `DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
+
+	if err := e.resolveVersions(ctx, lib.ID); err != nil {
+		log.Printf("[scan] version resolution error for %s: %v", lib.Name, err)
+	}
 
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks
 	lib.LastScannedAt = timePtr(time.Now())
@@ -859,4 +866,170 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 		}
 	}
 	return
+}
+
+// resolveVersions groups tracks by non-empty mbid and sets version/version_label.
+func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
+	rows, err := e.db.QueryContext(ctx,
+		`SELECT mbid, array_agg(id ORDER BY
+		 CASE file_format
+		 WHEN 'flac' THEN 0 WHEN 'alac' THEN 1 WHEN 'wav' THEN 2
+		 WHEN 'aiff' THEN 3 WHEN 'mp3' THEN 4 WHEN 'aac' THEN 5
+		 WHEN 'ogg' THEN 6 WHEN 'opus' THEN 7 ELSE 8 END,
+		 bit_rate DESC,
+		 file_path
+		 ) AS ids
+		 FROM tracks WHERE library_id = $1 AND mbid != ''
+		 GROUP BY mbid
+		 ORDER BY mbid`, libraryID)
+	if err != nil {
+		return fmt.Errorf("query tracks by mbid: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var mbid string
+		var ids []string
+		if err := rows.Scan(&mbid, pq.Array(&ids)); err != nil {
+			return fmt.Errorf("scan mbid group: %w", err)
+		}
+
+		if len(ids) < 2 {
+			e.db.ExecContext(ctx, `UPDATE tracks SET version = 0, version_label = '' WHERE id = $1`, ids[0])
+			e.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE mbid = $1 AND library_id = $2`, mbid, libraryID)
+			continue
+		}
+
+		for i, id := range ids {
+			version := 0
+			if i == 0 {
+				version = 1
+			} else {
+				version = i + 1
+			}
+			label := extractVersionLabel(ctx, e.db, id)
+			res, err := e.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, label, id)
+			if err != nil {
+				log.Printf("[scan] version update error: mbid=%s ver=%d id=%s err=%v", mbid, version, id, err)
+			} else if n, _ := res.RowsAffected(); n == 0 {
+				log.Printf("[scan] version update affected 0 rows: mbid=%s ver=%d id=%s", mbid, version, id)
+			}
+			e.db.ExecContext(ctx,
+				`INSERT INTO track_version_groups (mbid, library_id, track_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+				mbid, libraryID, id)
+		}
+	}
+
+	// Clean up: tracks that used to be in a group but no longer have a group mbid
+	e.db.ExecContext(ctx,
+		`DELETE FROM track_version_groups WHERE library_id = $1 AND mbid NOT IN (SELECT DISTINCT mbid FROM tracks WHERE library_id = $1 AND mbid != '')`, libraryID)
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate mbid groups: %w", err)
+	}
+	return nil
+}
+
+// extractVersionLabel extracts a human-readable version description from a track's file path.
+func extractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string {
+	var filePath, fileFormat, title, artist, album string
+	var bitRate int
+	if err := db.QueryRowContext(ctx,
+		`SELECT t.file_path, t.file_format, t.bit_rate, t.title,
+		        COALESCE((SELECT a2.name FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id WHERE ta2.track_id = t.id ORDER BY ta2.sort_order LIMIT 1), ''),
+		        COALESCE((SELECT al.title FROM track_albums tal JOIN albums al ON al.id = tal.album_id WHERE tal.track_id = t.id ORDER BY tal.disc_number, tal.track_number LIMIT 1), '')
+		 FROM tracks t WHERE t.id = $1`, trackID).Scan(&filePath, &fileFormat, &bitRate, &title, &artist, &album); err != nil {
+		return ""
+	}
+
+	keywords := []string{"live", "acoustic", "remaster", "remastered", "deluxe", "bonus",
+		"demo", "instrumental", "edit", "extended", "mix", "radio", "karaoke", "unplugged",
+		"anniversary", "orchestral", "piano", "reprise"}
+
+	dir := strings.ToLower(filepath.Base(filepath.Dir(filePath)))
+	stem := strings.ToLower(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
+
+	for _, kw := range keywords {
+		if strings.Contains(dir, kw) || strings.Contains(stem, kw) {
+			return fmt.Sprintf("%s · %s %dkbps", titleCase(kw), strings.ToUpper(fileFormat), bitRate/1000)
+		}
+	}
+
+	if label := extractFromPath(dir, stem, title, artist, album, filePath); label != "" {
+		return fmt.Sprintf("%s · %s %dkbps", label, strings.ToUpper(fileFormat), bitRate/1000)
+	}
+
+	return fmt.Sprintf("%s %dkbps", strings.ToUpper(fileFormat), bitRate/1000)
+}
+
+func extractFromPath(dir, stem, title, artist, album, filePath string) string {
+	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
+
+	blacklist := make(map[string]bool)
+	for _, w := range strings.Fields(title) {
+		if len(w) > 1 {
+			blacklist[strings.ToLower(w)] = true
+		}
+	}
+	for _, w := range strings.Fields(album) {
+		if len(w) > 1 {
+			blacklist[strings.ToLower(w)] = true
+		}
+	}
+	for _, w := range strings.Fields(artist) {
+		if len(w) > 1 {
+			blacklist[strings.ToLower(w)] = true
+		}
+	}
+	blacklist[ext] = true
+
+	tokens := splitByPunct(dir + " " + stem)
+	var kept []string
+	for _, tok := range tokens {
+		lower := strings.ToLower(tok)
+		if lower == "" || len(lower) <= 1 {
+			continue
+		}
+		if isYear(lower) {
+			continue
+		}
+		if blacklist[lower] {
+			continue
+		}
+		kept = append(kept, titleCase(tok))
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, ", ")
+}
+
+func splitByPunct(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '(' || r == ')' ||
+			r == '[' || r == ']' || r == ',' || ' ' == r ||
+			r == '/' || r == '\\' || r == '&' || r == '!' || r == '\'' ||
+			r == '"' || r == ':' || r == ';' || r == '~' || r == '#'
+	})
+}
+
+func isYear(s string) bool {
+	if len(s) != 4 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func titleCase(s string) string {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return s
+	}
+	runes[0] = rune(unicode.ToUpper(runes[0]))
+	return string(runes)
 }

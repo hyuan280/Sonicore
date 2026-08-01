@@ -15,20 +15,22 @@ import (
 )
 
 type DataHandler struct {
-	db         *sql.DB
-	trackRepo  *repository.TrackRepo
-	albumRepo  *repository.AlbumRepo
-	artistRepo *repository.ArtistRepo
-	perm       *middleware.PermissionChecker
+	db          *sql.DB
+	trackRepo   *repository.TrackRepo
+	albumRepo   *repository.AlbumRepo
+	artistRepo  *repository.ArtistRepo
+	libraryRepo *repository.LibraryRepo
+	perm        *middleware.PermissionChecker
 }
 
 func NewDataHandler(db *sql.DB) *DataHandler {
 	return &DataHandler{
-		db:         db,
-		trackRepo:  repository.NewTrackRepo(db),
-		albumRepo:  repository.NewAlbumRepo(db),
-		artistRepo: repository.NewArtistRepo(db),
-		perm:       middleware.NewPermissionChecker(db),
+		db:          db,
+		trackRepo:   repository.NewTrackRepo(db),
+		albumRepo:   repository.NewAlbumRepo(db),
+		artistRepo:  repository.NewArtistRepo(db),
+		libraryRepo: repository.NewLibraryRepo(db),
+		perm:        middleware.NewPermissionChecker(db),
 	}
 }
 
@@ -66,7 +68,14 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total := len(allTracks)
+	var filtered []domain.Track
+	for _, t := range allTracks {
+		if t.Version <= 1 {
+			filtered = append(filtered, t)
+		}
+	}
+
+	total := len(filtered)
 	start := (page - 1) * perPage
 	if start > total {
 		start = total
@@ -76,7 +85,20 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 		end = total
 	}
 
-	items := allTracks[start:end]
+	items := filtered[start:end]
+
+	var defaultMbids []string
+	for _, t := range items {
+		if t.Version == 1 && t.MBID != "" {
+			defaultMbids = append(defaultMbids, t.MBID)
+		}
+	}
+
+	var versionsByMbid map[string][]domain.Track
+	if len(defaultMbids) > 0 {
+		versionsByMbid = h.loadVersionMaps(r.Context(), defaultMbids, userID)
+	}
+
 	result := make([]map[string]interface{}, len(items))
 	for i, t := range items {
 		entry := map[string]interface{}{
@@ -90,9 +112,20 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 			"file_hash":      t.Hash,
 			"file_name":      filepath.Base(t.FilePath),
 			"mbid":           t.MBID,
+			"version":        t.Version,
+			"version_label":  t.VersionLabel,
 		}
 		entry["albums"] = h.buildTrackAlbums(r.Context(), t.ID)
 		entry["artists"] = h.buildTrackArtists(r.Context(), t.ID)
+
+		if t.Version == 1 && t.MBID != "" && versionsByMbid != nil {
+			if siblings, ok := versionsByMbid[t.MBID]; ok {
+				if versionList := buildVersionList(siblings, t.ID); len(versionList) > 0 {
+					entry["versions"] = versionList
+				}
+			}
+		}
+
 		result[i] = entry
 	}
 
@@ -133,7 +166,7 @@ func (h *DataHandler) Artists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
-
+	userID := middleware.GetUserID(r.Context())
 	artistID := mux.Vars(r)["artistId"]
 	artist, err := h.artistRepo.FindByID(r.Context(), artistID)
 	if err != nil {
@@ -144,16 +177,46 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 	albums, _ := h.albumRepo.FindByArtistID(r.Context(), artistID)
 	tracks, _ := h.trackRepo.FindByArtistID(r.Context(), artistID)
 
-	trackList := make([]map[string]interface{}, len(tracks))
-	for i, t := range tracks {
-		trackList[i] = map[string]interface{}{
+	var trackList []map[string]interface{}
+	var defaultMbids []string
+	for _, t := range tracks {
+		if t.Version >= 2 {
+			continue
+		}
+		if t.Version == 1 && t.MBID != "" {
+			defaultMbids = append(defaultMbids, t.MBID)
+		}
+		entry := map[string]interface{}{
 			"id":             t.ID,
 			"title":          t.Title,
 			"cover_image_id": t.CoverImageID,
 			"duration":       t.Duration,
 			"file_format":    t.FileFormat,
+			"version":        t.Version,
+			"version_label":  t.VersionLabel,
+			"mbid":           t.MBID,
 			"artists":        h.buildTrackArtists(r.Context(), t.ID),
 			"albums":         h.buildTrackAlbums(r.Context(), t.ID),
+		}
+		trackList = append(trackList, entry)
+	}
+
+	if len(defaultMbids) > 0 {
+		versionsByMbid := h.loadVersionMaps(r.Context(), defaultMbids, userID)
+		for _, entry := range trackList {
+			if v, _ := entry["version"].(int); v != 1 {
+				continue
+			}
+			mbid, _ := entry["mbid"].(string)
+			if mbid == "" {
+				continue
+			}
+			if siblings, ok := versionsByMbid[mbid]; ok {
+				versionList := buildVersionList(siblings, entry["id"].(string))
+				if len(versionList) > 0 {
+					entry["versions"] = versionList
+				}
+			}
 		}
 	}
 
@@ -193,7 +256,7 @@ func (h *DataHandler) Albums(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
-
+	userID := middleware.GetUserID(r.Context())
 	albumID := mux.Vars(r)["albumId"]
 	album, err := h.albumRepo.FindByID(r.Context(), albumID)
 	if err != nil {
@@ -208,16 +271,46 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tracks, _ := h.trackRepo.FindByAlbumID(r.Context(), albumID)
-	trackList := make([]map[string]interface{}, len(tracks))
-	for i, t := range tracks {
-		trackList[i] = map[string]interface{}{
+	var trackList []map[string]interface{}
+	var defaultMbids []string
+	for _, t := range tracks {
+		if t.Version >= 2 {
+			continue
+		}
+		if t.Version == 1 && t.MBID != "" {
+			defaultMbids = append(defaultMbids, t.MBID)
+		}
+		entry := map[string]interface{}{
 			"id":             t.ID,
 			"title":          t.Title,
 			"cover_image_id": t.CoverImageID,
 			"duration":       t.Duration,
 			"file_format":    t.FileFormat,
+			"version":        t.Version,
+			"version_label":  t.VersionLabel,
+			"mbid":           t.MBID,
 			"artists":        h.buildTrackArtists(r.Context(), t.ID),
 			"albums":         h.buildTrackAlbums(r.Context(), t.ID),
+		}
+		trackList = append(trackList, entry)
+	}
+
+	if len(defaultMbids) > 0 {
+		versionsByMbid := h.loadVersionMaps(r.Context(), defaultMbids, userID)
+		for _, entry := range trackList {
+			if v, _ := entry["version"].(int); v != 1 {
+				continue
+			}
+			mbid, _ := entry["mbid"].(string)
+			if mbid == "" {
+				continue
+			}
+			if siblings, ok := versionsByMbid[mbid]; ok {
+				versionList := buildVersionList(siblings, entry["id"].(string))
+				if len(versionList) > 0 {
+					entry["versions"] = versionList
+				}
+			}
 		}
 	}
 
@@ -300,4 +393,36 @@ func (h *DataHandler) TracksByIDs(w http.ResponseWriter, r *http.Request) {
 		tracks = []*domain.Track{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tracks": tracks})
+}
+
+func (h *DataHandler) loadVersionMaps(ctx context.Context, mbids []string, userID string) map[string][]domain.Track {
+	if len(mbids) == 0 || userID == "" {
+		return nil
+	}
+	accessibleLibs, _ := h.libraryRepo.FindByUserID(ctx, userID)
+	var libIDs []string
+	for _, l := range accessibleLibs {
+		libIDs = append(libIDs, l.ID)
+	}
+	versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(ctx, mbids, libIDs)
+	return versionsByMbid
+}
+
+func buildVersionList(siblings []domain.Track, excludeID string) []map[string]interface{} {
+	var list []map[string]interface{}
+	for _, s := range siblings {
+		if s.ID == excludeID {
+			continue
+		}
+		list = append(list, map[string]interface{}{
+			"id":            s.ID,
+			"version":       s.Version,
+			"version_label": s.VersionLabel,
+			"suffix":        s.FileFormat,
+			"bit_rate":      s.BitRate,
+			"duration":      s.Duration,
+			"library_id":    s.LibraryID,
+		})
+	}
+	return list
 }

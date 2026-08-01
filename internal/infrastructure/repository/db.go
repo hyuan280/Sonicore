@@ -115,6 +115,8 @@ func RunMigrations(db *sql.DB) error {
 		play_count    INTEGER NOT NULL DEFAULT 0,
 		last_played_at TIMESTAMPTZ,
 		metadata      JSONB,
+		version       SMALLINT NOT NULL DEFAULT 0,
+		version_label TEXT NOT NULL DEFAULT '',
 		created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
@@ -122,6 +124,7 @@ func RunMigrations(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(hash);
 	CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
 	CREATE INDEX IF NOT EXISTS idx_tracks_filepath ON tracks(file_path);
+	CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks(mbid);
 
 	CREATE TABLE IF NOT EXISTS track_artists (
 		track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
@@ -140,6 +143,15 @@ func RunMigrations(db *sql.DB) error {
 		PRIMARY KEY (track_id, album_id)
 	);
 	CREATE INDEX IF NOT EXISTS idx_track_albums_album ON track_albums(album_id);
+
+	CREATE TABLE IF NOT EXISTS track_version_groups (
+		mbid       VARCHAR(36) NOT NULL,
+		library_id VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+		track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+		PRIMARY KEY (mbid, track_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_tvg_mbid ON track_version_groups(mbid);
+	CREATE INDEX IF NOT EXISTS idx_tvg_library ON track_version_groups(library_id);
 
 	CREATE TABLE IF NOT EXISTS images (
 		id         VARCHAR(26) PRIMARY KEY,

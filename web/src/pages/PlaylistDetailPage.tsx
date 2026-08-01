@@ -48,6 +48,7 @@ export default function PlaylistDetailPage() {
       duration: t.duration, suffix: t.file_format || t.suffix || "mp3",
       cover_image_id: t.cover_image_id, artists: t.artists,
       albums: t.albums,
+      version: t.version, version_label: t.version_label,
     }))
     player.setQueue(tracks, idx, id)
   }
@@ -203,7 +204,7 @@ export default function PlaylistDetailPage() {
             </div>
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={t} />
+                <AddQueueBtn track={t} versions={t.versions} />
                 <AddBtn trackId={t.id} />
                 <FavBtn trackId={t.id} initiallyFav={favs.has(t.id)} />
               </span>

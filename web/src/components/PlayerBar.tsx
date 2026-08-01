@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react"
 import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText, PictureInPicture2 } from "lucide-react"
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText, PictureInPicture2, FileMusic } from "lucide-react"
 import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
@@ -36,6 +36,7 @@ export default function PlayerBar() {
   const [showLyrics, setShowLyrics] = useState(false)
   const [desktopLyricsOpen, setDesktopLyricsOpen] = useState(isDesktopLyricsOpen)
   const [showQuality, setShowQuality] = useState(false)
+  const [showVersions, setShowVersions] = useState(false)
   const [fav, setFav] = useState(false)
   const [quality, setQuality] = useState(loadQuality)
   const lastHistoryRef = useRef(0)
@@ -232,6 +233,7 @@ export default function PlayerBar() {
   }, [ps.track, mse.seek])
 
   const qualityRef = useRef<HTMLDivElement>(null)
+  const versionRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!showQuality) return
@@ -244,9 +246,39 @@ export default function PlayerBar() {
     return () => document.removeEventListener("mousedown", handle)
   }, [showQuality])
 
+  useEffect(() => {
+    if (!showVersions) return
+    const handle = (e: MouseEvent) => {
+      if (versionRef.current && !versionRef.current.contains(e.target as Node)) {
+        setShowVersions(false)
+      }
+    }
+    document.addEventListener("mousedown", handle)
+    return () => document.removeEventListener("mousedown", handle)
+  }, [showVersions])
+
   const currentQ = qualityOptions.find(o => o.key === quality) ?? qualityOptions[0]
 
   const track = ps.track
+  const verCount = track?.versions?.length ?? 0
+  const hasVersions = verCount > 0
+
+  const switchVersion = (v: { id: string; version: number; duration: number; suffix: string; version_label: string }) => {
+    if (!track) return
+    const oldEntry = { id: track.id, version: track.version || 0, version_label: track.version_label || "", suffix: track.suffix, duration: track.duration, library_id: "", bit_rate: 0 }
+    const newVersions = track.versions
+      ? [...track.versions.filter(x => x.id !== v.id), oldEntry]
+      : []
+    const newQueue = [...ps.queue]
+    newQueue[ps.queueIdx] = {
+      ...track,
+      id: v.id, duration: v.duration, suffix: v.suffix,
+      version: v.version, version_label: v.version_label,
+      versions: newVersions,
+    }
+    ps.setQueue(newQueue, ps.queueIdx)
+    setShowVersions(false)
+  }
 
   return (
     <>
@@ -271,7 +303,7 @@ export default function PlayerBar() {
           )}
         </div>
 
-        <div className="flex items-center gap-4 max-w-screen-2xl mx-auto pt-2">
+        <div className="flex items-center gap-4 max-w-screen-2xl mx-auto pt-2 relative">
           <div className="flex items-center gap-3 w-72">
             {track ? (
               <>
@@ -303,54 +335,88 @@ export default function PlayerBar() {
             )}
           </div>
 
-          <div className="flex-1 flex items-center justify-center gap-3">
-            <div className="relative" ref={qualityRef}>
-              <button onClick={() => setShowQuality(!showQuality)}
-                className="text-[11px] font-semibold px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 cursor-pointer"
-                title={currentQ.desc}>
-                {currentQ.label}
+          <div className="flex-1 flex items-center justify-center relative">
+            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+              <div className="relative" ref={qualityRef}>
+                <button onClick={() => setShowQuality(!showQuality)}
+                  className="text-[11px] font-semibold px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 cursor-pointer"
+                  title={currentQ.desc}>
+                  {currentQ.label}
+                </button>
+                {showQuality && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-28 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+                    {qualityOptions.map(o => (
+                      <button key={o.key}
+                        onClick={() => { setShowQuality(false); setQuality(o.key); saveQuality(o.key) }}
+                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 cursor-pointer ${quality === o.key ? "text-green-500" : "text-zinc-400"}`}>
+                        {o.label} <span className="text-zinc-600 ml-1">{o.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={ps.prev} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
+                <SkipBack className="w-5 h-5" />
               </button>
-              {showQuality && (
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-28 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
-                  {qualityOptions.map(o => (
-                    <button key={o.key}
-                      onClick={() => { setShowQuality(false); setQuality(o.key); saveQuality(o.key) }}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 cursor-pointer ${quality === o.key ? "text-green-500" : "text-zinc-400"}`}>
-                      {o.label} <span className="text-zinc-600 ml-1">{o.title}</span>
+              <button onClick={ps.togglePlay}
+                className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition cursor-pointer">
+                {ps.playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              </button>
+              <button onClick={ps.next} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
+                <SkipForward className="w-5 h-5" />
+              </button>
+              <span className="w-9 flex items-center justify-center">
+                {ps.track && (
+                  <button onClick={toggleFav}
+                    className={`p-1 cursor-pointer text-zinc-500 hover:text-red-400 ${fav ? "text-red-500" : ""}`}
+                    title={fav ? "Remove from favorites" : "Add to favorites"}>
+                    <Heart className={`w-5 h-5 ${fav ? "fill-red-500" : ""}`} />
+                  </button>
+                )}
+              </span>
+              <button onClick={ps.cycleMode}
+                className="p-1 cursor-pointer relative" title={
+                  ps.mode === "normal" ? "Normal" : ps.mode === "all" ? "Repeat all" : ps.mode === "one" ? "Repeat one" : "Shuffle"
+                }>
+                {ps.mode === "shuffle" ? (
+                  <Shuffle className={`w-5 h-5 ${ps.mode === "shuffle" ? "text-green-500" : "text-zinc-500"}`} />
+                ) : ps.mode === "one" ? (
+                  <Repeat1 className={`w-5 h-5 text-green-500`} />
+                ) : (
+                  <Repeat className={`w-5 h-5 ${ps.mode === "normal" ? "text-zinc-500" : "text-green-500"}`} />
+                )}
+              </button>
+              <span className="w-11 flex items-center justify-center relative" ref={versionRef}>
+                {track && hasVersions && (
+                  <>
+                    <button onClick={() => setShowVersions(!showVersions)}
+                      className="p-1 text-zinc-400 hover:text-white cursor-pointer flex items-center gap-0.5 whitespace-nowrap"
+                      title={track.version_label || "Versions"}>
+                      <FileMusic className="w-4 h-4" />V{track.version || 1}
                     </button>
-                  ))}
-                </div>
-              )}
+                    {showVersions && (
+                      <div className="absolute bottom-full right-0 mb-1 w-64 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-[60] py-1 max-h-72 overflow-y-auto">
+                        <p className="text-xs text-zinc-500 px-3 py-1.5">Select version</p>
+                        <div className="border-t border-zinc-700 pt-1">
+                          <div className="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 text-green-500">
+                            <FileMusic className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{track.version_label || track.suffix?.toUpperCase() + " · current"}</span>
+                            <span className="text-xs text-green-500 ml-auto shrink-0">current</span>
+                          </div>
+                          {track.versions!.filter(v => v.id !== track.id).map(v => (
+                            <button key={v.id} onClick={() => switchVersion(v)}
+                              className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-700 cursor-pointer flex items-center gap-2">
+                              <FileMusic className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                              <span className="text-zinc-300 truncate">{v.version_label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </span>
             </div>
-            <button onClick={ps.prev} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
-              <SkipBack className="w-5 h-5" />
-            </button>
-            <button onClick={ps.togglePlay}
-              className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition cursor-pointer">
-              {ps.playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-            </button>
-            <button onClick={ps.next} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
-              <SkipForward className="w-5 h-5" />
-            </button>
-            {ps.track && (
-              <button onClick={toggleFav}
-                className={`p-1 cursor-pointer text-zinc-500 hover:text-red-400 ${fav ? "text-red-500" : ""}`}
-                title={fav ? "Remove from favorites" : "Add to favorites"}>
-                <Heart className={`w-5 h-5 ${fav ? "fill-red-500" : ""}`} />
-              </button>
-            )}
-            <button onClick={ps.cycleMode}
-              className="p-1 cursor-pointer relative" title={
-                ps.mode === "normal" ? "Normal" : ps.mode === "all" ? "Repeat all" : ps.mode === "one" ? "Repeat one" : "Shuffle"
-              }>
-              {ps.mode === "shuffle" ? (
-                <Shuffle className={`w-5 h-5 ${ps.mode === "shuffle" ? "text-green-500" : "text-zinc-500"}`} />
-              ) : ps.mode === "one" ? (
-                <Repeat1 className={`w-5 h-5 text-green-500`} />
-              ) : (
-                <Repeat className={`w-5 h-5 ${ps.mode === "normal" ? "text-zinc-500" : "text-green-500"}`} />
-              )}
-            </button>
           </div>
 
           <div className="flex items-center gap-3 w-80 justify-end">
@@ -395,7 +461,7 @@ export default function PlayerBar() {
               <button onClick={ps.clearQueue}
                 className="p-1 rounded text-zinc-500 hover:text-red-400 cursor-pointer" title="Clear queue">
                 <Trash2 className="w-3.5 h-3.5" />
-              </button>
+            </button>
             </div>
             <div className="overflow-y-auto max-h-64 p-1">
               {ps.queue.map((t, i) => {

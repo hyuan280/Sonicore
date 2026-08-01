@@ -178,7 +178,7 @@ export default function FavoritesPage() {
             </div>
             <div className="flex items-center gap-1 flex-1 min-w-0">
               <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                <AddQueueBtn track={{ id: h.item_id, title: h.title || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id, albums: h.albums }} />
+                <AddQueueBtn track={{ id: h.item_id, title: h.title || "", duration: h.duration || 0, suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id, albums: h.albums }} versions={h.versions} />
                 <AddBtn trackId={h.item_id} />
                 <FavBtn trackId={h.item_id} initiallyFav={!removed.has(h.item_id)}
                   onToggle={(id, nowFav) => { setRemoved(prev => { const n = new Set(prev); nowFav ? n.delete(id) : n.add(id); return n }) }} />

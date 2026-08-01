@@ -15,18 +15,20 @@ import (
 )
 
 type UserDataHandler struct {
-	db         *sql.DB
-	trackRepo  *repository.TrackRepo
-	artistRepo *repository.ArtistRepo
-	albumRepo  *repository.AlbumRepo
+	db          *sql.DB
+	trackRepo   *repository.TrackRepo
+	artistRepo  *repository.ArtistRepo
+	albumRepo   *repository.AlbumRepo
+	libraryRepo *repository.LibraryRepo
 }
 
 func NewUserDataHandler(db *sql.DB) *UserDataHandler {
 	return &UserDataHandler{
-		db:         db,
-		trackRepo:  repository.NewTrackRepo(db),
-		artistRepo: repository.NewArtistRepo(db),
-		albumRepo:  repository.NewAlbumRepo(db),
+		db:          db,
+		trackRepo:   repository.NewTrackRepo(db),
+		artistRepo:  repository.NewArtistRepo(db),
+		albumRepo:   repository.NewAlbumRepo(db),
+		libraryRepo: repository.NewLibraryRepo(db),
 	}
 }
 
@@ -45,10 +47,11 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 
 	if itemType == "track" {
 		rows, err := h.db.QueryContext(r.Context(),
-			`SELECT f.item_type, f.item_id, f.created_at,
+			`SELECT DISTINCT ON (CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+			        f.item_type, f.item_id, f.created_at,
 			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-			        t.cover_image_id
+			        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.mbid, '')
 			 FROM favorites f
 			 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 			 LEFT JOIN LATERAL (
@@ -59,24 +62,28 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			     ORDER BY tal.disc_number, tal.track_number
 			     LIMIT 1
 			 ) sub ON true
-			 WHERE f.user_id = $1 AND f.item_type = 'track'
-			 ORDER BY f.created_at DESC`, userID)
+			 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1
+			 ORDER BY CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END, t.version ASC, f.created_at DESC`, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
 			return
 		}
 		defer rows.Close()
 		var trackIDs []string
+		var favMbids []string
 		for rows.Next() {
 			var t, id string
 			var ca time.Time
 			var title, album, albumID, fileFormat string
 			var duration float64
 			var coverID sql.NullString
-			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID)
+			var version int
+			var versionLabel, mbid string
+			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &mbid)
 			item := map[string]interface{}{
 				"item_type": t, "item_id": id, "created_at": ca,
 				"title": title, "duration": duration, "suffix": fileFormat,
+				"version": version, "version_label": versionLabel, "mbid": mbid,
 			}
 			if albumID != "" {
 				item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
@@ -86,12 +93,52 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			}
 			items = append(items, item)
 			trackIDs = append(trackIDs, id)
+			if mbid != "" {
+				favMbids = append(favMbids, mbid)
+			}
 		}
 		artistsByTrack := h.loadTrackArtistsBulk(r.Context(), trackIDs)
 		for i := range items {
 			tid := items[i]["item_id"].(string)
 			if artists, ok := artistsByTrack[tid]; ok {
 				items[i]["artists"] = artists
+			}
+		}
+		if len(favMbids) > 0 {
+			accessibleLibs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
+			var libIDs []string
+			for _, l := range accessibleLibs {
+				libIDs = append(libIDs, l.ID)
+			}
+			versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(r.Context(), favMbids, libIDs)
+			if versionsByMbid != nil {
+				for _, item := range items {
+					mbid, _ := item["mbid"].(string)
+					if mbid == "" {
+						continue
+					}
+					if siblings, ok := versionsByMbid[mbid]; ok {
+						versionList := make([]map[string]interface{}, 0, len(siblings))
+						itemID, _ := item["item_id"].(string)
+						for _, s := range siblings {
+							if s.ID == itemID {
+								continue
+							}
+							versionList = append(versionList, map[string]interface{}{
+								"id":            s.ID,
+								"version":       s.Version,
+								"version_label": s.VersionLabel,
+								"suffix":        s.FileFormat,
+								"bit_rate":      s.BitRate,
+								"duration":      s.Duration,
+								"library_id":    s.LibraryID,
+							})
+						}
+						if len(versionList) > 0 {
+							item["versions"] = versionList
+						}
+					}
+				}
 			}
 		}
 	} else {
@@ -136,17 +183,20 @@ func (h *UserDataHandler) AddFavorites(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	for _, id := range req.ItemIDs {
-		var libID *string
-		if req.ItemType == "track" {
-			h.db.QueryRowContext(r.Context(),
-				"SELECT library_id FROM tracks WHERE id = $1", id).Scan(&libID)
-		}
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at)
-			 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-			userID, req.ItemType, id, libID, now); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+		ids := h.expandTrackVersions(r.Context(), userID, req.ItemType, []string{id})
+		for _, tid := range ids {
+			var libID *string
+			if req.ItemType == "track" {
+				h.db.QueryRowContext(r.Context(),
+					"SELECT library_id FROM tracks WHERE id = $1", tid).Scan(&libID)
+			}
+			if _, err := h.db.ExecContext(r.Context(),
+				`INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at)
+				 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+				userID, req.ItemType, tid, libID, now); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 	}
 
@@ -167,9 +217,12 @@ func (h *UserDataHandler) RemoveFavorites(w http.ResponseWriter, r *http.Request
 	}
 
 	for _, id := range req.ItemIDs {
-		h.db.ExecContext(r.Context(),
-			"DELETE FROM favorites WHERE user_id = $1 AND item_type = $2 AND item_id = $3",
-			userID, req.ItemType, id)
+		ids := h.expandTrackVersions(r.Context(), userID, req.ItemType, []string{id})
+		for _, tid := range ids {
+			h.db.ExecContext(r.Context(),
+				"DELETE FROM favorites WHERE user_id = $1 AND item_type = $2 AND item_id = $3",
+				userID, req.ItemType, tid)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -418,6 +471,7 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(trackIDsJSON, &trackIDs)
 
 	var tracks []map[string]interface{}
+	var mbids []string
 	for _, tid := range trackIDs {
 		track, err := h.trackRepo.FindByID(r.Context(), tid)
 		if err != nil {
@@ -430,6 +484,13 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 			"duration":       track.Duration,
 			"bit_rate":       track.BitRate,
 			"suffix":         track.FileFormat,
+			"version":        track.Version,
+			"version_label":  track.VersionLabel,
+			"file_format":    track.FileFormat,
+			"mbid":           track.MBID,
+		}
+		if track.MBID != "" {
+			mbids = append(mbids, track.MBID)
 		}
 		if len(track.Albums) > 0 {
 			albums := make([]map[string]interface{}, len(track.Albums))
@@ -458,6 +519,44 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 			t["artists"] = artists
 		}
 		tracks = append(tracks, t)
+	}
+
+	if len(mbids) > 0 {
+		accessibleLibs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
+		var libIDs []string
+		for _, l := range accessibleLibs {
+			libIDs = append(libIDs, l.ID)
+		}
+		versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(r.Context(), mbids, libIDs)
+		if versionsByMbid != nil {
+			for _, t := range tracks {
+				trackMbid, _ := t["mbid"].(string)
+				if trackMbid == "" {
+					continue
+				}
+				if siblings, ok := versionsByMbid[trackMbid]; ok {
+					versionList := make([]map[string]interface{}, 0, len(siblings))
+					trackID, _ := t["id"].(string)
+					for _, s := range siblings {
+						if s.ID == trackID {
+							continue
+						}
+						versionList = append(versionList, map[string]interface{}{
+							"id":            s.ID,
+							"version":       s.Version,
+							"version_label": s.VersionLabel,
+							"suffix":        s.FileFormat,
+							"bit_rate":      s.BitRate,
+							"duration":      s.Duration,
+							"library_id":    s.LibraryID,
+						})
+					}
+					if len(versionList) > 0 {
+						t["versions"] = versionList
+					}
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -671,6 +770,9 @@ type trackSummary struct {
 	CoverImageID  *string `json:"cover_image_id,omitempty"`
 	DiscNumber    int     `json:"disc_number,omitempty"`
 	TrackNumber   int     `json:"track,omitempty"`
+	Version       int     `json:"version"`
+	VersionLabel  string  `json:"version_label"`
+	MBID          string  `json:"mbid"`
 }
 
 func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
@@ -698,7 +800,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	// Resolve track metadata (maintain order)
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(sub.album_title, ''), COALESCE(sub.album_id, ''), t.duration, t.file_format, t.cover_image_id,
-		 COALESCE(sub.track_number, 0), COALESCE(sub.disc_number, 0)
+		 COALESCE(sub.track_number, 0), COALESCE(sub.disc_number, 0), COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.mbid, '')
 		 FROM tracks t
 		 LEFT JOIN track_artists ta ON ta.track_id = t.id AND ta.role = 'performer' AND ta.sort_order = 0
 		 LEFT JOIN artists ar ON ta.artist_id = ar.id
@@ -723,7 +825,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t trackSummary
 		var coverID sql.NullString
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber, &t.Version, &t.VersionLabel, &t.MBID); err != nil {
 			continue
 		}
 		item := map[string]interface{}{
@@ -732,6 +834,9 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 			"artist":   t.Artist,
 			"duration": t.Duration,
 			"suffix":   t.Suffix,
+			"version":  t.Version,
+			"version_label": t.VersionLabel,
+			"mbid":     t.MBID,
 		}
 		if t.AlbumID != "" {
 			item["albums"] = []map[string]interface{}{{"id": t.AlbumID, "title": t.Album, "track": t.TrackNumber, "disc_number": t.DiscNumber}}
@@ -748,6 +853,50 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		tid := tracks[i]["id"].(string)
 		if artists, ok := artistsByTrack[tid]; ok {
 			tracks[i]["artists"] = artists
+		}
+	}
+
+	var queueMbids []string
+	for _, t := range tracks {
+		if mbid, _ := t["mbid"].(string); mbid != "" {
+			queueMbids = append(queueMbids, mbid)
+		}
+	}
+	if len(queueMbids) > 0 {
+		accessibleLibs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
+		var libIDs []string
+		for _, l := range accessibleLibs {
+			libIDs = append(libIDs, l.ID)
+		}
+		versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(r.Context(), queueMbids, libIDs)
+		if versionsByMbid != nil {
+			for _, t := range tracks {
+				mbid, _ := t["mbid"].(string)
+				if mbid == "" {
+					continue
+				}
+				if siblings, ok := versionsByMbid[mbid]; ok {
+					versionList := make([]map[string]interface{}, 0, len(siblings))
+					itemID, _ := t["id"].(string)
+					for _, s := range siblings {
+						if s.ID == itemID {
+							continue
+						}
+						versionList = append(versionList, map[string]interface{}{
+							"id":            s.ID,
+							"version":       s.Version,
+							"version_label": s.VersionLabel,
+							"suffix":        s.FileFormat,
+							"bit_rate":      s.BitRate,
+							"duration":      s.Duration,
+							"library_id":    s.LibraryID,
+						})
+					}
+					if len(versionList) > 0 {
+						t["versions"] = versionList
+					}
+				}
+			}
 		}
 	}
 
@@ -788,4 +937,47 @@ func (h *UserDataHandler) loadTrackArtistsBulk(ctx context.Context, trackIDs []s
 		result[tid] = artists
 	}
 	return result
+}
+
+func (h *UserDataHandler) expandTrackVersions(ctx context.Context, userID string, itemType string, ids []string) []string {
+	if itemType != "track" {
+		return ids
+	}
+	accessibleLibs, _ := h.libraryRepo.FindByUserID(ctx, userID)
+	var libIDs []string
+	for _, l := range accessibleLibs {
+		libIDs = append(libIDs, l.ID)
+	}
+	if len(libIDs) == 0 {
+		return ids
+	}
+	expanded := make([]string, 0, len(ids))
+	seen := make(map[string]bool)
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		var mbid string
+		if err := h.db.QueryRowContext(ctx, "SELECT mbid FROM tracks WHERE id = $1 AND mbid != '' AND library_id = ANY($2)", id, pq.Array(libIDs)).Scan(&mbid); err != nil || mbid == "" {
+			expanded = append(expanded, id)
+			seen[id] = true
+			continue
+		}
+		rows, err := h.db.QueryContext(ctx, "SELECT id FROM tracks WHERE mbid = $1 AND library_id = ANY($2)", mbid, pq.Array(libIDs))
+		if err != nil {
+			expanded = append(expanded, id)
+			seen[id] = true
+			continue
+		}
+		for rows.Next() {
+			var tid string
+			rows.Scan(&tid)
+			if !seen[tid] {
+				expanded = append(expanded, tid)
+				seen[tid] = true
+			}
+		}
+		rows.Close()
+	}
+	return expanded
 }

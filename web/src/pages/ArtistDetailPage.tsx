@@ -17,6 +17,8 @@ interface RawTrack {
   file_format: string; cover_image_id?: string
   artists: { artist_id: string; name: string; role: string }[]
   albums?: { id: string; title?: string; track?: number; disc_number?: number }[]
+  version?: number; version_label?: string
+  versions?: { id: string; version: number; version_label: string; suffix: string; bit_rate: number; duration: number; library_id: string }[]
 }
 
 interface RoleGroup { role: string; label: string; tracks: RawTrack[] }
@@ -68,6 +70,7 @@ export default function ArtistDetailPage() {
       duration: t.duration, suffix: t.file_format || "mp3",
       cover_image_id: t.cover_image_id, artists: t.artists,
       albums: t.albums,
+      version: t.version, version_label: t.version_label, versions: t.versions,
     })), [rawTracks, artist])
 
   const toggleSelect = (id: string) => {
@@ -156,6 +159,7 @@ export default function ArtistDetailPage() {
           duration: t.duration, suffix: t.file_format || "mp3",
           cover_image_id: t.cover_image_id, artists: t.artists,
           albums: t.albums,
+          version: t.version, version_label: t.version_label, versions: t.versions,
         }))
         return (
           <div key={group.role} className="space-y-1">
@@ -212,7 +216,7 @@ export default function ArtistDetailPage() {
                   </div>
                   <div className="flex items-center gap-1 flex-1 min-w-0">
                     <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                      <AddQueueBtn track={t} />
+                      <AddQueueBtn track={t} versions={t.versions} />
                       <AddBtn trackId={t.id} />
                       <FavBtn trackId={t.id} initiallyFav={favoriteIds.has(t.id)}
                         onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />

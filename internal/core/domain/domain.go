@@ -118,6 +118,8 @@ type Track struct {
 	PlayCount    int            `json:"play_count"`
 	LastPlayedAt *time.Time     `json:"last_played_at,omitempty"`
 	Metadata     *TrackMetadata `json:"metadata,omitempty"`
+	Version      int            `json:"version"`
+	VersionLabel string         `json:"version_label"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 

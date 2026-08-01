@@ -164,7 +164,7 @@ export default function SongsPage() {
               </div>
               <div className="flex items-center gap-1 flex-1 min-w-0">
                 <span className="w-20 shrink-0 flex items-center justify-end gap-0.5">
-                  <AddQueueBtn track={t} />
+                  <AddQueueBtn track={t} versions={(t as any).versions} />
                   <AddBtn trackId={t.id} />
                   <FavBtn trackId={t.id} initiallyFav={favoriteIds.has(t.id)}
                     onToggle={(id, nowFav) => { setFavoriteIds(prev => { const n = new Set(prev); nowFav ? n.add(id) : n.delete(id); return n }) }} />
