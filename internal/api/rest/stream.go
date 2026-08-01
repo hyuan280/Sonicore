@@ -2,6 +2,7 @@ package rest
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,14 +13,12 @@ import (
 )
 
 type StreamHandler struct {
-	db           *sql.DB
 	trackRepo    *repository.TrackRepo
 	sessionStore *cache.SessionStore
 }
 
 func NewStreamHandler(db *sql.DB, sessionStore *cache.SessionStore) *StreamHandler {
 	return &StreamHandler{
-		db:           db,
 		trackRepo:    repository.NewTrackRepo(db),
 		sessionStore: sessionStore,
 	}
@@ -46,6 +45,10 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	quality := transcoder.ParseQuality(r.URL.Query().Get("quality"))
+	if r.URL.Query().Get("init") == "1" || r.URL.Query().Get("start") != "" {
+		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
+		return
+	}
 	if transcoder.Decide(track.BitRate, track.AudioCodec, quality).Transcode {
 		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
 		return
@@ -55,4 +58,33 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatInt(track.FileSize, 10))
 	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeFile(w, r, track.FilePath)
+}
+
+// ServeTranscodeStatus reports whether the transcode cache for a track is ready,
+// so the frontend can switch from the live stream to the seekable cache file.
+func (h *StreamHandler) ServeTranscodeStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	session := vars["session"]
+	trackID := vars["id"]
+
+	if session == "" {
+		http.Error(w, "missing session", http.StatusUnauthorized)
+		return
+	}
+	if _, err := h.sessionStore.Validate(r.Context(), session); err != nil {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+
+	track, err := h.trackRepo.FindByID(r.Context(), trackID)
+	if err != nil {
+		http.Error(w, "track not found", http.StatusNotFound)
+		return
+	}
+
+	quality := transcoder.ParseQuality(r.URL.Query().Get("quality"))
+	ready := transcoder.CacheReady(track.FilePath, quality)
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ready":%t}`, ready)
 }

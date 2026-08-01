@@ -199,6 +199,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 
 	streamHandler := rest.NewStreamHandler(db, sessionStore)
 	api.HandleFunc("/s/{session}/{id}", streamHandler.ServeStream).Methods("GET")
+	api.HandleFunc("/s/{session}/{id}/transcode-status", streamHandler.ServeTranscodeStatus).Methods("GET")
 
 	coverHandler := rest.NewCoverHandler(db, cfg.Data.ImagesDir, sessionStore)
 	api.HandleFunc("/c/{session}/{ownerType}/{ownerId}", coverHandler.Serve).Methods("GET")

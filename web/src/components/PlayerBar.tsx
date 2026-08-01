@@ -9,6 +9,7 @@ import ArtistLink from "../components/ArtistLink"
 import LyricsPanel from "../components/LyricsPanel"
 import { isDesktopLyricsSupported, isDesktopLyricsOpen, openDesktopLyrics, closeDesktopLyrics, subscribeDesktopLyrics } from "../lib/desktopLyrics"
 import { setMediaSessionMetadata, setMediaSessionPlaybackState, setMediaSessionPositionState, bindMediaSessionActions, clearMediaSessionActions } from "../lib/mediaSession"
+import { useMseAudio } from "../hooks/useMseAudio"
 
 const qualityOptions = [
   { key: "standard", label: "SQ", title: "AAC 256k", desc: "Standard" },
@@ -27,7 +28,8 @@ function saveQuality(q: string) {
 export default function PlayerBar() {
   const ps = usePlayer()
   const { logout } = useAuth()
-  const audioRef = useRef<HTMLAudioElement>(null)
+  const mse = useMseAudio()
+  const audioRef = mse.audioRef
   const progressRef = useRef<HTMLDivElement>(null)
   const currentTrackRef = useRef<string | null>(null)
   const [showQueue, setShowQueue] = useState(false)
@@ -37,6 +39,7 @@ export default function PlayerBar() {
   const [fav, setFav] = useState(false)
   const [quality, setQuality] = useState(loadQuality)
   const lastHistoryRef = useRef(0)
+  const switchingRef = useRef(false)
   const session = localStorage.getItem("session_token")
 
   useEffect(() => {
@@ -93,14 +96,11 @@ export default function PlayerBar() {
     const trackId = ps.track.id
     currentTrackRef.current = trackId
     lastHistoryRef.current = 0
-
-    const session = localStorage.getItem("session_token")
-    const q = quality === "standard" ? "" : `?quality=${quality}`
-    el.src = session ? `/api/s/${session}/${ps.track.id}${q}` : ""
     el.volume = ps.volume
 
     const onEnded = () => {
       if (currentTrackRef.current !== trackId) return
+      switchingRef.current = false
       usePlayer.getState().advanceTrack()
     }
 
@@ -125,15 +125,17 @@ export default function PlayerBar() {
 
     const onPlay = () => {
       const s = usePlayer.getState()
+      switchingRef.current = false
       s.setPlaying(true)
       savePlayerState()
       lastHistoryRef.current = 0
       if (s.position > 1 && el.currentTime < 1) {
-        el.currentTime = s.position
+        mse.seek(s.position)
       }
     }
 
     const onPause = () => {
+      if (switchingRef.current) return
       const s = usePlayer.getState()
 
       if (s.playing && s.mode !== "normal" && currentTrackRef.current === s.track?.id) {
@@ -149,13 +151,13 @@ export default function PlayerBar() {
 
     const onError = () => {
       console.warn("[audio] stream error | code:", el.error?.code, "| message:", el.error?.message)
+      switchingRef.current = false
       usePlayer.getState().setPlaying(false)
     }
 
-    if (ps.playing) {
-      if (el.ended) el.currentTime = 0
-      el.play().catch(() => usePlayer.getState().setPlaying(false))
-    }
+    switchingRef.current = true
+    const swTimer = setTimeout(() => { switchingRef.current = false }, 5000)
+    mse.start({ id: trackId, duration: ps.track.duration || 0 }, quality, ps.position, ps.playing)
 
     el.addEventListener("ended", onEnded)
     el.addEventListener("timeupdate", onTimeUpdate)
@@ -164,13 +166,14 @@ export default function PlayerBar() {
     el.addEventListener("error", onError)
 
     return () => {
+      clearTimeout(swTimer)
       el.removeEventListener("ended", onEnded)
       el.removeEventListener("timeupdate", onTimeUpdate)
       el.removeEventListener("play", onPlay)
       el.removeEventListener("pause", onPause)
       el.removeEventListener("error", onError)
     }
-  }, [ps.track?.id, ps.playEpoch, quality])
+  }, [ps.track?.id, ps.playEpoch, quality, mse.start, mse.seek])
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = ps.volume
@@ -179,9 +182,9 @@ export default function PlayerBar() {
   useEffect(() => {
     const el = audioRef.current
     if (!el) return
-    if (!ps.track) { el.pause(); el.src = ""; return }
+    if (!ps.track) { el.pause(); return }
     if (ps.playing) {
-      if (el.ended) el.currentTime = 0
+      if (el.ended) { try { el.currentTime = 0 } catch {} }
       el.play().catch(() => usePlayer.getState().setPlaying(false))
     } else {
       el.pause()
@@ -196,7 +199,7 @@ export default function PlayerBar() {
       pause: () => audioRef.current?.pause(),
       next: () => usePlayer.getState().next(),
       prev: () => usePlayer.getState().prev(),
-      seekTo: (time) => { if (audioRef.current) audioRef.current.currentTime = time },
+      seekTo: (time) => mse.seek(time),
     })
     return () => {
       setMediaSessionMetadata(null)
@@ -219,14 +222,14 @@ export default function PlayerBar() {
   }, [ps.position, ps.track])
 
   const seek = useCallback((e: React.MouseEvent) => {
-    const el = audioRef.current
     const bar = progressRef.current
-    if (!el || !bar || !ps.track) return
+    if (!bar || !ps.track) return
     const rect = bar.getBoundingClientRect()
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    const target = pct * ps.track.duration
-    el.currentTime = Math.min(target, ps.track.duration - 0.5)
-  }, [ps.track])
+    const target = Math.min(pct * ps.track.duration, Math.max(0, ps.track.duration - 0.5))
+    usePlayer.getState().setPosition(target)
+    mse.seek(target)
+  }, [ps.track, mse.seek])
 
   const qualityRef = useRef<HTMLDivElement>(null)
 
@@ -241,7 +244,7 @@ export default function PlayerBar() {
     return () => document.removeEventListener("mousedown", handle)
   }, [showQuality])
 
-  const currentQ = qualityOptions.find(o => o.key === quality)!
+  const currentQ = qualityOptions.find(o => o.key === quality) ?? qualityOptions[0]
 
   const track = ps.track
 
@@ -250,10 +253,20 @@ export default function PlayerBar() {
       <audio ref={audioRef} preload="auto" />
       <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2 z-50 h-16">
         <div className="absolute top-0 left-0 right-0 h-2" />
-        <div ref={progressRef} className="absolute top-2 left-0 right-0 h-1 bg-zinc-800 cursor-pointer group"
+        <div ref={progressRef} className="absolute top-2 left-0 right-0 h-1 bg-zinc-800 cursor-pointer group overflow-hidden"
           onClick={seek}>
+          {track && ps.playing && mse.waiting && (
+            <div className="absolute inset-0 progress-sweep" />
+          )}
+          {track && mse.buffered.map((r, i) => (
+            <div key={i} className="absolute inset-y-0 bg-green-600/40"
+              style={{
+                left: `${(r.start / (track.duration || 1)) * 100}%`,
+                width: `${((r.end - r.start) / (track.duration || 1)) * 100}%`,
+              }} />
+          ))}
           {track && (
-            <div className="h-full bg-green-500 transition-all"
+            <div className="absolute inset-y-0 bg-green-500 transition-all"
               style={{ width: `${(ps.position / (track.duration || 1)) * 100}%` }} />
           )}
         </div>
