@@ -245,7 +245,7 @@ export default function LyricsPanel({ onClose }: Props) {
           </div>
         ) : (
           <div className="text-zinc-600 italic pt-5" style={{ fontSize: Math.round(settings.fontSize * 0.6) }}>
-            {track ? "暂无歌词" : "未在播放"}
+            {track ? "No lyrics" : "Not playing"}
           </div>
         )}
       </div>

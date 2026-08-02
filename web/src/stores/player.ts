@@ -152,6 +152,11 @@ export async function restorePlayerState() {
       })
     }
   } catch {}
+
+  const st = usePlayer.getState()
+  if (st.track) {
+    st.fetchLyrics(st.track.id)
+  }
 }
 
 export const usePlayer = create<PlayerState>((set, get) => ({
