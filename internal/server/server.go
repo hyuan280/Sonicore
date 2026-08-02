@@ -186,7 +186,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/user/password", userHandler.ChangePassword).Methods("PUT")
 
 	browseHandler := rest.NewDataHandler(db)
-	protected.HandleFunc("/data/{libId}/tracks", browseHandler.Tracks).Methods("GET")
+	protected.HandleFunc("/data/tracks", browseHandler.Tracks).Methods("GET")
 	protected.HandleFunc("/data/artists", browseHandler.Artists).Methods("GET")
 	protected.HandleFunc("/data/artists/{artistId}", browseHandler.ArtistDetail).Methods("GET")
 	protected.HandleFunc("/data/albums", browseHandler.Albums).Methods("GET")

@@ -54,15 +54,24 @@ func parsePagination(r *http.Request) (page, perPage int) {
 
 func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
-	libID := mux.Vars(r)["libId"]
-	if libID != "" && libID != "__all__" && !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
-		return
-	}
-
 	page, perPage := parsePagination(r)
 
-	allTracks, err := h.trackRepo.FindByLibraryID(r.Context(), libID)
+	var allTracks []domain.Track
+	var err error
+	if libID := r.URL.Query().Get("libId"); libID != "" {
+		if !h.perm.IsMember(r.Context(), libID, userID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+			return
+		}
+		allTracks, err = h.trackRepo.FindByLibraryID(r.Context(), libID)
+	} else {
+		libs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
+		var ids []string
+		for _, l := range libs {
+			ids = append(ids, l.ID)
+		}
+		allTracks, err = h.trackRepo.FindByLibraryID(r.Context(), ids...)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load tracks"})
 		return

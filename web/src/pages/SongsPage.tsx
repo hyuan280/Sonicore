@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
-import { useLibrary } from "../stores/library"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { AddBtn, FavBtn, AddQueueBtn } from "../components/AddToPlaylist"
 import { Clock, Play, CheckSquare, Plus, ListPlus, Heart, Music } from "lucide-react"
@@ -9,7 +8,6 @@ import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
 export default function SongsPage() {
-  const { activeId, libraries } = useLibrary()
   const player = usePlayer()
   const [tracks, setTracks] = useState<PlayerTrack[]>([])
   const [page, setPage] = useState(1)
@@ -22,21 +20,16 @@ export default function SongsPage() {
   const perPage = 50
 
   const load = async () => {
-    if (!activeId) return
-    const ids = activeId === "__all__" ? libraries.map(l => l.id) : [activeId]
-    const results = await Promise.all(ids.map(id => api.data.tracks(id, 1, 9999)))
-    const merged = results.flatMap(r => r.items || [])
-    const totalItems = results.reduce((sum, r) => sum + (r.total || 0), 0)
-    const start = (page - 1) * perPage
-    const pageItems = merged.slice(start, start + perPage)
-    setTracks(pageItems)
-    setTotal(totalItems)
-    if (pageItems.length > 0) {
-      const fav = await api.user.checkFavorites(pageItems.map(t => t.id))
+    const r = await api.data.tracks(undefined, page, perPage)
+    const items = r.items || []
+    setTracks(items)
+    setTotal(r.total || 0)
+    if (items.length > 0) {
+      const fav = await api.user.checkFavorites(items.map((t: any) => t.id))
       setFavoriteIds(new Set(Object.keys(fav.favorites || {})))
     }
   }
-  useEffect(() => { load() }, [activeId, page, libraries.length])
+  useEffect(() => { load() }, [page])
 
   const totalPages = Math.ceil(total / perPage)
 

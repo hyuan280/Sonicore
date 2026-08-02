@@ -73,8 +73,8 @@ export const api = {
     scanStatus: (id: string) => request(`/api/libraries/${id}/scan/status`),
   },
 	data: {
-		tracks: (libId: string, page = 1, perPage = 50) =>
-			request(`/api/data/${libId}/tracks?page=${page}&per_page=${perPage}`),
+		tracks: (libId?: string, page = 1, perPage = 50) =>
+			request(`/api/data/tracks?page=${page}&per_page=${perPage}${libId ? `&libId=${encodeURIComponent(libId)}` : ""}`),
 		tracksByIds: (ids: string[]) =>
 			request("/api/data/tracks/byids", { method: "POST", body: JSON.stringify({ ids }) }),
 		artists: (page = 1, perPage = 9999) =>

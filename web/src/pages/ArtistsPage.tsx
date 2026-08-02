@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api } from "../api/client"
-import { useLibrary } from "../stores/library"
 import { Card, CardGrid } from "../components/ui/card"
 import { Mic2, LayoutGrid, List, Music } from "lucide-react"
 import { coverUrl } from "../lib/utils"
@@ -18,7 +17,6 @@ function formatRoles(roles?: string[]): string {
 }
 
 export default function ArtistsPage() {
-  const { activeId } = useLibrary()
   const [artists, setArtists] = useState<any[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -26,7 +24,6 @@ export default function ArtistsPage() {
   const perPage = 30
 
   const load = async () => {
-    if (!activeId) return
     const r = await api.data.artists(1, 9999)
     const items = r.items || []
     setTotal(items.length)
@@ -34,7 +31,7 @@ export default function ArtistsPage() {
     setArtists(items.slice(start, start + perPage))
   }
 
-  useEffect(() => { load() }, [activeId, page])
+  useEffect(() => { load() }, [page])
 
   const totalPages = Math.ceil(total / perPage)
 

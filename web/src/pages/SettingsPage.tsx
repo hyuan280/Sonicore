@@ -37,7 +37,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!manageLib) { setManageTracks([]); return }
-    fetch(`/api/data/${manageLib.id}/tracks?page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
+    fetch(`/api/data/tracks?libId=${encodeURIComponent(manageLib.id)}&page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
       .then(r => r.json()).then(d => setManageTracks(d.items || [])).catch(() => {})
   }, [manageLib?.id])
 
@@ -365,7 +365,7 @@ export default function SettingsPage() {
       )}
       {searchModal &&       <SearchResultModal data={searchModal} onClose={() => setSearchModal(null)} onUpdate={(edit) => setSearchModal((prev: any) => ({ ...prev, edit }))}
         onSaved={() => {
-          if (manageLib) fetch(`/api/data/${manageLib.id}/tracks?page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
+          if (manageLib) fetch(`/api/data/tracks?libId=${encodeURIComponent(manageLib.id)}&page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
             .then(r => r.json()).then(d => setManageTracks(d.items || [])).catch(() => {})
         }} />}
     </div>

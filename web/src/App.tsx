@@ -7,7 +7,7 @@ import { usePlayer } from "./stores/player"
 import { api } from "./api/client"
 import { APP_VERSION } from "./lib/constants"
 import {
-  Turntable, Music, Disc2, Mic2, ListMusic, Heart, History, Settings, LogOut, ChevronDown, Shield,
+  Turntable, Music, Disc2, Mic2, ListMusic, Heart, History, Settings, LogOut, Shield,
   ChevronRight,
 } from "lucide-react"
 import LoginPage from "./pages/LoginPage"
@@ -44,7 +44,6 @@ const navItemsAfter = [
 
 function Sidebar() {
   const location = useLocation()
-  const { libraries, activeId, setActive } = useLibrary()
   const { list: jukeboxes, loadList: loadJukeboxes } = useJukebox()
   const [playlists, setPlaylists] = useState<any[]>([])
   const [plOpen, setPlOpen] = useState(false)
@@ -76,15 +75,6 @@ function Sidebar() {
         <span className="font-bold">Sonicore</span>
         <span className="text-xs text-zinc-500 self-end pb-0.5 ml-auto">{APP_VERSION}</span>
       </Link>
-
-      <div className="relative px-3 py-2 border-b border-zinc-800">
-        <select value={activeId || ""} onChange={e => setActive(e.target.value)}
-          className="w-full bg-zinc-800 text-sm text-white rounded-lg px-3 py-2 appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-green-500">
-          <option value="__all__">All Libraries</option>
-          {libraries.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </select>
-        <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
-      </div>
 
       <nav className="flex-1 py-2 space-y-1 px-2 overflow-y-auto">
         {navItems.map((item, i) => {

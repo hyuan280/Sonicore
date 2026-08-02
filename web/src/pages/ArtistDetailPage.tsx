@@ -180,7 +180,7 @@ export default function ArtistDetailPage() {
               </div>
             </div>
             {groupTracks.map((t, i) => {
-              const gi = allPlayerTracks.indexOf(t)
+              const gi = allPlayerTracks.findIndex(p => p.id === t.id)
               return (
                 <div key={t.id}
                   className="flex items-center gap-1 px-4 py-0 rounded-lg hover:bg-zinc-800/50 cursor-pointer group">

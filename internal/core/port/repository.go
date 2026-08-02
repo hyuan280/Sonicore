@@ -45,7 +45,7 @@ type AlbumRepository interface {
 type TrackRepository interface {
 	BatchCreate(ctx context.Context, tracks []domain.Track) error
 	FindByID(ctx context.Context, id string) (*domain.Track, error)
-	FindByLibraryID(ctx context.Context, libraryID string) ([]domain.Track, error)
+	FindByLibraryID(ctx context.Context, libraryIDs ...string) ([]domain.Track, error)
 	FindByAlbumID(ctx context.Context, albumID string) ([]domain.Track, error)
 	FindByArtistID(ctx context.Context, artistID string) ([]domain.Track, error)
 	FindByHash(ctx context.Context, hash string) (*domain.Track, error)

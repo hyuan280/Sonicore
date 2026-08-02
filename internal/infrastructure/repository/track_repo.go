@@ -296,14 +296,17 @@ func (r *TrackRepo) LoadTrackArtistsBulk(ctx context.Context, trackIDs []string)
 	return result, rows.Err()
 }
 
-func (r *TrackRepo) FindByLibraryID(ctx context.Context, libraryID string) ([]domain.Track, error) {
+func (r *TrackRepo) FindByLibraryID(ctx context.Context, libraryIDs ...string) ([]domain.Track, error) {
+	if len(libraryIDs) == 0 {
+		return nil, nil
+	}
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, library_id, title,
 		 cover_image_id,
 		 duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, audio_codec, mbid, acoust_id, hash,
 		 lyrics_mask, lyrics, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
-		 FROM tracks WHERE library_id = $1`, libraryID)
+		 FROM tracks WHERE library_id = ANY($1)`, pq.Array(libraryIDs))
 	if err != nil {
 		return nil, err
 	}
