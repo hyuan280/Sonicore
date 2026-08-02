@@ -389,15 +389,15 @@ export default function PlayerBar() {
                 )}
               </span>
               <button onClick={ps.cycleMode}
-                className="p-1 cursor-pointer relative" title={
+                className="p-1 cursor-pointer relative group" title={
                   ps.mode === "normal" ? "Normal" : ps.mode === "all" ? "Repeat all" : ps.mode === "one" ? "Repeat one" : "Shuffle"
                 }>
                 {ps.mode === "shuffle" ? (
-                  <Shuffle className={`w-5 h-5 ${ps.mode === "shuffle" ? "text-green-500" : "text-zinc-500"}`} />
+                  <Shuffle className={`w-5 h-5 ${ps.mode === "shuffle" ? "text-green-500 group-hover:text-white" : "text-zinc-500 group-hover:text-white"}`} />
                 ) : ps.mode === "one" ? (
-                  <Repeat1 className={`w-5 h-5 text-green-500`} />
+                  <Repeat1 className={`w-5 h-5 text-green-500 group-hover:text-white`} />
                 ) : (
-                  <Repeat className={`w-5 h-5 ${ps.mode === "normal" ? "text-zinc-500" : "text-green-500"}`} />
+                  <Repeat className={`w-5 h-5 ${ps.mode === "normal" ? "text-zinc-500" : "text-green-500"} group-hover:text-white`} />
                 )}
               </button>
               <span className="w-11 flex items-center justify-center relative" ref={versionRef}>
