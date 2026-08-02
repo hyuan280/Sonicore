@@ -380,7 +380,7 @@ type Track struct {
   Hash         string    // SHA256 of audio data
   HasLyrics    bool
   Lyrics       string
-  Rating       int       // 用户评分 1-5
+  Heat         int       // 热度（待实现）
   PlayCount    int
   LastPlayedAt *time.Time
   Metadata     *TrackMetadata  // JSONB 扩展元数据

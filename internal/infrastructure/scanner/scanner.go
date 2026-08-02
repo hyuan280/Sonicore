@@ -350,7 +350,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 
 		if existing != nil {
 			track.CreatedAt = existing.CreatedAt
-			track.Rating = existing.Rating
+			track.Heat = existing.Heat
 			track.PlayCount = existing.PlayCount
 			track.LastPlayedAt = existing.LastPlayedAt
 			track.CoverImageID = existing.CoverImageID

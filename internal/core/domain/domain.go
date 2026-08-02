@@ -114,7 +114,7 @@ type Track struct {
 	Hash         string         `json:"hash"`
 	LyricsMask   int            `json:"lyrics_mask"`
 	Lyrics       string         `json:"lyrics"`
-	Rating       int            `json:"rating"`
+	Heat         int            `json:"heat"`
 	PlayCount    int            `json:"play_count"`
 	LastPlayedAt *time.Time     `json:"last_played_at,omitempty"`
 	Metadata     *TrackMetadata `json:"metadata,omitempty"`
