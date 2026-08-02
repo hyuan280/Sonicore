@@ -263,7 +263,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 
     if (mode === "normal") {
       if (queueIdx >= queue.length - 1) {
-        set({ playing: false, position: 0 })
+        set({ playing: false, position: 0, lyrics: "", lyricsFormat: "" })
         savePlayerState()
         return
       }
@@ -351,7 +351,37 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   setPosition: (pos) => set({ position: pos }),
   setVolume: (v) => { set({ volume: v }); savePlayerState() },
   setPlaying: (p) => { set({ playing: p }) },
-  togglePlay: () => set(s => ({ playing: !s.playing })),
+  togglePlay: () => {
+    const s = get()
+    if (s.playing) {
+      set({ playing: false })
+      savePlayerState()
+      return
+    }
+    if (s.track) {
+      set({ playing: true })
+      savePlayerState()
+      return
+    }
+    if (s.queue.length > 0) {
+      const { mode } = s
+      const idx = mode === "shuffle" && s.shuffleOrder.length > 0 ? s.shuffleOrder[0] : 0
+      const track = s.queue[idx] || null
+      set({
+        queueIdx: idx,
+        shuffleIdx: 0,
+        track,
+        playing: true,
+        position: 0,
+        lyrics: "",
+        lyricsFormat: "",
+        playEpoch: get().playEpoch + 1,
+      })
+      savePlayerState()
+      saveQueue()
+      if (track) get().fetchLyrics(track.id)
+    }
+  },
 
   cycleMode: () => {
     const order: ("normal" | "all" | "one" | "shuffle")[] = ["normal", "all", "one", "shuffle"]
@@ -414,7 +444,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const update: any = { queue: newQueue, queueIdx: newIdx }
 
     if (newQueue.length === 0) {
-      update.track = null; update.playing = false; update.queueIdx = 0
+      update.track = null; update.playing = false; update.queueIdx = 0; update.lyrics = ""; update.lyricsFormat = ""
     } else if (isCurrent) {
       const nextTrack = newQueue[Math.min(newIdx, newQueue.length - 1)]
       update.track = nextTrack; update.position = 0
@@ -431,7 +461,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   clearQueue: () => {
-    set({ queue: [], queueIdx: 0, shuffleOrder: [], shuffleIdx: 0, track: null, playing: false, position: 0, currentPlaylistId: null })
+    set({ queue: [], queueIdx: 0, shuffleOrder: [], shuffleIdx: 0, track: null, playing: false, position: 0, currentPlaylistId: null, lyrics: "", lyricsFormat: "" })
     savePlayerState()
     saveQueue()
   },

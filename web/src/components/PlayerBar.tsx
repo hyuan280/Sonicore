@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react"
 import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText, PictureInPicture2, FileMusic } from "lucide-react"
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText, PictureInPicture2, FileMusic, Music2, Music3 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { formatDuration, coverUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
@@ -32,10 +32,15 @@ export default function PlayerBar() {
   const audioRef = mse.audioRef
   const progressRef = useRef<HTMLDivElement>(null)
   const currentTrackRef = useRef<string | null>(null)
+  const prevVolume = useRef(0.8)
+  if (prevVolume.current === 0.8) {
+    try { const v = localStorage.getItem("prevVolume"); if (v) prevVolume.current = parseFloat(v) } catch {}
+  }
   const [showQueue, setShowQueue] = useState(false)
   const [showLyrics, setShowLyrics] = useState(false)
   const [desktopLyricsOpen, setDesktopLyricsOpen] = useState(isDesktopLyricsOpen)
   const [showQuality, setShowQuality] = useState(false)
+  const [qualityPos, setQualityPos] = useState<{ left: number }>({ left: 0 })
   const [showVersions, setShowVersions] = useState(false)
   const [fav, setFav] = useState(false)
   const [quality, setQuality] = useState(loadQuality)
@@ -233,12 +238,15 @@ export default function PlayerBar() {
   }, [ps.track, mse.seek])
 
   const qualityRef = useRef<HTMLDivElement>(null)
+  const qualityPanelRef = useRef<HTMLDivElement>(null)
   const versionRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!showQuality) return
     const handle = (e: MouseEvent) => {
-      if (qualityRef.current && !qualityRef.current.contains(e.target as Node)) {
+      const inBtn = qualityRef.current && qualityRef.current.contains(e.target as Node)
+      const inPanel = qualityPanelRef.current && qualityPanelRef.current.contains(e.target as Node)
+      if (!inBtn && !inPanel) {
         setShowQuality(false)
       }
     }
@@ -258,6 +266,12 @@ export default function PlayerBar() {
   }, [showVersions])
 
   const currentQ = qualityOptions.find(o => o.key === quality) ?? qualityOptions[0]
+
+  const qIcons: Record<string, React.ReactNode> = {
+    standard: <Music3 className="w-4 h-4" />,
+    high: <Music2 className="w-4 h-4" />,
+    lossless: <Music className="w-4 h-4" />,
+  }
 
   const track = ps.track
   const verCount = track?.versions?.length ?? 0
@@ -285,7 +299,7 @@ export default function PlayerBar() {
       <audio ref={audioRef} preload="auto" />
       <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2 z-50 h-16">
         <div className="absolute top-0 left-0 right-0 h-2" />
-        <div ref={progressRef} className="absolute top-2 left-0 right-0 h-1 bg-zinc-800 cursor-pointer group overflow-hidden"
+        <div ref={progressRef} className="absolute top-2 left-0 right-0 h-1 bg-zinc-800 cursor-pointer group overflow-hidden z-10"
           onClick={seek}>
           {track && ps.playing && mse.waiting && (
             <div className="absolute inset-0 progress-sweep" />
@@ -300,10 +314,10 @@ export default function PlayerBar() {
           {track && (
             <div className="absolute inset-y-0 bg-green-500 transition-all"
               style={{ width: `${(ps.position / (track.duration || 1)) * 100}%` }} />
-          )}
-        </div>
+        )}
+      </div>
 
-        <div className="flex items-center gap-4 max-w-screen-2xl mx-auto pt-2 relative">
+        <div className="flex items-center gap-4 max-w-screen-2xl mx-auto mt-2 relative">
           <div className="flex items-center gap-3 w-72">
             {track ? (
               <>
@@ -331,29 +345,29 @@ export default function PlayerBar() {
                 </div>
               </>
             ) : (
-              <div className="text-sm text-zinc-500">No track playing</div>
+              <>
+                <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 flex items-center justify-center">
+                  <Music className="w-5 h-5 text-zinc-600" />
+                </div>
+                <div className="text-sm text-zinc-500">No track playing</div>
+              </>
             )}
           </div>
 
-          <div className="flex-1 flex items-center justify-center relative">
+           <div className="flex-1 flex items-center justify-center relative">
             <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
-              <div className="relative" ref={qualityRef}>
-                <button onClick={() => setShowQuality(!showQuality)}
-                  className="text-[11px] font-semibold px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 cursor-pointer"
+              <div ref={qualityRef}>
+                <button onClick={() => {
+                  if (qualityRef.current) {
+                    const r = qualityRef.current.getBoundingClientRect()
+                    setQualityPos({ left: r.left + r.width / 2 })
+                  }
+                  setShowQuality(!showQuality)
+                }}
+                  className="text-[11px] font-semibold px-1.5 py-0.5 rounded text-zinc-400 hover:text-white cursor-pointer flex items-center gap-1 w-14 justify-center"
                   title={currentQ.desc}>
-                  {currentQ.label}
+                  {qIcons[quality]}{currentQ.label}
                 </button>
-                {showQuality && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-28 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
-                    {qualityOptions.map(o => (
-                      <button key={o.key}
-                        onClick={() => { setShowQuality(false); setQuality(o.key); saveQuality(o.key) }}
-                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 cursor-pointer ${quality === o.key ? "text-green-500" : "text-zinc-400"}`}>
-                        {o.label} <span className="text-zinc-600 ml-1">{o.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
               <button onClick={ps.prev} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
                 <SkipBack className="w-5 h-5" />
@@ -424,7 +438,10 @@ export default function PlayerBar() {
               {formatDuration(ps.position)} / {formatDuration(track?.duration || 0)}
             </span>
             <div className="flex items-center gap-1">
-              <button onClick={() => ps.setVolume(ps.volume === 0 ? 0.8 : 0)}
+              <button onClick={() => {
+                if (ps.volume > 0) { prevVolume.current = ps.volume; localStorage.setItem("prevVolume", String(ps.volume)); ps.setVolume(0) }
+                else ps.setVolume(prevVolume.current)
+              }}
                 className="p-1 text-zinc-400 hover:text-white cursor-pointer">
                 {ps.volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
@@ -432,23 +449,28 @@ export default function PlayerBar() {
                 onChange={e => ps.setVolume(parseFloat(e.target.value))}
                 className="w-20 accent-green-500" />
             </div>
-            {track && (
-              <button onClick={() => setShowLyrics(!showLyrics)}
-                className={`p-1 cursor-pointer ${showLyrics ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
-                title="Lyrics">
-                <FileText className="w-4 h-4" />
-              </button>
-            )}
-            {isDesktopLyricsSupported() && (
-              <button onClick={toggleDesktopLyrics}
-                className={`p-1 cursor-pointer ${desktopLyricsOpen ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
-                title="桌面歌词">
-                <PictureInPicture2 className="w-4 h-4" />
-              </button>
-            )}
+            <span className="w-9 flex justify-center">
+              {track && (
+                <button onClick={() => setShowLyrics(!showLyrics)}
+                  className={`p-1 cursor-pointer ${showLyrics ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
+                  title="Lyrics">
+                  <FileText className="w-4 h-4" />
+                </button>
+              )}
+            </span>
+            <span className="w-9 flex justify-center">
+              {isDesktopLyricsSupported() && (
+                <button onClick={toggleDesktopLyrics}
+                  className={`p-1 cursor-pointer ${desktopLyricsOpen ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
+                  title="Desktop Lyrics">
+                  <PictureInPicture2 className="w-4 h-4" />
+                </button>
+              )}
+            </span>
             <button onClick={() => setShowQueue(!showQueue)}
-              className={`p-1 cursor-pointer ${showQueue ? "text-green-500" : "text-zinc-400 hover:text-white"}`}>
+              className={`p-1 cursor-pointer flex items-end w-12 ${showQueue ? "text-green-500" : "text-zinc-400 hover:text-white"}`}>
               <ListMusic className="w-4 h-4" />
+              <span className="text-[9px] font-semibold leading-none ml-0.5">{ps.queue.length || ""}</span>
             </button>
           </div>
         </div>
@@ -471,6 +493,9 @@ export default function PlayerBar() {
                     onClick={() => ps.playIndex(i)}>
                     <span className="text-xs text-zinc-500 w-5 text-right shrink-0">{i + 1}</span>
                     <span className="truncate flex-1">{t.title}</span>
+                    {t.version_label && (
+                      <span className="text-xs text-zinc-500 shrink-0 max-w-24 truncate group-hover:hidden" title={t.version_label}>{t.version_label}</span>
+                    )}
                     {t.artists && t.artists.length > 0 && (
                       <span className="text-xs text-zinc-500 shrink-0 group-hover:hidden"><ArtistLink artists={t.artists} /></span>
                     )}
@@ -486,6 +511,18 @@ export default function PlayerBar() {
               })}
               {ps.queue.length === 0 && <p className="text-xs text-zinc-600 text-center py-4">Empty</p>}
             </div>
+          </div>
+        )}
+        {showQuality && (
+          <div ref={qualityPanelRef} className="fixed z-[60] w-36 bg-zinc-800 border border-zinc-700 shadow-xl overflow-hidden rounded-t-xl"
+            style={{ left: qualityPos.left, bottom: 64, transform: "translateX(-50%)" }}>
+            {qualityOptions.map(o => (
+              <button key={o.key}
+                onClick={() => { setShowQuality(false); setQuality(o.key); saveQuality(o.key) }}
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 cursor-pointer flex items-center gap-1.5 ${quality === o.key ? "text-green-500" : "text-zinc-400"}`}>
+                {qIcons[o.key]} {o.label} <span className="text-zinc-600 ml-1">{o.title}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>

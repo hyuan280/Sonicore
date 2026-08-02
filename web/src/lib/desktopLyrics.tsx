@@ -127,20 +127,20 @@ function DesktopLyrics() {
       {/* hover toolbar */}
       <div className="absolute top-1 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20">
         <button onClick={() => updateSettings({ fontSize: Math.max(16, settings.fontSize - 4) })}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="缩小">
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Smaller">
           <span className="text-sm font-bold">A-</span>
         </button>
         <button onClick={() => updateSettings({ fontSize: Math.min(60, settings.fontSize + 4) })}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="放大">
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Larger">
           <span className="text-base font-bold">A+</span>
         </button>
         <button onClick={() => setShowSettings(!showSettings)}
           className={`p-1 rounded cursor-pointer ${showSettings ? "text-green-400" : "text-zinc-400 hover:text-white hover:bg-zinc-800/80"}`}
-          title="设置">
+          title="Settings">
           <Settings className="w-4 h-4" />
         </button>
         <button onClick={closeDesktopLyrics}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="关闭">
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Close">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -207,7 +207,7 @@ function DesktopLyrics() {
           </div>
         ) : (
           <div className="text-zinc-600 italic text-center pt-5" style={{ fontSize: Math.round(settings.fontSize * 0.6) }}>
-            {track ? "暂无歌词" : "未在播放"}
+            {track ? "No lyrics" : "Not playing"}
           </div>
         )}
       </div>
