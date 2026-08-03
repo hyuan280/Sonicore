@@ -113,7 +113,7 @@ type Track struct {
 	AcoustID     string         `json:"acoust_id"`
 	Hash         string         `json:"hash"`
 	LyricsMask   int            `json:"lyrics_mask"`
-	Lyrics       string         `json:"lyrics"`
+	LyricsOffset float64        `json:"lyrics_offset"`
 	Heat         int            `json:"heat"`
 	PlayCount    int            `json:"play_count"`
 	LastPlayedAt *time.Time     `json:"last_played_at,omitempty"`

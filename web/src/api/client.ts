@@ -87,6 +87,8 @@ export const api = {
 			request(`/api/data/albums/${albumId}?page=${page}&per_page=${perPage}`),
 		lyrics: (trackId: string) =>
 			request(`/api/data/tracks/lyrics?trackid=${encodeURIComponent(trackId)}`),
+		updateLyricsOffset: (trackId: string, offset: number) =>
+			request("/api/data/tracks/lyrics", { method: "POST", body: JSON.stringify({ trackid: trackId, offset }) }),
 		search: (q: string) => request(`/api/data/search?q=${encodeURIComponent(q)}`),
 	},
   user: {

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useMemo, useCallback, useState } from "react"
 import { usePlayer } from "../stores/player"
-import { X, Settings } from "lucide-react"
+import { X, Settings, ChevronLeft, ChevronRight } from "lucide-react"
 import { parseLRC, findCurrentLine } from "../lib/utils"
 import {
   type LyricsSettings,
@@ -45,7 +45,7 @@ interface Props {
 type ResizeDir = "e"
 
 export default function LyricsPanel({ onClose }: Props) {
-  const { lyrics, lyricsFormat, position, track } = usePlayer()
+  const { lyrics, lyricsFormat, position, track, lyricsOffset, adjustLyricsOffset } = usePlayer()
   const [settings, setSettings] = useState<LyricsSettings>(loadLyricsSettings)
   const [showSettings, setShowSettings] = useState(false)
   const [pos, setPos] = useState(loadPos)
@@ -70,8 +70,8 @@ export default function LyricsPanel({ onClose }: Props) {
 
   const currentIdx = useMemo(() => {
     if (lines.length === 0) return -1
-    return findCurrentLine(lines, position)
-  }, [position, lines])
+    return findCurrentLine(lines, position + lyricsOffset)
+  }, [position, lyricsOffset, lines])
 
   // Two fixed slots (left/right). The current line sits on the left when its
   // index is even, on the right when odd — so the highlighted line alternates
@@ -163,20 +163,29 @@ export default function LyricsPanel({ onClose }: Props) {
       <div className="absolute top-1 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20"
         onMouseDown={(e) => e.stopPropagation()}>
         <button onClick={() => updateSettings({ fontSize: Math.max(16, settings.fontSize - 4) })}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="缩小">
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Smaller">
           <span className="text-sm font-bold">A-</span>
         </button>
         <button onClick={() => updateSettings({ fontSize: Math.min(60, settings.fontSize + 4) })}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="放大">
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Larger">
           <span className="text-base font-bold">A+</span>
+        </button>
+        <button onClick={() => adjustLyricsOffset(-0.1)}
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Delay -0.1s" aria-label="Delay lyrics by 0.1s">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="text-xs text-zinc-500 tabular-nums w-10 text-center">{lyricsOffset >= 0 ? "+" : ""}{lyricsOffset.toFixed(1)}s</span>
+        <button onClick={() => adjustLyricsOffset(0.1)}
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Ahead +0.1s" aria-label="Advance lyrics by 0.1s">
+          <ChevronRight className="w-4 h-4" />
         </button>
         <button onClick={() => setShowSettings(!showSettings)}
           className={`p-1 rounded cursor-pointer ${showSettings ? "text-green-400" : "text-zinc-400 hover:text-white hover:bg-zinc-800/80"}`}
-          title="设置">
+          title="Settings">
           <Settings className="w-4 h-4" />
         </button>
         <button onClick={onClose}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="关闭">
+          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Close">
           <X className="w-4 h-4" />
         </button>
       </div>

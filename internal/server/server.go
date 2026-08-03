@@ -197,6 +197,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	lyricsStore := lyrics.NewStore(cfg.Data.LyricsDir)
 	lyricsHandler := rest.NewLyricsHandler(db, lyricsStore)
 	protected.HandleFunc("/data/tracks/lyrics", lyricsHandler.GetLyrics).Methods("GET")
+	protected.HandleFunc("/data/tracks/lyrics", lyricsHandler.UpdateLyrics).Methods("POST")
 
 	streamHandler := rest.NewStreamHandler(db, sessionStore)
 	api.HandleFunc("/s/{session}/{id}", streamHandler.ServeStream).Methods("GET")

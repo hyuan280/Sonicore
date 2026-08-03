@@ -110,7 +110,7 @@ func RunMigrations(db *sql.DB) error {
 		acoust_id     VARCHAR(36) NOT NULL DEFAULT '',
 		hash          VARCHAR(64) NOT NULL DEFAULT '',
 		lyrics_mask   SMALLINT NOT NULL DEFAULT 0,
-		lyrics        TEXT NOT NULL DEFAULT '',
+		lyrics_offset DOUBLE PRECISION NOT NULL DEFAULT 0,
 		heat        INTEGER NOT NULL DEFAULT 0,
 		play_count    INTEGER NOT NULL DEFAULT 0,
 		last_played_at TIMESTAMPTZ,

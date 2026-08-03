@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { X, Settings } from "lucide-react"
+import { X, Settings, ChevronLeft, ChevronRight } from "lucide-react"
 import { usePlayer } from "../stores/player"
 import { parseLRC, findCurrentLine } from "./utils"
 import {
@@ -89,7 +89,7 @@ export function closeDesktopLyrics(): void {
 }
 
 function DesktopLyrics() {
-  const { track, lyrics, lyricsFormat, position } = usePlayer()
+  const { track, lyrics, lyricsFormat, position, lyricsOffset, adjustLyricsOffset } = usePlayer()
   const [settings, setSettings] = useState<LyricsSettings>(loadLyricsSettings)
   const [showSettings, setShowSettings] = useState(false)
 
@@ -108,8 +108,8 @@ function DesktopLyrics() {
 
   const currentIdx = useMemo(() => {
     if (lines.length === 0) return -1
-    return findCurrentLine(lines, position)
-  }, [lines, position])
+    return findCurrentLine(lines, position + lyricsOffset)
+  }, [lines, position, lyricsOffset])
 
   const current = currentIdx >= 0 ? lines[currentIdx] : null
   const next = currentIdx >= 0 && currentIdx + 1 < lines.length ? lines[currentIdx + 1] : null
@@ -124,25 +124,39 @@ function DesktopLyrics() {
       className="group fixed inset-0 flex flex-col overflow-hidden select-none"
       style={{ backgroundColor: bgColor }}
     >
-      {/* hover toolbar */}
-      <div className="absolute top-1 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20">
-        <button onClick={() => updateSettings({ fontSize: Math.max(16, settings.fontSize - 4) })}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Smaller">
-          <span className="text-sm font-bold">A-</span>
-        </button>
-        <button onClick={() => updateSettings({ fontSize: Math.min(60, settings.fontSize + 4) })}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Larger">
-          <span className="text-base font-bold">A+</span>
-        </button>
-        <button onClick={() => setShowSettings(!showSettings)}
-          className={`p-1 rounded cursor-pointer ${showSettings ? "text-green-400" : "text-zinc-400 hover:text-white hover:bg-zinc-800/80"}`}
-          title="Settings">
-          <Settings className="w-4 h-4" />
-        </button>
-        <button onClick={closeDesktopLyrics}
-          className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Close">
-          <X className="w-4 h-4" />
-        </button>
+      {/* top bar */}
+      <div className="absolute top-1 left-2 right-2 flex items-center gap-0.5 z-20">
+        <span className="text-base text-white/80 truncate flex-1">
+          {track ? <>Now Playing: {track.title}</> : "Not playing"}
+        </span>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <button onClick={() => updateSettings({ fontSize: Math.max(16, settings.fontSize - 4) })}
+            className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Smaller">
+            <span className="text-sm font-bold">A-</span>
+          </button>
+          <button onClick={() => updateSettings({ fontSize: Math.min(60, settings.fontSize + 4) })}
+            className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Larger">
+            <span className="text-base font-bold">A+</span>
+          </button>
+          <button onClick={() => adjustLyricsOffset(-0.1)}
+            className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Delay -0.1s" aria-label="Delay lyrics by 0.1s">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs text-zinc-500 tabular-nums w-10 text-center">{lyricsOffset >= 0 ? "+" : ""}{lyricsOffset.toFixed(1)}s</span>
+          <button onClick={() => adjustLyricsOffset(0.1)}
+            className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Ahead +0.1s" aria-label="Advance lyrics by 0.1s">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <button onClick={() => setShowSettings(!showSettings)}
+            className={`p-1 rounded cursor-pointer ${showSettings ? "text-green-400" : "text-zinc-400 hover:text-white hover:bg-zinc-800/80"}`}
+            title="Settings">
+            <Settings className="w-4 h-4" />
+          </button>
+          <button onClick={closeDesktopLyrics}
+            className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800/80 cursor-pointer" title="Close">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {showSettings && (

@@ -24,7 +24,7 @@ func scanTrack(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Tr
 		&coverID,
 		&t.Duration, &t.BitRate, &t.SampleRate,
 		&t.Channels, &t.FilePath, &t.FileSize, &t.FileFormat, &t.AudioCodec, &t.MBID, &t.AcoustID,
-		&t.Hash, &t.LyricsMask, &t.Lyrics, &t.Heat, &t.PlayCount, &t.LastPlayedAt,
+		&t.Hash, &t.LyricsMask, &t.LyricsOffset, &t.Heat, &t.PlayCount, &t.LastPlayedAt,
 		&metadata, &t.Version, &t.VersionLabel, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 		 cover_image_id,
 		 duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, audio_codec, mbid, acoust_id, hash,
-		 lyrics_mask, lyrics, heat, play_count, metadata, version, version_label, created_at, updated_at)
+		 lyrics_mask, lyrics_offset, heat, play_count, metadata, version, version_label, created_at, updated_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`)
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 			t.CoverImageID,
 			t.Duration, t.BitRate, t.SampleRate, t.Channels,
 			t.FilePath, t.FileSize, t.FileFormat, t.AudioCodec, t.MBID, t.AcoustID, t.Hash,
-			t.LyricsMask, t.Lyrics, t.Heat, t.PlayCount, t.Metadata, t.Version, t.VersionLabel, t.CreatedAt, t.UpdatedAt)
+			t.LyricsMask, t.LyricsOffset, t.Heat, t.PlayCount, t.Metadata, t.Version, t.VersionLabel, t.CreatedAt, t.UpdatedAt)
 		if err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func (r *TrackRepo) FindByID(ctx context.Context, id string) (*domain.Track, err
 		 cover_image_id,
 		 duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, audio_codec, mbid, acoust_id, hash,
-		 lyrics_mask, lyrics, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
+		 lyrics_mask, lyrics_offset, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
 		 FROM tracks WHERE id = $1`, id)
 	t, err := scanTrack(row)
 	if err != nil {
@@ -191,7 +191,7 @@ func (r *TrackRepo) FindByIDs(ctx context.Context, ids []string) ([]*domain.Trac
 		 cover_image_id,
 		 duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, audio_codec, mbid, acoust_id, hash,
-		 lyrics_mask, lyrics, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
+		 lyrics_mask, lyrics_offset, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
 		 FROM tracks WHERE id = ANY($1)`, pq.Array(ids))
 	if err != nil {
 		return nil, err
@@ -305,7 +305,7 @@ func (r *TrackRepo) FindByLibraryID(ctx context.Context, libraryIDs ...string) (
 		 cover_image_id,
 		 duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, audio_codec, mbid, acoust_id, hash,
-		 lyrics_mask, lyrics, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
+		 lyrics_mask, lyrics_offset, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
 		 FROM tracks WHERE library_id = ANY($1)`, pq.Array(libraryIDs))
 	if err != nil {
 		return nil, err
@@ -329,7 +329,7 @@ func (r *TrackRepo) FindByAlbumID(ctx context.Context, albumID string) ([]domain
 		 t.cover_image_id,
 		 t.duration, t.bit_rate, t.sample_rate, t.channels,
 		 t.file_path, t.file_size, t.file_format, t.audio_codec, t.mbid, t.acoust_id, t.hash,
-		 t.lyrics_mask, t.lyrics, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
+		 t.lyrics_mask, t.lyrics_offset, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
 		 FROM tracks t
 		 INNER JOIN track_albums ta ON ta.track_id = t.id
 		 WHERE ta.album_id = $1
@@ -356,7 +356,7 @@ func (r *TrackRepo) FindByArtistID(ctx context.Context, artistID string) ([]doma
 		 t.cover_image_id,
 		 t.duration, t.bit_rate, t.sample_rate, t.channels,
 		 t.file_path, t.file_size, t.file_format, t.audio_codec, t.mbid, t.acoust_id, t.hash,
-		 t.lyrics_mask, t.lyrics, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
+		 t.lyrics_mask, t.lyrics_offset, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
 		 FROM tracks t
 		 INNER JOIN track_artists ta ON ta.track_id = t.id
 		 WHERE ta.artist_id = $1`, artistID)
@@ -393,7 +393,7 @@ func (r *TrackRepo) FindByHash(ctx context.Context, hash string) (*domain.Track,
 		 cover_image_id,
 		 duration, bit_rate, sample_rate, channels,
 		 file_path, file_size, file_format, audio_codec, mbid, acoust_id, hash,
-		 lyrics_mask, lyrics, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
+		 lyrics_mask, lyrics_offset, heat, play_count, last_played_at, metadata, version, version_label, created_at, updated_at
 		 FROM tracks WHERE hash = $1`, hash)
 	return scanTrack(row)
 }
@@ -409,13 +409,13 @@ func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 		`UPDATE tracks SET title=$1, cover_image_id=$2,
 		 duration=$3, bit_rate=$4, sample_rate=$5, channels=$6,
 		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, mbid=$11, acoust_id=$12,
-		 hash=$13, lyrics_mask=$14, lyrics=$15, heat=$16, play_count=$17,
+		 hash=$13, lyrics_mask=$14, lyrics_offset=$15, heat=$16, play_count=$17,
 		 last_played_at=$18, metadata=$19, version=$20, version_label=$21, updated_at=NOW()
 		 WHERE id=$22`,
 		track.Title, track.CoverImageID,
 		track.Duration, track.BitRate, track.SampleRate, track.Channels,
 		track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.MBID, track.AcoustID,
-		track.Hash, track.LyricsMask, track.Lyrics, track.Heat, track.PlayCount,
+		track.Hash, track.LyricsMask, track.LyricsOffset, track.Heat, track.PlayCount,
 		track.LastPlayedAt, track.Metadata, track.Version, track.VersionLabel, track.ID)
 	if err != nil {
 		return err
@@ -443,6 +443,13 @@ func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 	}
 
 	return tx.Commit()
+}
+
+func (r *TrackRepo) UpdateLyricsOffset(ctx context.Context, trackID string, offset float64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tracks SET lyrics_offset=$1, updated_at=NOW() WHERE id=$2`,
+		offset, trackID)
+	return err
 }
 
 func (r *TrackRepo) DeleteByFilePath(ctx context.Context, path, libraryID string) (string, error) {
@@ -525,7 +532,7 @@ func (r *TrackRepo) FindVersionsByMbid(ctx context.Context, mbid string, exclude
 		 t.cover_image_id,
 		 t.duration, t.bit_rate, t.sample_rate, t.channels,
 		 t.file_path, t.file_size, t.file_format, t.audio_codec, t.mbid, t.acoust_id, t.hash,
-		 t.lyrics_mask, t.lyrics, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
+		 t.lyrics_mask, t.lyrics_offset, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
 		 FROM tracks t
 		 INNER JOIN track_version_groups g ON g.track_id = t.id
 		 WHERE g.mbid = $1 AND g.track_id != $2 AND g.library_id = ANY($3)
@@ -555,7 +562,7 @@ func (r *TrackRepo) FindVersionsByMbidBulk(ctx context.Context, mbids []string, 
 		 t.cover_image_id,
 		 t.duration, t.bit_rate, t.sample_rate, t.channels,
 		 t.file_path, t.file_size, t.file_format, t.audio_codec, t.mbid, t.acoust_id, t.hash,
-		 t.lyrics_mask, t.lyrics, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
+		 t.lyrics_mask, t.lyrics_offset, t.heat, t.play_count, t.last_played_at, t.metadata, t.version, t.version_label, t.created_at, t.updated_at
 		 FROM tracks t
 		 INNER JOIN track_version_groups g ON g.track_id = t.id
 		 WHERE g.mbid = ANY($1) AND g.library_id = ANY($2)
