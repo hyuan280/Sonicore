@@ -4,7 +4,7 @@ import { useJukebox } from "../stores/jukebox"
 import { api } from "../api/client"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
-import { Plus, Loader2, Turntable, ChevronRight, Trash2, Shield } from "lucide-react"
+import { Plus, Loader2, Turntable, ChevronRight, Trash2, Shield, X } from "lucide-react"
 
 export default function JukeboxPage() {
   const { list, loading, loadList, create, delete: delJbx } = useJukebox()
@@ -12,6 +12,7 @@ export default function JukeboxPage() {
   const role = localStorage.getItem("role")
   const isAdmin = role === "admin" || role === "super_admin"
   const [delId, setDelId] = useState<string | null>(null)
+  const [searchQ, setSearchQ] = useState("")
 
   const handleDelete = async (id: string) => {
     await delJbx(id)
@@ -20,10 +21,30 @@ export default function JukeboxPage() {
 
   useEffect(() => { loadList() }, [])
 
+  const filtered = searchQ.trim()
+    ? list.filter((j: any) => j.name.toLowerCase().includes(searchQ.trim().toLowerCase()))
+    : list
+
   return (
     <div className="p-6 space-y-6 pb-24">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Jukeboxes</h1>
+      <div className="relative flex items-center">
+        <h1 className="text-2xl font-bold shrink-0">Jukeboxes</h1>
+        <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
+          <input
+            type="text"
+            placeholder="Search jukeboxes..."
+            value={searchQ}
+            onChange={e => setSearchQ(e.target.value)}
+            className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
+          />
+          {searchQ && (
+            <button onClick={() => setSearchQ("")}
+              className="absolute right-5 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-white cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        <div className="flex-1" />
         {isAdmin && (
           <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
             <Plus className="w-4 h-4 mr-1" /> New Jukebox
@@ -31,13 +52,13 @@ export default function JukeboxPage() {
         )}
       </div>
 
-      {loading && list.length === 0 && (
+      {loading && filtered.length === 0 && (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
         </div>
       )}
 
-      {!loading && list.length === 0 && (
+      {!loading && filtered.length === 0 && (
         <div className="text-center py-20 text-zinc-500">
           <Turntable className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p>No jukeboxes configured</p>
@@ -52,7 +73,7 @@ export default function JukeboxPage() {
       )}
 
       <div className="space-y-2">
-        {list.map(j => (
+        {filtered.map(j => (
           <div key={j.id} className="flex items-center gap-3 p-4 border border-zinc-800 rounded-xl bg-zinc-900/50 hover:bg-zinc-800/30 transition-colors group">
             <Link to={`/jukebox/${j.id}`} className="flex-1 min-w-0 flex items-center gap-3">
               <Turntable className={`w-10 h-10 shrink-0 ${j.is_playing ? "text-green-500" : "text-zinc-600"}`} />

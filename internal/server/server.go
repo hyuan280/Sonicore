@@ -187,11 +187,12 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 
 	browseHandler := rest.NewDataHandler(db)
 	protected.HandleFunc("/data/tracks", browseHandler.Tracks).Methods("GET")
+	protected.HandleFunc("/data/tracks/byids", browseHandler.TracksByIDs).Methods("POST")
+	protected.HandleFunc("/data/search", browseHandler.Search).Methods("GET")
 	protected.HandleFunc("/data/artists", browseHandler.Artists).Methods("GET")
 	protected.HandleFunc("/data/artists/{artistId}", browseHandler.ArtistDetail).Methods("GET")
 	protected.HandleFunc("/data/albums", browseHandler.Albums).Methods("GET")
 	protected.HandleFunc("/data/albums/{albumId}", browseHandler.AlbumDetail).Methods("GET")
-	protected.HandleFunc("/data/tracks/byids", browseHandler.TracksByIDs).Methods("POST")
 
 	lyricsStore := lyrics.NewStore(cfg.Data.LyricsDir)
 	lyricsHandler := rest.NewLyricsHandler(db, lyricsStore)

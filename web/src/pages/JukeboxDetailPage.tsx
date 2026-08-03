@@ -162,7 +162,8 @@ export default function JukeboxDetailPage() {
   const isAdmin = role === "admin" || role === "super_admin"
 
   return (
-    <div className="p-6 space-y-6 pb-24">
+    <div className="pb-24">
+      <div className="sticky top-0 z-10 bg-black pb-2 space-y-6 px-6 pt-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -231,9 +232,10 @@ export default function JukeboxDetailPage() {
       </div>
 
       {showSettings && id && <PathMappingPanel jukeboxId={id} onClose={() => setShowSettings(false)} />}
+      </div>
 
       {/* Queue */}
-      <div>
+      <div className="px-6">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm text-zinc-400">Queue ({queue.length})</span>
           <div className="flex items-center gap-3">

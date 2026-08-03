@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -42,12 +43,62 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 	}
 
 	itemType := r.URL.Query().Get("type")
+	page, perPage := parsePagination(r)
+	if perPage < 1 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"items": []interface{}{}, "page": page, "per_page": perPage, "total": 0,
+		})
+		return
+	}
 
 	var items []map[string]interface{}
+	var total int
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
 	if itemType == "track" {
-		rows, err := h.db.QueryContext(r.Context(),
-			`SELECT DISTINCT ON (CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+		var trackTotal int
+		if q != "" {
+			h.db.QueryRowContext(r.Context(),
+				`SELECT COUNT(DISTINCT CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				 FROM favorites f
+				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
+				 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1 AND t.title ILIKE $2`, userID, "%"+q+"%").Scan(&trackTotal)
+		} else {
+			h.db.QueryRowContext(r.Context(),
+				`SELECT COUNT(DISTINCT CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				 FROM favorites f
+				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
+				 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1`, userID).Scan(&trackTotal)
+		}
+		total = trackTotal
+
+		offset := (page - 1) * perPage
+		var rows *sql.Rows
+		var err error
+		if q != "" {
+			rows, err = h.db.QueryContext(r.Context(),
+				`SELECT DISTINCT ON (CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				        f.item_type, f.item_id, f.created_at,
+				        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
+				        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+				        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.mbid, '')
+				 FROM favorites f
+				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
+				 LEFT JOIN LATERAL (
+				     SELECT tal.album_id, al.title AS album_title
+				     FROM track_albums tal
+				     JOIN albums al ON al.id = tal.album_id
+				     WHERE tal.track_id = t.id
+				     ORDER BY tal.disc_number, tal.track_number
+				     LIMIT 1
+				 ) sub ON true
+				 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1 AND t.title ILIKE $2
+				 ORDER BY CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END, t.version ASC, f.created_at DESC
+				 LIMIT $3 OFFSET $4`, userID, "%"+q+"%", perPage, offset)
+		} else {
+			rows, err = h.db.QueryContext(r.Context(),
+				`SELECT DISTINCT ON (CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
 			        f.item_type, f.item_id, f.created_at,
 			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
@@ -63,7 +114,9 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			     LIMIT 1
 			 ) sub ON true
 			 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1
-			 ORDER BY CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END, t.version ASC, f.created_at DESC`, userID)
+			 ORDER BY CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END, t.version ASC, f.created_at DESC
+			 LIMIT $2 OFFSET $3`, userID, perPage, offset)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
 			return
@@ -160,7 +213,9 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": items, "page": page, "per_page": perPage, "total": total,
+	})
 }
 
 type favoritesRequest struct {
@@ -272,25 +327,69 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	page, perPage := parsePagination(r)
+	if perPage < 1 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"items": []interface{}{}, "page": page, "per_page": perPage, "total": 0,
+		})
+		return
+	}
 
-	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT ph.id, ph.track_id, ph.played_at,
-		        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
-		        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-		        t.cover_image_id
-		 FROM play_history ph
-		 INNER JOIN tracks t ON t.id = ph.track_id
-		 LEFT JOIN LATERAL (
-		     SELECT tal.album_id, al.title AS album_title
-		     FROM track_albums tal
-		     JOIN albums al ON al.id = tal.album_id
-		     WHERE tal.track_id = t.id
-		     ORDER BY tal.disc_number, tal.track_number
-		     LIMIT 1
-		 ) sub ON true
-		 WHERE ph.user_id = $1
-		 ORDER BY ph.played_at DESC LIMIT 100`,
-		userID)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	var total int
+	if q != "" {
+		h.db.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM play_history ph
+			 INNER JOIN tracks t ON t.id = ph.track_id
+			 WHERE ph.user_id = $1 AND t.title ILIKE $2`, userID, "%"+q+"%").Scan(&total)
+	} else {
+		h.db.QueryRowContext(r.Context(),
+			"SELECT COUNT(*) FROM play_history WHERE user_id = $1", userID).Scan(&total)
+	}
+
+	offset := (page - 1) * perPage
+	var rows *sql.Rows
+	var err error
+	if q != "" {
+		rows, err = h.db.QueryContext(r.Context(),
+			`SELECT ph.id, ph.track_id, ph.played_at,
+			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
+			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+			        t.cover_image_id
+			 FROM play_history ph
+			 INNER JOIN tracks t ON t.id = ph.track_id
+			 LEFT JOIN LATERAL (
+			     SELECT tal.album_id, al.title AS album_title
+			     FROM track_albums tal
+			     JOIN albums al ON al.id = tal.album_id
+			     WHERE tal.track_id = t.id
+			     ORDER BY tal.disc_number, tal.track_number
+			     LIMIT 1
+			 ) sub ON true
+			 WHERE ph.user_id = $1 AND t.title ILIKE $2
+			 ORDER BY ph.played_at DESC LIMIT $3 OFFSET $4`,
+			userID, "%"+q+"%", perPage, offset)
+	} else {
+		rows, err = h.db.QueryContext(r.Context(),
+			`SELECT ph.id, ph.track_id, ph.played_at,
+			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
+			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
+			        t.cover_image_id
+			 FROM play_history ph
+			 INNER JOIN tracks t ON t.id = ph.track_id
+			 LEFT JOIN LATERAL (
+			     SELECT tal.album_id, al.title AS album_title
+			     FROM track_albums tal
+			     JOIN albums al ON al.id = tal.album_id
+			     WHERE tal.track_id = t.id
+			     ORDER BY tal.disc_number, tal.track_number
+			     LIMIT 1
+			 ) sub ON true
+			 WHERE ph.user_id = $1
+			 ORDER BY ph.played_at DESC LIMIT $2 OFFSET $3`,
+			userID, perPage, offset)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
 		return
@@ -328,7 +427,9 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": items, "page": page, "per_page": perPage, "total": total,
+	})
 }
 
 func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
@@ -455,6 +556,15 @@ func (h *UserDataHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request)
 func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	plID := mux.Vars(r)["id"]
+	page, perPage := parsePagination(r)
+	all := r.URL.Query().Get("all") == "1"
+	if !all && perPage < 1 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": plID, "name": "", "tracks": []interface{}{},
+			"page": page, "per_page": perPage, "total": 0,
+		})
+		return
+	}
 
 	var name string
 	var trackIDsJSON []byte
@@ -470,9 +580,25 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	var trackIDs []string
 	json.Unmarshal(trackIDsJSON, &trackIDs)
 
+	total := len(trackIDs)
+	var pagedIDs []string
+	if all {
+		pagedIDs = trackIDs
+	} else {
+		start := (page - 1) * perPage
+		if start > total {
+			start = total
+		}
+		end := start + perPage
+		if end > total {
+			end = total
+		}
+		pagedIDs = trackIDs[start:end]
+	}
+
 	var tracks []map[string]interface{}
 	var mbids []string
-	for _, tid := range trackIDs {
+	for _, tid := range pagedIDs {
 		track, err := h.trackRepo.FindByID(r.Context(), tid)
 		if err != nil {
 			continue
@@ -561,6 +687,7 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id": plID, "name": name, "tracks": tracks, "created_at": createdAt,
+		"page": page, "per_page": perPage, "total": total,
 	})
 }
 

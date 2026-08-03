@@ -7,11 +7,12 @@ import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
 import { Link } from "react-router-dom"
-import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert } from "lucide-react"
+import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 import ArtistSelector, { type SelectedArtist } from "../components/ArtistSelector"
 import DirectoryPicker from "../components/DirectoryPicker"
+import { usePerPage } from "../hooks/usePerPage"
 
 const roleLabel = (r: string) =>
   r === "super_admin" ? "Super Admin" : r === "admin" ? "Admin" : "User"
@@ -32,14 +33,55 @@ export default function SettingsPage() {
   const [scanOverwrite, setScanOverwrite] = useState(false)
   const [manageLib, setManageLib] = useState<any>(null)
   const [manageTracks, setManageTracks] = useState<any[]>([])
+  const [managePage, setManagePage] = useState(1)
+  const [managePerPage, setManagePerPage] = usePerPage("manage", 20)
+  const [manageTotal, setManageTotal] = useState(0)
+  const [manageSearch, setManageSearch] = useState("")
+  const [manageLoading, setManageLoading] = useState(false)
+  const [managePageEditing, setManagePageEditing] = useState(false)
+  const [manageEditValue, setManageEditValue] = useState("")
+  const [managePerPageOpen, setManagePerPageOpen] = useState(false)
   const [searching, setSearching] = useState("")
   const [searchModal, setSearchModal] = useState<any>(null)
 
-  useEffect(() => {
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const searchRef = useRef(manageSearch)
+  const skipDebounceRef = useRef(false)
+  searchRef.current = manageSearch
+
+  const manageTotalPages = Math.ceil(manageTotal / managePerPage)
+  const manageCommitPage = (val: string) => {
+    const v = parseInt(val)
+    if (v >= 1 && v <= manageTotalPages) setManagePage(v)
+    setManagePageEditing(false)
+  }
+  const manageStartEdit = () => { setManageEditValue(""); setManagePageEditing(true) }
+
+  const doLoad = useCallback(() => {
     if (!manageLib) { setManageTracks([]); return }
-    fetch(`/api/data/tracks?libId=${encodeURIComponent(manageLib.id)}&page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
-      .then(r => r.json()).then(d => setManageTracks(d.items || [])).catch(() => {})
-  }, [manageLib?.id])
+    setManageLoading(true)
+    const params = new URLSearchParams({
+      libId: manageLib.id, page: String(managePage), per_page: String(managePerPage), all: "1",
+    })
+    const q = searchRef.current.trim()
+    if (q) params.set("q", q)
+    fetch(`/api/data/tracks?${params}`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
+      .then(r => r.json()).then(d => {
+        setManageTracks(d.items || [])
+        setManageTotal(d.total || 0)
+      }).catch(() => {})
+      .finally(() => setManageLoading(false))
+  }, [manageLib, managePage, managePerPage])
+
+  useEffect(() => { doLoad() }, [doLoad])
+
+  useEffect(() => {
+    if (!manageLib) return
+    if (skipDebounceRef.current) { skipDebounceRef.current = false; return }
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => { doLoad() }, 500)
+    return () => clearTimeout(timerRef.current)
+  }, [manageSearch])
 
   const [showPwModal, setShowPwModal] = useState(false)
   const [pwForm, setPwForm] = useState({ oldPw: "", newPw: "", confirmPw: "" })
@@ -290,35 +332,122 @@ export default function SettingsPage() {
       {manageLib && (
         <div className="fixed inset-0 bottom-16 z-50 bg-zinc-950 flex flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
-            <div>
+          <div className="relative flex items-center px-6 py-4 border-b border-zinc-800 shrink-0">
+            <div className="shrink-0">
               <h2 className="text-lg font-bold">{manageLib.name}</h2>
-              <p className="text-sm text-zinc-500">{manageLib.track_count} tracks</p>
             </div>
+            <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-6">
+              <input
+                type="text"
+                placeholder="Search tracks..."
+                value={manageSearch}
+                onChange={e => { setManageSearch(e.target.value); setManagePage(1) }}
+                onKeyDown={e => { if (e.key === "Enter") { clearTimeout(timerRef.current); skipDebounceRef.current = true; doLoad() } }}
+                className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
+              />
+              {manageSearch && (
+                <button onClick={() => { setManageSearch(""); setManagePage(1); searchRef.current = ""; clearTimeout(timerRef.current); skipDebounceRef.current = true; doLoad() }}
+                  className="absolute right-7 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-white cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <div className="flex-1" />
             <button onClick={() => { setManageLib(null); setManageTracks([]) }}
-              className="p-2 rounded-lg hover:bg-zinc-800 cursor-pointer">
+              className="p-2 rounded-lg hover:bg-zinc-800 cursor-pointer shrink-0">
               <X className="w-5 h-5" />
             </button>
           </div>
-          {/* Track list */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {manageTracks.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-zinc-500">
+          {/* Pagination + Table header + Track list (shared scroll) */}
+          <div className="flex-1 overflow-y-auto pb-6">
+            <div className="sticky top-0 z-10 bg-zinc-950 py-2">
+              <div className="flex items-center justify-end px-6 mb-2">
+                <span className="text-sm text-zinc-400">{manageTotal} tracks</span>
+                <div className="flex items-center bg-zinc-800 rounded-lg ml-2">
+                  <div className="relative">
+                    <button onClick={() => setManagePerPageOpen(!managePerPageOpen)}
+                      className="px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-l-lg cursor-pointer transition-colors">
+                      {managePerPage} <ChevronDown className="w-4 h-4 inline-block -m-0.5" />
+                    </button>
+                    {managePerPageOpen && (
+                      <div className="absolute top-full left-0 mt-1 bg-zinc-800 rounded-lg shadow-xl z-50 py-1"
+                        onClick={() => setManagePerPageOpen(false)}>
+                        {[10, 20, 50].map(n => (
+                          <button key={n} onClick={() => { setManagePerPage(n); setManagePage(1); setManagePerPageOpen(false) }}
+                            className={`w-full text-left px-3 py-1.5 text-sm cursor-pointer ${managePerPage === n ? "text-white" : "text-zinc-400 hover:text-white"}`}>{n}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <span className="w-px h-4 bg-zinc-700" />
+                  <div className="w-24 flex items-center justify-center relative shrink-0">
+                    {managePageEditing ? (
+                      <>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={manageEditValue}
+                          onChange={e => setManageEditValue(e.target.value)}
+                          onBlur={() => manageCommitPage(manageEditValue)}
+                          onKeyDown={e => { if (e.key === "Enter") manageCommitPage(manageEditValue) }}
+                          autoFocus
+                          placeholder={`/ ${manageTotalPages || 1}`}
+                          className="w-full text-center py-2 text-sm bg-transparent text-zinc-400 border-none outline-none"
+                        />
+                        {manageTotalPages > 1 && (
+                          <div className="absolute left-0 top-full mt-1 bg-zinc-800 rounded-lg shadow-xl z-50 py-1 max-h-48 overflow-y-auto min-w-[3rem]">
+                            {Array.from({ length: manageTotalPages }, (_, i) => i + 1).map(n => (
+                              <button key={n} onMouseDown={() => { setManagePage(n); setManagePageEditing(false) }}
+                                className={`w-full text-center px-3 py-1.5 text-sm cursor-pointer ${n === managePage ? "text-white" : "text-zinc-400 hover:text-white"}`}>
+                                {n}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : manageTotalPages > 1 ? (
+                      <span onClick={manageStartEdit}
+                        className="text-sm text-zinc-400 cursor-pointer hover:text-white hover:bg-zinc-700 w-full text-center py-2 transition-colors">
+                        {managePage} / {manageTotalPages}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-zinc-400 w-full text-center py-2">
+                        1 / 1
+                      </span>
+                    )}
+                  </div>
+                  <span className="w-px h-4 bg-zinc-700" />
+                  <button disabled={managePage <= 1} onClick={() => setManagePage(p => p - 1)}
+                    className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
+                    <ChevronLeft className="w-4 h-4" />Prev
+                  </button>
+                  <span className="w-px h-4 bg-zinc-700" />
+                  <button disabled={managePage >= manageTotalPages} onClick={() => setManagePage(p => p + 1)}
+                    className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
+                    Next<ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 text-xs text-zinc-500 px-6 py-1">
+                <span className="flex-1 min-w-0">Title</span>
+                <span className="w-24 shrink-0 text-center">Version</span>
+                <span className="w-32 shrink-0 text-center hidden sm:block">Artists</span>
+                <span className="w-32 shrink-0 text-center hidden sm:block">Album</span>
+                <span className="w-16 shrink-0 text-center">Format</span>
+                <span className="w-16 shrink-0 text-center">Duration</span>
+                <span className="w-36 shrink-0 text-center">Actions</span>
+              </div>
+            </div>
+            {manageLoading ? (
+              <div className="flex items-center justify-center h-[50vh] text-zinc-500">
                 <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading tracks...
               </div>
+            ) : manageTracks.length === 0 ? (
+              <div className="flex items-center justify-center h-[50vh] text-zinc-500">No results</div>
             ) : (
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
-                  <span className="flex-1 min-w-0">Title</span>
-                  <span className="w-24 shrink-0 text-center">Version</span>
-                  <span className="w-32 shrink-0 text-center hidden sm:block">Artists</span>
-                  <span className="w-32 shrink-0 text-center hidden sm:block">Album</span>
-                  <span className="w-16 shrink-0 text-center">Format</span>
-                  <span className="w-16 shrink-0 text-center">Duration</span>
-                  <span className="w-36 shrink-0 text-center">Actions</span>
-                </div>
+              <div className="space-y-1 px-6">
                 {manageTracks.map((t: any) => (
-                  <div key={t.id} className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-zinc-800/50 text-sm group">
+                  <div key={t.id} className="flex items-center gap-1 py-1 rounded-lg hover:bg-zinc-800/50 text-sm group">
                     <span className="flex-1 min-w-0 truncate">{t.title}</span>
                     <span className={`w-24 shrink-0 text-center truncate text-xs ${t.version >= 1 ? "text-blue-400" : "text-zinc-600"}`}>{t.version_label || (t.version ? `V${t.version}` : "")}</span>
                     <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block"><ArtistLink artists={t.artists} /></span>
@@ -347,8 +476,7 @@ export default function SettingsPage() {
                         className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Identify with MusicBrainz">
                         {searching === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
                       </button>
-                      <button
-                        className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Edit lyrics">
+                      <button className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Edit lyrics">
                         <FileText className="w-4 h-4" />
                       </button>
                       <button onClick={() => {/* TODO: edit cover art */}}
@@ -364,10 +492,7 @@ export default function SettingsPage() {
         </div>
       )}
       {searchModal &&       <SearchResultModal data={searchModal} onClose={() => setSearchModal(null)} onUpdate={(edit) => setSearchModal((prev: any) => ({ ...prev, edit }))}
-        onSaved={() => {
-          if (manageLib) fetch(`/api/data/tracks?libId=${encodeURIComponent(manageLib.id)}&page=1&per_page=9999&all=1`, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } })
-            .then(r => r.json()).then(d => setManageTracks(d.items || [])).catch(() => {})
-        }} />}
+        onSaved={() => { doLoad() }} />}
     </div>
   )
 }
