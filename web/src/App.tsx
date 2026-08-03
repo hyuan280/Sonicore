@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Link, useLocation, Outlet } from "react-router
 import { useAuth } from "./stores/auth"
 import { useLibrary } from "./stores/library"
 import { useJukebox } from "./stores/jukebox"
+import { usePlaylists } from "./stores/playlists"
 import { usePlayer } from "./stores/player"
 import { api } from "./api/client"
 import { APP_VERSION } from "./lib/constants"
@@ -45,15 +46,13 @@ const navItemsAfter = [
 function Sidebar() {
   const location = useLocation()
   const { list: jukeboxes, loadList: loadJukeboxes } = useJukebox()
-  const [playlists, setPlaylists] = useState<any[]>([])
+  const { list: playlists, load: loadPlaylists } = usePlaylists()
   const [plOpen, setPlOpen] = useState(false)
   const [jbxOpen, setJbxOpen] = useState(false)
 
   useEffect(() => {
-    if (plOpen && playlists.length === 0) {
-      api.user.playlists().then(d => setPlaylists(d.items || []))
-    }
-  }, [plOpen])
+    if (plOpen) loadPlaylists()
+  }, [plOpen, loadPlaylists])
 
   useEffect(() => {
     loadJukeboxes()

@@ -17,13 +17,11 @@ export function AddBtn({ trackId, onDone }: Props) {
     if (!open) return
     api.user.playlists().then(d => {
       const all = d.items || []
-      Promise.all(all.map((p: any) =>
-        api.user.getPlaylist(p.id).then((pl: any) => ({
-          id: p.id,
-          name: p.name,
-          has: (pl.tracks || []).some((t: any) => t.id === trackId),
-        })).catch(() => ({ id: p.id, name: p.name, has: false }))
-      )).then(setPlaylists)
+      setPlaylists(all.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        has: Array.isArray(p.track_ids) && p.track_ids.includes(trackId),
+      })))
     })
   }, [open, trackId])
 

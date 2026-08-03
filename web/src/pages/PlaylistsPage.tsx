@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { api } from "../api/client"
+import { usePlaylists } from "../stores/playlists"
 import { usePlayer } from "../stores/player"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { ListMusic, Plus, ChevronRight, Trash2, X } from "lucide-react"
 
 export default function PlaylistsPage() {
-  const [playlists, setPlaylists] = useState<any[]>([])
+  const { list: playlists, load, create: createPlaylist, remove: removePlaylist } = usePlaylists()
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState("")
   const [delId, setDelId] = useState<string | null>(null)
@@ -15,22 +15,18 @@ export default function PlaylistsPage() {
   const navigate = useNavigate()
   const currentPlaylistId = usePlayer(s => s.currentPlaylistId)
 
-  const load = () => api.user.playlists().then(d => setPlaylists(d.items || []))
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const create = async () => {
     if (!name.trim()) return
-    const res = await api.user.createPlaylist(name)
+    await createPlaylist(name.trim())
     setName("")
     setShowCreate(false)
-    if (res.id) navigate(`/playlists/${res.id}`)
-    else load()
   }
 
   const del = async (id: string) => {
-    await api.user.deletePlaylist(id)
+    await removePlaylist(id)
     setDelId(null)
-    load()
   }
 
   const filtered = searchQ.trim()

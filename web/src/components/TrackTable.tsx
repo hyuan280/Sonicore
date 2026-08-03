@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react"
-import { Play, Clock, CheckSquare, Plus, ListPlus, Heart, Music, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
+import { Play, Clock, CheckSquare, Check, Plus, ListPlus, Heart, Music, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
 import { Link } from "react-router-dom"
 import { usePlayer } from "../stores/player"
 import { api } from "../api/client"
@@ -216,10 +216,19 @@ export default function TrackTable({
                       <div className="absolute left-0 top-8 w-48 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-50 py-1 max-h-48 overflow-y-auto"
                         onClick={e => e.stopPropagation()}>
                         <p className="text-xs text-zinc-500 px-3 py-1.5">Add to playlist</p>
-                        {playlists.map((p: any) => (
-                          <button key={p.id} onClick={() => handleBulkPlaylist(p.id)}
-                            className="w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700 cursor-pointer">{p.name}</button>
-                        ))}
+                        {playlists.map((p: any) => {
+                           const sids = selIds()
+                           const allIn = sids.length > 0 && sids.every((id: string) =>
+                             Array.isArray(p.track_ids) && p.track_ids.includes(id))
+                           return (
+                             <button key={p.id} onClick={() => handleBulkPlaylist(p.id)}
+                               className="w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700 cursor-pointer flex items-center gap-2">
+                               {allIn ? <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> : <span className="w-3.5 flex-shrink-0" />}
+                               <span className="flex-1 truncate">{p.name}</span>
+                               {allIn && <span className="text-xs text-zinc-600 ml-auto">added</span>}
+                             </button>
+                           )
+                         })}
                         {playlists.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">No playlists</p>}
                       </div>
                     )}

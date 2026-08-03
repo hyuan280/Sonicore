@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { api } from "../api/client"
 import { usePlayer, type PlayerTrack } from "../stores/player"
+import { usePlaylists } from "../stores/playlists"
 import { Button } from "../components/ui/button"
 import { Trash2, ListMusic, X } from "lucide-react"
 import TrackTable, { type TrackRow } from "../components/TrackTable"
@@ -11,6 +12,7 @@ export default function PlaylistDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const player = usePlayer()
+  const { remove: removePlaylist } = usePlaylists()
   const [playlist, setPlaylist] = useState<any>(null)
   const [perPage, setPerPage] = usePerPage("tracks", 20)
   const [multi, setMulti] = useState(false)
@@ -36,7 +38,7 @@ export default function PlaylistDetailPage() {
 
   const handleDelete = async () => {
     if (!id) return
-    await api.user.deletePlaylist(id)
+    await removePlaylist(id)
     navigate("/playlists")
   }
 
