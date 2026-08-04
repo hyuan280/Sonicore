@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/gorilla/mux"
+	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -19,6 +20,7 @@ type CoverHandler struct {
 	trackRepo    *repository.TrackRepo
 	albumRepo    *repository.AlbumRepo
 	artistRepo   *repository.ArtistRepo
+	perm         *middleware.PermissionChecker
 }
 
 func NewCoverHandler(db *sql.DB, imagesDir string, sessionStore *cache.SessionStore) *CoverHandler {
@@ -29,6 +31,7 @@ func NewCoverHandler(db *sql.DB, imagesDir string, sessionStore *cache.SessionSt
 		trackRepo:    repository.NewTrackRepo(db),
 		albumRepo:    repository.NewAlbumRepo(db),
 		artistRepo:   repository.NewArtistRepo(db),
+		perm:         middleware.NewPermissionChecker(db),
 	}
 }
 
@@ -42,7 +45,8 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing session", http.StatusUnauthorized)
 		return
 	}
-	if _, err := h.sessionStore.Validate(r.Context(), session); err != nil {
+	userID, err := h.sessionStore.Validate(r.Context(), session)
+	if err != nil {
 		http.Error(w, "invalid session", http.StatusUnauthorized)
 		return
 	}
@@ -75,6 +79,10 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		track, err := h.trackRepo.FindByID(ctx, ownerID)
 		if err != nil {
 			break
+		}
+		if !h.perm.IsMember(ctx, track.LibraryID, userID) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 		if track.CoverImageID != nil && tryCover(track.LibraryID, "track", track.ID) {
 			return

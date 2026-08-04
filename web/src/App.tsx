@@ -224,6 +224,24 @@ export default function App() {
     }
   }, [token])
 
+  useEffect(() => {
+    if (!token) return
+    const renew = () => {
+      const st = localStorage.getItem("session_token") || undefined
+      api.auth.renewSession(st).then(d => {
+        if (d.session_token) localStorage.setItem("session_token", d.session_token)
+      }).catch(e => console.error("session renew failed", e))
+    }
+    renew()
+    const id = setInterval(renew, 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === "visible") renew() }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [token])
+
   const hasLibraries = libraries.length > 0
 
   return (

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/internal/infrastructure/transcoder"
@@ -15,12 +16,14 @@ import (
 type StreamHandler struct {
 	trackRepo    *repository.TrackRepo
 	sessionStore *cache.SessionStore
+	perm         *middleware.PermissionChecker
 }
 
 func NewStreamHandler(db *sql.DB, sessionStore *cache.SessionStore) *StreamHandler {
 	return &StreamHandler{
 		trackRepo:    repository.NewTrackRepo(db),
 		sessionStore: sessionStore,
+		perm:         middleware.NewPermissionChecker(db),
 	}
 }
 
@@ -33,7 +36,8 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing session", http.StatusUnauthorized)
 		return
 	}
-	if _, err := h.sessionStore.Validate(r.Context(), session); err != nil {
+	userID, err := h.sessionStore.Validate(r.Context(), session)
+	if err != nil {
 		http.Error(w, "invalid session", http.StatusUnauthorized)
 		return
 	}
@@ -41,6 +45,11 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 	track, err := h.trackRepo.FindByID(r.Context(), trackID)
 	if err != nil {
 		http.Error(w, "track not found", http.StatusNotFound)
+		return
+	}
+
+	if !h.perm.IsMember(r.Context(), track.LibraryID, userID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -71,7 +80,8 @@ func (h *StreamHandler) ServeTranscodeStatus(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "missing session", http.StatusUnauthorized)
 		return
 	}
-	if _, err := h.sessionStore.Validate(r.Context(), session); err != nil {
+	userID, err := h.sessionStore.Validate(r.Context(), session)
+	if err != nil {
 		http.Error(w, "invalid session", http.StatusUnauthorized)
 		return
 	}
@@ -79,6 +89,11 @@ func (h *StreamHandler) ServeTranscodeStatus(w http.ResponseWriter, r *http.Requ
 	track, err := h.trackRepo.FindByID(r.Context(), trackID)
 	if err != nil {
 		http.Error(w, "track not found", http.StatusNotFound)
+		return
+	}
+
+	if !h.perm.IsMember(r.Context(), track.LibraryID, userID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 

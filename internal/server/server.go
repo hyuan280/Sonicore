@@ -181,8 +181,9 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/metadata/search/artist", metadataHandler.SearchArtist).Methods("POST")
 	protected.HandleFunc("/metadata/search/album", metadataHandler.SearchRelease).Methods("POST")
 
-	userHandler := rest.NewUserHandler(db)
+	userHandler := rest.NewUserHandler(db, sessionStore, tokenStore)
 	protected.HandleFunc("/user/me", userHandler.Me).Methods("GET")
+	protected.HandleFunc("/user/me", userHandler.MeRenew).Methods("POST")
 	protected.HandleFunc("/user/password", userHandler.ChangePassword).Methods("PUT")
 
 	browseHandler := rest.NewDataHandler(db)

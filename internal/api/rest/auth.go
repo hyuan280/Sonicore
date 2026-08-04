@@ -213,7 +213,11 @@ func (h *AuthHandler) writeAuthResponse(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	sessToken, _ := h.sessionStore.Generate(ctx, user.ID)
+	sessToken, err := h.sessionStore.Generate(ctx, user.ID, r.UserAgent())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate session"})
+		return
+	}
 
 	writeJSON(w, status, authResponse{
 		Token:        accessToken,

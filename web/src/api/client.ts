@@ -52,6 +52,8 @@ export const api = {
     register: (d: any) => request("/api/auth/register", { method: "POST", body: JSON.stringify(d) }),
     logout: () => request("/api/auth/logout", { method: "POST" }),
     me: () => request("/api/user/me"),
+    renewSession: (sessionToken?: string) =>
+      request("/api/user/me", { method: "POST", body: JSON.stringify({ session_token: sessionToken || "" }) }),
     changePassword: (oldPw: string, newPw: string) =>
       request("/api/user/password", { method: "PUT", body: JSON.stringify({ old_password: oldPw, new_password: newPw }) }),
     registrationStatus: () => request("/api/auth/registration-status"),
