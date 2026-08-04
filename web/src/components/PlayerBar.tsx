@@ -9,7 +9,7 @@ import ArtistLink from "../components/ArtistLink"
 import LyricsPanel from "../components/LyricsPanel"
 import { isDesktopLyricsSupported, isDesktopLyricsOpen, openDesktopLyrics, closeDesktopLyrics, subscribeDesktopLyrics } from "../lib/desktopLyrics"
 import { setMediaSessionMetadata, setMediaSessionPlaybackState, setMediaSessionPositionState, bindMediaSessionActions, clearMediaSessionActions } from "../lib/mediaSession"
-import { useMseAudio } from "../hooks/useMseAudio"
+import { useMseAudio, streamInitUrl } from "../hooks/useMseAudio"
 
 const qualityOptions = [
   { key: "standard", label: "SQ", title: "AAC 256k", desc: "Standard" },
@@ -28,8 +28,6 @@ function saveQuality(q: string) {
 export default function PlayerBar() {
   const ps = usePlayer()
   const { logout } = useAuth()
-  const mse = useMseAudio()
-  const audioRef = mse.audioRef
   const progressRef = useRef<HTMLDivElement>(null)
   const currentTrackRef = useRef<string | null>(null)
   const prevVolume = useRef(0.8)
@@ -44,9 +42,95 @@ export default function PlayerBar() {
   const [showVersions, setShowVersions] = useState(false)
   const [fav, setFav] = useState(false)
   const [quality, setQuality] = useState(loadQuality)
+  const [recovering, setRecovering] = useState(false)
   const lastHistoryRef = useRef(0)
   const switchingRef = useRef(false)
+  const soundStartedRef = useRef(false)
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollCtrlRef = useRef<AbortController | null>(null)
   const session = localStorage.getItem("session_token")
+
+  const stopPolling = () => {
+    if (pollCtrlRef.current) {
+      pollCtrlRef.current.abort()
+      pollCtrlRef.current = null
+    }
+    if (pollRef.current) {
+      clearTimeout(pollRef.current)
+      pollRef.current = null
+    }
+    setRecovering(false)
+  }
+
+  const startPolling = () => {
+    const track = usePlayer.getState().track
+    if (!track) return
+    const sid = localStorage.getItem("session_token")
+    if (!sid) return
+    setRecovering(true)
+    if (pollRef.current) {
+      clearTimeout(pollRef.current)
+      pollRef.current = null
+    }
+    const trackId = track.id
+    const url = streamInitUrl(trackId, quality)
+
+    const poll = () => {
+      const cur = usePlayer.getState().track
+      if (!cur || cur.id !== trackId) {
+        setRecovering(false)
+        return
+      }
+      if (pollCtrlRef.current) {
+        pollCtrlRef.current.abort()
+      }
+      pollCtrlRef.current = new AbortController()
+      const timer = setTimeout(() => pollCtrlRef.current?.abort(), 5000)
+      fetch(url, { signal: pollCtrlRef.current.signal })
+        .then(res => {
+          clearTimeout(timer)
+          pollCtrlRef.current = null
+          if (res.ok) {
+            if (usePlayer.getState().track?.id !== trackId) {
+              stopPolling()
+              return
+            }
+            setRecovering(false)
+            pollRef.current = null
+            usePlayer.setState({ playing: true, playEpoch: usePlayer.getState().playEpoch + 1 })
+            savePlayerState()
+          } else {
+            pollRef.current = setTimeout(poll, 3000)
+          }
+        })
+        .catch(() => {
+          clearTimeout(timer)
+          pollCtrlRef.current = null
+          pollRef.current = setTimeout(poll, 3000)
+        })
+    }
+    pollRef.current = setTimeout(poll, 3000)
+  }
+
+  const handlePlayToggle = () => {
+    stopPolling()
+    if (ps.playing) {
+      ps.togglePlay()
+    } else if (ps.track) {
+      usePlayer.setState({ playing: true, playEpoch: ps.playEpoch + 1 })
+      savePlayerState()
+    } else {
+      ps.togglePlay()
+    }
+  }
+
+  const onFatal = useCallback(() => {
+    usePlayer.getState().setPlaying(false)
+    savePlayerState()
+    startPolling()
+  }, [quality])
+  const mse = useMseAudio(onFatal)
+  const audioRef = mse.audioRef
 
   useEffect(() => {
     if (ps.track) {
@@ -100,8 +184,11 @@ export default function PlayerBar() {
     if (!el || !ps.track) return
 
     const trackId = ps.track.id
+    stopPolling()
     currentTrackRef.current = trackId
     lastHistoryRef.current = 0
+    switchingRef.current = true
+    soundStartedRef.current = false
     el.volume = ps.volume
 
     const onEnded = () => {
@@ -113,6 +200,8 @@ export default function PlayerBar() {
     const onTimeUpdate = () => {
       const s = usePlayer.getState()
       if (currentTrackRef.current !== s.track?.id) return
+
+      if (el.currentTime > 0) soundStartedRef.current = true
 
       s.setPosition(el.currentTime)
       if (el.currentTime - lastHistoryRef.current >= 15 && s.track) {
@@ -131,7 +220,6 @@ export default function PlayerBar() {
 
     const onPlay = () => {
       const s = usePlayer.getState()
-      switchingRef.current = false
       s.setPlaying(true)
       savePlayerState()
       lastHistoryRef.current = 0
@@ -145,7 +233,12 @@ export default function PlayerBar() {
       const s = usePlayer.getState()
 
       if (s.playing && s.mode !== "normal" && currentTrackRef.current === s.track?.id) {
-        s.advanceTrack()
+        if (!soundStartedRef.current) {
+          s.setPlaying(false)
+          savePlayerState()
+        } else {
+          s.advanceTrack()
+        }
         return
       }
 
@@ -156,12 +249,14 @@ export default function PlayerBar() {
     }
 
     const onError = () => {
+      if (switchingRef.current) return
       console.warn("[audio] stream error | code:", el.error?.code, "| message:", el.error?.message)
       switchingRef.current = false
       usePlayer.getState().setPlaying(false)
+      savePlayerState()
+      onFatal()
     }
 
-    switchingRef.current = true
     const swTimer = setTimeout(() => { switchingRef.current = false }, 5000)
     mse.start({ id: trackId, duration: ps.track.duration || 0 }, quality, ps.position, ps.playing)
 
@@ -197,12 +292,41 @@ export default function PlayerBar() {
     }
   }, [ps.track?.id, ps.playing])
 
+  useEffect(() => {
+    const onOnline = () => {
+      const el = audioRef.current
+      if (el && !el.src && ps.track) {
+        usePlayer.setState({ playing: true, playEpoch: usePlayer.getState().playEpoch + 1 })
+        savePlayerState()
+      }
+    }
+    window.addEventListener("online", onOnline)
+    return () => window.removeEventListener("online", onOnline)
+  }, [ps.track])
+
   // Media Session API (OS media controls / system flyout)
   useEffect(() => {
     if (!("mediaSession" in navigator)) return
     bindMediaSessionActions({
-      play: () => audioRef.current?.play(),
-      pause: () => audioRef.current?.pause(),
+      play: () => {
+        stopPolling()
+        const s = usePlayer.getState()
+        if (s.playing) {
+          s.togglePlay()
+          savePlayerState()
+        } else if (s.track) {
+          usePlayer.setState({ playing: true, playEpoch: s.playEpoch + 1 })
+          savePlayerState()
+        } else {
+          s.togglePlay()
+        }
+      },
+      pause: () => {
+        audioRef.current?.pause()
+        const s = usePlayer.getState()
+        s.setPlaying(false)
+        savePlayerState()
+      },
       next: () => usePlayer.getState().next(),
       prev: () => usePlayer.getState().prev(),
       seekTo: (time) => mse.seek(time),
@@ -294,8 +418,22 @@ export default function PlayerBar() {
     setShowVersions(false)
   }
 
+  useEffect(() => {
+    return () => stopPolling()
+  }, [])
+
   return (
     <>
+      {recovering && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-amber-600 text-white rounded-none shadow-2xl px-5 py-3 flex items-center gap-3 text-sm">
+          <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin shrink-0" />
+          <span>Server or network error, retrying...</span>
+          <button onClick={stopPolling}
+            className="bg-red-500 hover:bg-amber-700 text-white rounded w-6 h-6 flex items-center justify-center cursor-pointer shrink-0 transition-colors">
+            &times;
+          </button>
+        </div>
+      )}
       <audio ref={audioRef} preload="auto" />
       <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 px-4 py-2 z-50 h-16">
         <div className="absolute top-0 left-0 right-0 h-2" />
@@ -372,7 +510,7 @@ export default function PlayerBar() {
               <button onClick={ps.prev} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
                 <SkipBack className="w-5 h-5" />
               </button>
-              <button onClick={ps.togglePlay}
+              <button onClick={handlePlayToggle}
                 className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition cursor-pointer">
                 {ps.playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
               </button>
