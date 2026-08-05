@@ -28,10 +28,11 @@ type MetadataConfig struct {
 }
 
 type ServerConfig struct {
-	Host    string `mapstructure:"host"`
-	Port    int    `mapstructure:"port"`
-	BaseURL string `mapstructure:"base_url"`
-	WebDir  string `mapstructure:"web_dir"`
+	Host           string   `mapstructure:"host"`
+	Port           int      `mapstructure:"port"`
+	BaseURL        string   `mapstructure:"base_url"`
+	WebDir         string   `mapstructure:"web_dir"`
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 type DatabaseConfig struct {
@@ -98,6 +99,7 @@ func Load() *Config {
 	v.SetDefault("server.port", 4530)
 	v.SetDefault("server.base_url", "http://localhost:4530")
 	v.SetDefault("server.web_dir", "web/dist")
+	v.SetDefault("server.trusted_proxies", []string{})
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.port", 5432)
 	v.SetDefault("database.user", "sonicore")

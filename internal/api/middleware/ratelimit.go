@@ -15,7 +15,7 @@ type rateLimiter struct {
 }
 
 type rateEntry struct {
-	count    int
+	count       int
 	windowStart time.Time
 }
 
@@ -66,7 +66,9 @@ func (rl *rateLimiter) cleanupLoop() {
 func RateLimitMiddleware(limiter *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.RemoteAddr
+			// ClientIP verifies the TCP peer against trusted_proxies before
+			// honoring forwarded headers; untrusted peers use RemoteAddr.
+			key := ClientIP(r)
 			if !limiter.allow(key) {
 				w.Header().Set("Retry-After", "60")
 				http.Error(w, `{"error":"too many requests"}`, http.StatusTooManyRequests)

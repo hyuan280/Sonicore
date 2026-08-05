@@ -50,7 +50,8 @@ services:
     container_name: sonicore-nginx
     restart: unless-stopped
     ports:
-      - "28880:80"
+      - "2880:2880"
+      - "127.0.0.1:28880:28880"
     volumes:
       - ./nginx/sonicore.conf:/etc/nginx/conf.d/default.conf:ro
       - ../web/dist:/usr/share/nginx/html:ro

@@ -45,3 +45,5 @@ docker-compose.override.yml
 # Development
 run.sh
 AGENTS.md
+.opencode/
+.opencodereview/

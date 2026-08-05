@@ -35,20 +35,28 @@ Sonicore is a self-hosted music management center offering server-side playback 
 ## 架构 / Architecture
 
 ```
-┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
-│  Browser    │────▶│  nginx   │────▶│  sonicore  │────▶│ PostgreSQL │
-│ (React SPA) │     │  :28880  │     │   :4530    │     └────────────┘
-└─────────────┘     └──────────┘     │           │     ┌────────────┐
-                                     │ Go Server │────▶│  Redis     │
-┌─────────────┐     ┌──────────┐     │           │     └────────────┘
-│ Subsonic    │────▶│  nginx   │     │  ffplay   │
-│ Client      │     └──────────┘     └───────────┘
-└─────────────┘
+┌──────────────────┐ :2880 ┌──────────┐     ┌───────────┐     ┌────────────┐
+│     Browser      │──────▶│          │────▶│           │────▶│ PostgreSQL │
+│   (React SPA)    │       │          │     │           │     └────────────┘
+└──────────────────┘       │          │     │ Go Server │
+         │                 │          │     │  :4530    │     ┌────────────┐
+         ▼                 │          │     │           │────▶│   Redis    │
+┌──────────────────┐       │  nginx   │     │           │     └────────────┘
+│    反代/FRP      │ :28880│ (docker) │     │  ffplay   │
+│ (proxy protocol) │──────▶│          │     └───────────┘
+└──────────────────┘       │          │
+         ▲                 │          │
+         │                 │          │
+┌──────────────────┐ :2880 │          │
+│ Subsonic         │──────▶│          │
+│ Client           │       └──────────┘
+└──────────────────┘
 ```
 
 | 服务 / Service | 端口 / Port | 说明 / Purpose |
 |---------------|-------------|----------------|
-| nginx | 28880 (exposed) | 反向代理 + 静态文件服务 |
+| nginx | 2880 (exposed) | 反向代理（直连 / 内网，不验证客户端 header） |
+| nginx | 28880 (exposed) | 反向代理（前置带 proxy_protocol 的反代，信任 `X-Real-IP`） |
 | sonicore | 4530 (internal) | Go API 服务 + WebSocket |
 | PostgreSQL | 5432 (internal) | 主数据库 |
 | Redis | 6379 (internal) | 缓存 / 会话存储 |

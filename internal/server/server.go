@@ -92,6 +92,7 @@ func New(cfg *config.Config) (*Server, error) {
 	wsHub := ws.NewHub()
 
 	router := mux.NewRouter()
+	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
 	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -320,7 +321,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("[%s] %s %s %v", r.Method, r.URL.Path, r.RemoteAddr, time.Since(start))
+		log.Printf("[%s] %s %s %v", r.Method, r.URL.Path, middleware.ClientIP(r), time.Since(start))
 	})
 }
 

@@ -11,6 +11,8 @@ port = 4530
 base_url = "http://localhost:4530"
 # 前端静态文件目录（开发时通常为 web/dist）
 # web_dir = "web/dist"
+# 可信代理 CIDR 列表，仅当对端 IP（RemoteAddr）匹配列表中任一网段时，才信任 X-Real-IP / X-Forwarded-For 请求头
+# trusted_proxies = ["172.17.0.0/16"]
 
 [database]
 host = "localhost"
