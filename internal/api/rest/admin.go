@@ -110,11 +110,13 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
 	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
 	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
+	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"allow_registration":            allowReg == "true",
 		"metadata_musicbrainz_enabled":  mbEnabled == "true",
 		"metadata_musicbrainz_api_url":  mbURL,
 		"metadata_musicbrainz_rate_limit": mbRateLimit,
+		"subsonic_jukebox_id":           subJukebox,
 	})
 }
 
@@ -123,6 +125,7 @@ type updateSettingsRequest struct {
 	MusicBrainzEnabled          *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
 	MusicBrainzAPIURL           *string `json:"metadata_musicbrainz_api_url,omitempty"`
 	MusicBrainzRateLimit        *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
+	SubsonicJukeboxID           *string `json:"subsonic_jukebox_id,omitempty"`
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -152,16 +155,21 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.MusicBrainzRateLimit != nil {
 		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_rate_limit", *req.MusicBrainzRateLimit)
 	}
+	if req.SubsonicJukeboxID != nil {
+		h.settingsRepo.Set(r.Context(), "subsonic_jukebox_id", *req.SubsonicJukeboxID)
+	}
 
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
 	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
 	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
+	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
 		"metadata_musicbrainz_api_url":    mbURL,
 		"metadata_musicbrainz_rate_limit": mbRateLimit,
+		"subsonic_jukebox_id":             subJukebox,
 	})
 }
 

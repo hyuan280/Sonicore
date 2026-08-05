@@ -78,6 +78,7 @@ type Status struct {
 	Duration     float64    `json:"duration"`
 	Volume       float64    `json:"volume"`
 	PlayMode     PlayMode   `json:"play_mode"`
+	Position     float64    `json:"position"`
 	Queue        []string   `json:"queue"`
 	QueueIdx     int        `json:"queue_idx"`
 	ShuffleOrder []int      `json:"shuffle_order"`
@@ -103,9 +104,10 @@ type Engine struct {
 	queueIdx     int
 	shuffleOrder []int
 	shuffleIdx   int
-	pathMapping  map[string]string // lib_id → remote_path
-	libPaths     map[string]string // lib_id → local_path (from DB)
+	pathMapping  map[string]string
+	libPaths     map[string]string
 	playEpoch    uint64
+	trackStart   time.Time
 	onChange     func(Status)
 }
 
@@ -188,6 +190,7 @@ func (e *Engine) Play(id string, info *TrackInfo) error {
 	e.mu.Lock()
 	e.killLocked()
 	e.playEpoch++
+	e.trackStart = time.Now()
 	e.current = info
 	e.state = StatePlaying
 	for i, tid := range e.queue {
@@ -606,13 +609,21 @@ func (e *Engine) Status() Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	dur := 0.0
+	pos := 0.0
 	if e.current != nil {
 		dur = e.current.Duration
+		if e.state == StatePlaying {
+			pos = time.Since(e.trackStart).Seconds()
+			if pos > dur {
+				pos = dur
+			}
+		}
 	}
 	return Status{
 		State:        e.state,
 		Track:        e.current,
 		Duration:     dur,
+		Position:     pos,
 		Volume:       e.volume,
 		PlayMode:     e.playMode,
 		Queue:        e.queue,

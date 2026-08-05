@@ -7,12 +7,13 @@ import { Input } from "../components/ui/input"
 import { Card } from "../components/ui/card"
 import { api } from "../api/client"
 import { Link } from "react-router-dom"
-import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
+import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Turntable, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 import ArtistSelector, { type SelectedArtist } from "../components/ArtistSelector"
 import DirectoryPicker from "../components/DirectoryPicker"
 import { usePerPage } from "../hooks/usePerPage"
+import type { JukeboxInfo } from "../stores/jukebox"
 
 const roleLabel = (r: string) =>
   r === "super_admin" ? "Super Admin" : r === "admin" ? "Admin" : "User"
@@ -273,6 +274,7 @@ export default function SettingsPage() {
       )}
 
       {isAdmin && <DeviceManager />}
+      {isAdmin && <SubsonicJukeboxSetting />}
 
       {showPwModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowPwModal(false)}>
@@ -1050,6 +1052,107 @@ function DeviceManager() {
             </div>
           )}
         </>
+      )}
+    </Card>
+  )
+}
+
+function SubsonicJukeboxSetting() {
+  const [jukeboxes, setJukeboxes] = useState<JukeboxInfo[]>([])
+  const [selected, setSelected] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    Promise.all([
+      api.jukebox.list(),
+      api.admin.getSettings(),
+    ]).then(([jbList, settings]) => {
+      setJukeboxes(jbList.jukeboxes || [])
+      setSelected(settings.subsonic_jukebox_id || "")
+    }).catch(() => setError("Failed to load jukebox settings"))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const save = async (id: string) => {
+    const prev = selected
+    setSaving(true)
+    setSelected(id)
+    setOpen(false)
+    try {
+      await api.admin.updateSettings({ subsonic_jukebox_id: id || "" })
+    } catch {
+      setSelected(prev)
+      setError("Failed to save jukebox setting")
+    } finally { setSaving(false) }
+  }
+
+  const selectedJb = selected ? jukeboxes.find(j => j.id === selected) : null
+
+  return (
+    <Card className="p-4 space-y-3">
+      <h2 className="text-sm font-semibold text-zinc-400 flex items-center gap-2">
+        <img src="/subsonic.png" className="w-4 h-4" /> Subsonic Jukebox
+        {selected && <span className="text-xs text-green-400 ml-auto">Subsonic clients can control this jukebox</span>}
+      </h2>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {loading ? (
+        <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
+      ) : jukeboxes.length === 0 ? (
+        <p className="text-xs text-zinc-500">No jukeboxes configured. Create one first.</p>
+      ) : (
+        <div className="relative">
+          <button
+            onClick={() => setOpen(!open)}
+            disabled={saving}
+            className="w-full flex items-center text-sm cursor-pointer rounded-lg px-3 py-2.5" style={{ backgroundColor: "rgb(32, 32, 34)" }}
+          >
+            <Turntable className={`w-4 h-4 shrink-0 mr-2 ${selected ? "text-green-400" : "text-zinc-500"}`} />
+            <span className="flex-1 text-left min-w-0">
+              {selectedJb ? (
+                <>
+                  <div className="text-white text-sm">{selectedJb.name}</div>
+                  <div className="text-xs text-zinc-500">{selectedJb.device_name || "No device"}</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-white text-sm">Disabled</div>
+                  <div className="text-xs text-zinc-500">No device</div>
+                </>
+              )}
+            </span>
+            <ChevronDown className={`w-4 h-4 ml-2 text-zinc-500 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+          {open && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-zinc-800 rounded-lg shadow-xl z-50 py-1 border border-zinc-700/50">
+              <button
+                onClick={() => save("")}
+                className={`w-full text-left px-3 py-2 text-sm cursor-pointer flex items-center gap-2 ${!selected ? "text-white" : "text-zinc-400 hover:text-white"}`}
+              >
+                <Turntable className="w-4 h-4 shrink-0 text-zinc-500" />
+                <div className="min-w-0">
+                  <div className="text-sm">Disabled</div>
+                  <div className="text-xs text-zinc-500">No device</div>
+                </div>
+              </button>
+              {jukeboxes.map((j) => (
+                <button
+                  key={j.id}
+                  onClick={() => save(j.id)}
+                  className={`w-full text-left px-3 py-2 text-sm cursor-pointer flex items-center gap-2 ${j.id === selected ? "text-white" : "text-zinc-400 hover:text-white"}`}
+                >
+                  <Turntable className={`w-4 h-4 shrink-0 ${j.id === selected ? "text-green-400" : "text-zinc-500"}`} />
+                  <div className="min-w-0">
+                    <div className="font-medium">{j.name}</div>
+                    <div className="text-xs text-zinc-500">{j.device_name || j.device_id}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </Card>
   )

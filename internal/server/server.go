@@ -120,7 +120,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		w.Write([]byte("pong"))
 	}).Methods("GET")
 
-	subsonicHandler := subsonic.NewHandler(db, jwtService, scannerService, cfg.Data.ImagesDir)
+	subsonicHandler := subsonic.NewHandler(db, jwtService, scannerService, engineManager, cfg.Data.ImagesDir)
 	r.PathPrefix("/rest").Handler(subsonicHandler)
 
 	api := r.PathPrefix("/api").Subrouter()

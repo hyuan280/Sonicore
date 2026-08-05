@@ -84,3 +84,8 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = $1", email)
 	return scanUser(row)
 }
+
+func (r *UserRepo) Delete(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", id)
+	return err
+}
