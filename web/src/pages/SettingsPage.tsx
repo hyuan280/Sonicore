@@ -204,7 +204,7 @@ export default function SettingsPage() {
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-medium flex items-center gap-2"><SquareLibrary className="w-4 h-4" /> Libraries</h3>
-            <Button size="sm" onClick={() => setShowForm(!showForm)}><Plus className="w-4 h-4 mr-1" />Add</Button>
+            <Button size="sm" onClick={() => setShowForm(!showForm)} className="px-2 py-1 text-xs"><Plus className="w-3.5 h-3.5 mr-0.5" />Add</Button>
           </div>
 
           {showForm && (
@@ -971,11 +971,11 @@ function DeviceManager() {
   return (
     <Card className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-400 flex items-center gap-2">
+        <h2 className="font-medium flex items-center gap-2">
           <Speaker className="w-4 h-4" /> Audio Devices
         </h2>
-        <Button variant="ghost" size="sm" onClick={() => setShowAdd(!showAdd)}>
-          <Plus className="w-4 h-4 mr-1" /> Add
+        <Button size="sm" onClick={() => setShowAdd(!showAdd)} className="px-2 py-1 text-xs">
+          <Plus className="w-3.5 h-3.5 mr-0.5" /> Add
         </Button>
       </div>
 
@@ -1032,7 +1032,7 @@ function DeviceManager() {
           ) : (
             <div className="space-y-2">
               {devices.map((d: any) => (
-                <div key={d.id} className="flex items-center gap-3 p-3 border border-zinc-800 rounded-lg">
+                <div key={d.id} className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800/50">
                   <Volume2 className="w-4 h-4 text-green-500 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm">{d.name}</div>
@@ -1093,9 +1093,9 @@ function SubsonicJukeboxSetting() {
 
   return (
     <Card className="p-4 space-y-3">
-      <h2 className="text-sm font-semibold text-zinc-400 flex items-center gap-2">
+      <h2 className="font-medium flex items-center gap-2">
         <img src="/subsonic.png" className="w-4 h-4" /> Subsonic Jukebox
-        {selected && <span className="text-xs text-green-400 ml-auto">Subsonic clients can control this jukebox</span>}
+        {selected && <span className="text-xs text-green-400 ml-auto">Subsonic clients can control this jukebox.</span>}
       </h2>
       {error && <p className="text-xs text-red-400">{error}</p>}
       {loading ? (
