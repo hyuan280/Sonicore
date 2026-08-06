@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { api } from "../api/client"
 import { Card, CardGrid } from "../components/ui/card"
@@ -15,6 +16,7 @@ export default function AlbumsPage() {
   const [albums, setAlbums] = useState<AlbumItem[]>([])
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = usePerPage("albums", 10)
+  const { t } = useTranslation()
   const [total, setTotal] = useState(0)
   const [layout, setLayout] = useState<"grid" | "list">("grid")
   const [searchQ, setSearchQ] = useState("")
@@ -52,11 +54,11 @@ export default function AlbumsPage() {
     <>
       <div className="sticky top-0 z-10 bg-black px-6 pt-6 pb-4 space-y-2">
         <div className="relative flex items-center">
-          <h1 className="text-2xl font-bold shrink-0">Albums</h1>
+          <h1 className="text-2xl font-bold shrink-0">{t("nav.albums")}</h1>
           <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
             <input
               type="text"
-              placeholder="Search albums..."
+              placeholder={t("search.searchAlbums")}
               value={searchQ}
               onChange={e => { setSearchQ(e.target.value); setPage(1) }}
               className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -78,7 +80,7 @@ export default function AlbumsPage() {
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <span className="text-sm text-zinc-400">{total} albums</span>
+          <span className="text-sm text-zinc-400">{t("album.totalAlbums", { count: total })}</span>
           <div className="flex items-center bg-zinc-800 rounded-lg">
             <div className="relative">
               <button onClick={() => setPerPageOpen(!perPageOpen)}
@@ -135,12 +137,12 @@ export default function AlbumsPage() {
             <span className="w-px h-4 bg-zinc-700" />
             <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
               className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-              <ChevronLeft className="w-4 h-4" />Prev
+              <ChevronLeft className="w-4 h-4" />{t("trackTable.prev")}
             </button>
             <span className="w-px h-4 bg-zinc-700" />
             <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
               className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-              Next<ChevronRight className="w-4 h-4" />
+              {t("trackTable.next")}<ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -170,7 +172,7 @@ export default function AlbumsPage() {
                   <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
                     <span>{a.year || ""}</span>
                     {a.country && <span>· {a.country}</span>}
-                    {a.song_count > 0 && <span>· {a.song_count} tracks</span>}
+                    {a.song_count > 0 && <span>· {t("album.tracks", { count: a.song_count })}</span>}
                   </div>
                   </div>
                 </Card>
@@ -203,7 +205,7 @@ export default function AlbumsPage() {
             ))}
           </div>
         )}
-        {albums.length === 0 && <p className="text-zinc-500 text-center py-12">No albums found</p>}
+        {albums.length === 0 && <p className="text-zinc-500 text-center py-12">{t("trackTable.noAlbumsFound")}</p>}
       </div>
     </>
   )

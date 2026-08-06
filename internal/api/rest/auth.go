@@ -62,41 +62,41 @@ type refreshRequest struct {
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	if req.Username == "" || req.Email == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username, email, and password are required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAuthRegistrationFields)
 		return
 	}
 
 	if len(req.Password) < 6 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 6 characters"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAuthPasswordTooShort)
 		return
 	}
 
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
 	if allowReg != "true" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "registration is disabled"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrAuthRegistrationDisabled)
 		return
 	}
 
 	existing, _ := h.userRepo.FindByUsername(r.Context(), req.Username)
 	if existing != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "username already exists"})
+		writeCodedError(w, http.StatusConflict, domain.ErrAuthUsernameExists)
 		return
 	}
 
 	existing, _ = h.userRepo.FindByEmail(r.Context(), req.Email)
 	if existing != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "email already exists"})
+		writeCodedError(w, http.StatusConflict, domain.ErrAuthEmailExists)
 		return
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to hash password"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthHashPassword)
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.userRepo.Create(r.Context(), user); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create user"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthCreateUser)
 		return
 	}
 
@@ -128,23 +128,23 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	if req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password are required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAuthCredentialsRequired)
 		return
 	}
 
 	user, err := h.userRepo.FindByUsername(r.Context(), req.Username)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrAuthInvalidCredentials)
 		return
 	}
 
 	if !auth.CheckPassword(req.Password, user.PasswordHash) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrAuthInvalidCredentials)
 		return
 	}
 
@@ -154,29 +154,29 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	if req.RefreshToken == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "refresh_token is required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAuthRefreshRequired)
 		return
 	}
 
 	userID, err := h.tokenStore.Validate(r.Context(), req.RefreshToken)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired refresh token"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrAuthInvalidRefresh)
 		return
 	}
 
 	if err := h.tokenStore.Revoke(r.Context(), req.RefreshToken); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to revoke old token"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthRevokeTokens)
 		return
 	}
 
 	user, err := h.userRepo.FindByID(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "user not found"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrAuthUserNotFound)
 		return
 	}
 
@@ -186,12 +186,12 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	if err := h.tokenStore.RevokeAll(r.Context(), userID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to revoke tokens"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthRevokeTokens)
 		return
 	}
 
@@ -201,7 +201,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) writeAuthResponse(w http.ResponseWriter, r *http.Request, status int, user *domain.User) {
 	accessToken, err := h.jwtService.Generate(user.ID, user.Username, user.Role)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthGenerateToken)
 		return
 	}
 
@@ -209,13 +209,13 @@ func (h *AuthHandler) writeAuthResponse(w http.ResponseWriter, r *http.Request, 
 	ctx := r.Context()
 
 	if err := h.tokenStore.Store(ctx, user.ID, raw, h.refreshExp); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store refresh token"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthStoreToken)
 		return
 	}
 
 	sessToken, err := h.sessionStore.Generate(ctx, user.ID, r.UserAgent())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate session"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAuthGenerateSession)
 		return
 	}
 

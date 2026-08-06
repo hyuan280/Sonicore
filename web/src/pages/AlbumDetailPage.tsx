@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { usePlayer } from "../stores/player"
@@ -10,6 +11,7 @@ import TrackTable, { type TrackRow } from "../components/TrackTable"
 import { usePerPage } from "../hooks/usePerPage"
 
 export default function AlbumDetailPage() {
+  const { t } = useTranslation()
   const { albumId } = useParams()
   const player = usePlayer()
   const [album, setAlbum] = useState<any>(null)
@@ -48,7 +50,7 @@ export default function AlbumDetailPage() {
     cover_image_id: t.cover_image_id, artists: t.artists, albums: t.albums, versions: t.versions,
   }))
 
-  if (!album) return <div className="p-6 text-zinc-500">Loading...</div>
+  if (!album) return <div className="p-6 text-zinc-500">{t("common.loading")}</div>
 
   return (
     <div>
@@ -66,7 +68,7 @@ export default function AlbumDetailPage() {
               <Disc3 className={`w-12 h-12 text-zinc-600 ${album.cover_image_id ? "hidden" : ""}`} />
             </div>
             <div className="flex flex-col justify-end">
-              <p className="text-xs uppercase tracking-wider text-zinc-400">Album</p>
+              <p className="text-xs uppercase tracking-wider text-zinc-400">{t("album.label")}</p>
               <h1 className="text-3xl font-bold mt-1">{album.title}</h1>
               {album.artist && (
                 <Link to={`/artists/${album.artist_id}`} className="text-sm text-zinc-300 mt-1 block hover:text-white transition-colors">
@@ -75,7 +77,7 @@ export default function AlbumDetailPage() {
               )}
               <p className="text-sm text-zinc-500 mt-1">{album.year || ""}{album.country ? ` · ${album.country}` : ""} · {tracks.length} tracks</p>
               <Button className="mt-4 w-fit" onClick={() => { if (tracks.length > 0) player.setQueue(makePlayerTracks(), 0) }}>
-                <Play className="w-4 h-4 mr-2" />Play All
+                <Play className="w-4 h-4 mr-2" />{t("player.playAll")}
               </Button>
             </div>
           </div>
@@ -95,7 +97,7 @@ export default function AlbumDetailPage() {
         total={total}
         onPageChange={setPage}
         onPerPageChange={(val) => { setPerPage(val); setPage(1) }}
-        emptyText="No tracks in this album"
+        emptyText={t("trackTable.noTracksAlbum")}
       />
     </div>
   )

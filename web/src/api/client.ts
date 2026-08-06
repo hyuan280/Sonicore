@@ -20,6 +20,7 @@ async function request(path: string, opts: RequestInit = {}): Promise<any> {
     const err: any = new Error(body.error || res.statusText)
     err.status = res.status
     err.error = body.error
+    err.code = body.code
     throw err
   }
 

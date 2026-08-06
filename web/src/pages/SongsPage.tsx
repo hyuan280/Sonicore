@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { api } from "../api/client"
 import { usePlayer } from "../stores/player"
 import { Play, X } from "lucide-react"
@@ -11,6 +12,7 @@ export default function SongsPage() {
   const [tracks, setTracks] = useState<TrackRow[]>([])
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = usePerPage("tracks", 20)
+  const { t } = useTranslation()
   const [total, setTotal] = useState(0)
   const [searchQ, setSearchQ] = useState("")
   const [multi, setMulti] = useState(false)
@@ -54,12 +56,12 @@ export default function SongsPage() {
         header={
           <div className="relative flex items-center">
             <div className="shrink-0">
-              <h1 className="text-2xl font-bold">Songs</h1>
+              <h1 className="text-2xl font-bold">{t("nav.songs")}</h1>
             </div>
             <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
               <input
                 type="text"
-                placeholder="Search songs..."
+                placeholder={t("search.searchSongs")}
                 value={searchQ}
                 onChange={e => { setSearchQ(e.target.value); setPage(1) }}
                 className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -75,7 +77,7 @@ export default function SongsPage() {
             <Button onClick={() => player.setQueue(tracks.map(t => ({
               id: t.id, title: t.title, duration: t.duration, suffix: t.suffix || "mp3",
               cover_image_id: t.cover_image_id, artists: t.artists, albums: t.albums, versions: t.versions,
-            })), 0)} size="sm" className="shrink-0"><Play className="w-4 h-4 mr-1" />Play All</Button>
+            })), 0)} size="sm" className="shrink-0"><Play className="w-4 h-4 mr-1" />{t("player.playAll")}</Button>
           </div>
         }
         onPlay={(i) => player.setQueue(tracks.map(t => ({
@@ -96,7 +98,7 @@ export default function SongsPage() {
         total={total}
         onPageChange={setPage}
         onPerPageChange={(val) => { setPerPage(val); setPage(1) }}
-        emptyText="No songs found"
+        emptyText={t("trackTable.noSongsFound")}
       />
     </div>
   )

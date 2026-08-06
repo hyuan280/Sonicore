@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useParams, useNavigate } from "react-router-dom"
 import { api } from "../api/client"
 import { usePlayer, type PlayerTrack } from "../stores/player"
@@ -9,6 +10,7 @@ import TrackTable, { type TrackRow } from "../components/TrackTable"
 import { usePerPage } from "../hooks/usePerPage"
 
 export default function PlaylistDetailPage() {
+  const { t } = useTranslation()
   const { id } = useParams()
   const navigate = useNavigate()
   const player = usePlayer()
@@ -53,13 +55,13 @@ export default function PlaylistDetailPage() {
   }
   const batchRemove = async () => {
     if (!id) return
-    if (!confirm(`Remove ${selected.size} track(s) from playlist?`)) return
+    if (!confirm(t("playlist.removeTracks", { count: selected.size }))) return
     await api.user.removeTracksFromPlaylist(id, [...selected])
     setSelected(new Set())
     load()
   }
 
-  if (!playlist) return <div className="p-6 text-zinc-500">Loading...</div>
+  if (!playlist) return <div className="p-6 text-zinc-500">{t("common.loading")}</div>
   const rawTracks: any[] = playlist.tracks || []
   const filteredRaw = searchQ.trim()
     ? rawTracks.filter((t: any) => t.title.toLowerCase().includes(searchQ.trim().toLowerCase()))
@@ -89,7 +91,7 @@ export default function PlaylistDetailPage() {
             <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
               <input
                 type="text"
-                placeholder="Search playlist..."
+                placeholder={t("search.searchPlaylist")}
                 value={searchQ}
                 onChange={e => setSearchQ(e.target.value)}
                 className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -106,9 +108,9 @@ export default function PlaylistDetailPage() {
               {delConfirm ? (
                 <div className="flex gap-1 items-center">
                   <button onClick={() => { handleDelete(); setDelConfirm(false) }}
-                    className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">Delete?</button>
+                    className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">{t("common.delete")}</button>
                   <button onClick={() => setDelConfirm(false)}
-                    className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">No</button>
+                    className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">{t("common.no")}</button>
                 </div>
               ) : (
                 <Button variant="ghost" size="sm" onClick={() => setDelConfirm(true)}>
@@ -130,7 +132,7 @@ export default function PlaylistDetailPage() {
         extraBulkActions={
           <button onClick={batchRemove}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
-            <Trash2 className="w-4 h-4" /> Remove
+            <Trash2 className="w-4 h-4" /> {t("trackTable.remove")}
           </button>
         }
         onPlay={(i) => {
@@ -149,7 +151,7 @@ export default function PlaylistDetailPage() {
             <Trash2 className="w-4 h-4" />
           </button>
         )}
-        emptyText="No tracks in this playlist"
+        emptyText={t("trackTable.noTracksPlaylist")}
       />
     </div>
   )

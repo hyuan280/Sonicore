@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react"
+import { useTranslation } from "react-i18next"
 import { useParams, useNavigate } from "react-router-dom"
 import { useJukebox, type JukeboxStatus } from "../stores/jukebox"
 import { usePlayer } from "../stores/player"
@@ -17,6 +18,7 @@ import ArtistLink from "../components/ArtistLink"
 export default function JukeboxDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { delete: delJbx, updatePlaying } = useJukebox()
   const ps = usePlayer()
 
@@ -180,9 +182,9 @@ export default function JukeboxDetailPage() {
             delConfirm ? (
               <div className="flex gap-1 items-center">
                 <button onClick={() => { handleDelete(); setDelConfirm(false) }}
-                  className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">Delete?</button>
+                  className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">{t("jukebox.delete")}</button>
                 <button onClick={() => setDelConfirm(false)}
-                  className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">No</button>
+                  className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">{t("jukebox.no")}</button>
               </div>
             ) : (
               <Button variant="ghost" size="sm" onClick={() => setDelConfirm(true)}>
@@ -201,11 +203,11 @@ export default function JukeboxDetailPage() {
           {track && hasTracks ? (
             <>
               <div className="font-medium truncate">{track.title}</div>
-              <div className="text-sm text-zinc-400 truncate">{track.artist || "Unknown"}</div>
+              <div className="text-sm text-zinc-400 truncate">{track.artist || t("jukebox.unknown")}</div>
               <div className="text-xs text-zinc-500">{formatDuration(track.duration)}</div>
             </>
           ) : (
-            <div className="text-zinc-500">Nothing playing</div>
+            <div className="text-zinc-500">{t("jukebox.nothingPlaying")}</div>
           )}
         </div>
       </div>
@@ -237,22 +239,22 @@ export default function JukeboxDetailPage() {
       {/* Queue */}
       <div className="px-6">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-zinc-400">Queue ({queue.length})</span>
+          <span className="text-sm text-zinc-400">{t("jukebox.queue")} ({queue.length})</span>
           <div className="flex items-center gap-3">
             <button onClick={handlePushQueue} disabled={pushing || ps.queue.length === 0}
               className="text-xs text-zinc-500 hover:text-green-400 flex items-center gap-1 cursor-pointer disabled:opacity-30">
               {pushing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowUpFromLine className="w-3 h-3" />}
-              Push
+              {t("jukebox.push")}
             </button>
             <button onClick={handleClear} className="text-xs text-zinc-500 hover:text-red-400 cursor-pointer">
-              Clear
+              {t("jukebox.clear")}
             </button>
           </div>
         </div>
         <div className="space-y-0.5 border border-zinc-800 rounded-lg">
           {queue.length === 0 && (
             <div className="text-center py-12 text-sm text-zinc-600">
-              Queue is empty — push browser queue or add from songs
+              {t("jukebox.queueEmptyHint")}
             </div>
           )}
           {queue.map((tid: string, i: number) => {
@@ -294,6 +296,7 @@ export default function JukeboxDetailPage() {
 }
 
 function PathMappingPanel({ jukeboxId, onClose }: { jukeboxId: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const { libraries } = useLibrary()
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -333,22 +336,22 @@ function PathMappingPanel({ jukeboxId, onClose }: { jukeboxId: string; onClose: 
   return (
     <div className="border border-zinc-800 rounded-xl p-4 space-y-3 bg-zinc-900/50 mb-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-300">Path Mapping</h3>
+        <h3 className="text-sm font-semibold text-zinc-300">{t("jukebox.pathMapping")}</h3>
         <div className="flex gap-2">
           <button onClick={handleSave} disabled={saving}
             className="text-xs text-zinc-400 hover:text-green-400 cursor-pointer disabled:opacity-30">
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("jukebox.saving") : t("jukebox.save")}
           </button>
           <button onClick={onClose}
-            className="text-xs text-zinc-500 hover:text-white cursor-pointer">Close</button>
+            className="text-xs text-zinc-500 hover:text-white cursor-pointer">{t("jukebox.close")}</button>
         </div>
       </div>
 
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {!loaded ? (
-          <div className="text-center py-4 text-sm text-zinc-500">Loading...</div>
+          <div className="text-center py-4 text-sm text-zinc-500">{t("common.loading")}</div>
         ) : paths.length === 0 ? (
-          <div className="text-center py-4 text-sm text-zinc-500">No libraries found</div>
+          <div className="text-center py-4 text-sm text-zinc-500">{t("jukebox.noLibrariesFound")}</div>
         ) : paths.map(p => (
           <div key={p.id} className="border border-zinc-800 rounded-lg px-3 py-2">
             <div className="text-sm font-bold text-zinc-300 mb-1">{p.name}</div>

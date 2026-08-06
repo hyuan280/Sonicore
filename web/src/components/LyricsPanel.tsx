@@ -1,4 +1,5 @@
 import { useRef, useEffect, useMemo, useCallback, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { usePlayer } from "../stores/player"
 import { X, Settings, ChevronLeft, ChevronRight } from "lucide-react"
 import { parseLRC, findCurrentLine } from "../lib/utils"
@@ -45,6 +46,7 @@ interface Props {
 type ResizeDir = "e"
 
 export default function LyricsPanel({ onClose }: Props) {
+  const { t } = useTranslation()
   const { lyrics, lyricsFormat, position, track, lyricsOffset, adjustLyricsOffset } = usePlayer()
   const [settings, setSettings] = useState<LyricsSettings>(loadLyricsSettings)
   const [showSettings, setShowSettings] = useState(false)
@@ -254,7 +256,7 @@ export default function LyricsPanel({ onClose }: Props) {
           </div>
         ) : (
           <div className="text-zinc-600 italic pt-5" style={{ fontSize: Math.round(settings.fontSize * 0.6) }}>
-            {track ? "No lyrics" : "Not playing"}
+            {track ? t("player.noLyrics") : t("player.notPlaying")}
           </div>
         )}
       </div>

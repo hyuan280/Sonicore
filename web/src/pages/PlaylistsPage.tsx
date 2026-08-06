@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { usePlaylists } from "../stores/playlists"
 import { usePlayer } from "../stores/player"
@@ -7,6 +8,7 @@ import { Input } from "../components/ui/input"
 import { ListMusic, Plus, ChevronRight, Trash2, X } from "lucide-react"
 
 export default function PlaylistsPage() {
+  const { t } = useTranslation()
   const { list: playlists, load, create: createPlaylist, remove: removePlaylist } = usePlaylists()
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState("")
@@ -36,11 +38,11 @@ export default function PlaylistsPage() {
   return (
     <div className="p-6 space-y-6">
       <div className="relative flex items-center">
-        <h1 className="text-2xl font-bold shrink-0">Playlists</h1>
+        <h1 className="text-2xl font-bold shrink-0">{t("nav.playlists")}</h1>
         <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
           <input
             type="text"
-            placeholder="Search playlists..."
+            placeholder={t("search.searchPlaylists")}
             value={searchQ}
             onChange={e => setSearchQ(e.target.value)}
             className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -54,7 +56,7 @@ export default function PlaylistsPage() {
         </div>
         <div className="flex-1" />
         <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-          <Plus className="w-4 h-4 mr-1" /> New Playlist
+          <Plus className="w-4 h-4 mr-1" /> {t("playlist.newPlaylist")}
         </Button>
       </div>
 
@@ -72,9 +74,9 @@ export default function PlaylistsPage() {
               {delId === p.id ? (
                 <>
                   <button onClick={() => del(p.id)}
-                    className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">Delete?</button>
+                    className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">{t("playlist.delete")}</button>
                   <button onClick={() => setDelId(null)}
-                    className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">No</button>
+                    className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">{t("playlist.no")}</button>
                 </>
               ) : (
                 <button onClick={() => setDelId(p.id)}
@@ -89,8 +91,8 @@ export default function PlaylistsPage() {
         {filtered.length === 0 && (
           <div className="text-center py-16 space-y-4">
             <ListMusic className="w-12 h-12 text-zinc-600 mx-auto" />
-            <p className="text-zinc-500">{playlists.length === 0 ? "No playlists yet" : "No playlists match your search"}</p>
-            <p className="text-sm text-zinc-600">{playlists.length === 0 ? 'Click "New Playlist" to get started.' : ""}</p>
+            <p className="text-zinc-500">{playlists.length === 0 ? t("playlist.noPlaylistsYet") : t("playlist.noPlaylistsMatch")}</p>
+            <p className="text-sm text-zinc-600">{playlists.length === 0 ? t("playlist.getStarted") : ""}</p>
           </div>
         )}
       </div>
@@ -98,13 +100,13 @@ export default function PlaylistsPage() {
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowCreate(false)}>
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Create Playlist</h2>
+            <h2 className="text-lg font-bold mb-4">{t("playlist.createPlaylist")}</h2>
             <Input value={name} onChange={e => setName(e.target.value)}
-              placeholder="Playlist name" autoFocus
+              placeholder={t("playlist.playlistName")} autoFocus
               onKeyDown={e => e.key === "Enter" && create()} />
             <div className="flex justify-end gap-2 mt-4">
-              <Button variant="ghost" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button variant="primary" onClick={create} disabled={!name.trim()}>Create</Button>
+              <Button variant="ghost" onClick={() => setShowCreate(false)}>{t("playlist.cancel")}</Button>
+              <Button variant="primary" onClick={create} disabled={!name.trim()}>{t("playlist.create")}</Button>
             </div>
           </div>
         </div>

@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react"
+import { useTranslation } from "react-i18next"
+import { translateApiError } from "../i18n/errorCodes"
 import { useAuth } from "../stores/auth"
 import { useLibrary } from "../stores/library"
 import { usePlayer } from "../stores/player"
@@ -8,6 +10,7 @@ import { Card } from "../components/ui/card"
 import { api } from "../api/client"
 import { Link } from "react-router-dom"
 import { Music, ScanSearch, ColumnsSettings, Trash2, Plus, FolderOpen, Loader2, UserRound, SquareLibrary, Speaker, Turntable, Volume2, Search, X, Upload, FileText, Image, Pen, RefreshCw, Scan, TriangleAlert, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
+import LanguageSwitcher from "../components/LanguageSwitcher"
 import { formatDuration, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 import ArtistSelector, { type SelectedArtist } from "../components/ArtistSelector"
@@ -15,10 +18,8 @@ import DirectoryPicker from "../components/DirectoryPicker"
 import { usePerPage } from "../hooks/usePerPage"
 import type { JukeboxInfo } from "../stores/jukebox"
 
-const roleLabel = (r: string) =>
-  r === "super_admin" ? "Super Admin" : r === "admin" ? "Admin" : "User"
-
 export default function SettingsPage() {
+  const { t } = useTranslation()
   const { user, logout } = useAuth()
   const { libraries, load: reloadLibs } = useLibrary()
   const [showForm, setShowForm] = useState(false)
@@ -89,9 +90,9 @@ export default function SettingsPage() {
   const [pwError, setPwError] = useState("")
   const [pwSaving, setPwSaving] = useState(false)
 
+  const roleLabels: Record<string, string> = { super_admin: t("settings.superAdmin"), admin: t("settings.admin"), user: t("settings.user") }
+  const roleLabel = (r: string) => roleLabels[r] || t("settings.user")
   const isAdmin = user?.role === "admin" || user?.role === "super_admin"
-
-  // On unmount, stop all polling
   useEffect(() => {
     return () => { pollingRef.current = {} }
   }, [])
@@ -148,7 +149,7 @@ export default function SettingsPage() {
   }
 
   const del = async (id: string) => {
-    if (confirm("Delete this library?")) {
+    if (confirm(t("settings.deleteLibrary"))) {
       await api.libraries.delete(id)
       reloadLibs()
       api.user.getQueue().then((data: any) => {
@@ -176,49 +177,52 @@ export default function SettingsPage() {
   const changePassword = async () => {
     setPwSaving(true); setPwError("")
     if (pwForm.newPw !== pwForm.confirmPw) {
-      setPwError("New passwords do not match"); setPwSaving(false); return
+      setPwError(t("settings.passwordsNoMatch")); setPwSaving(false); return
     }
     try {
       await api.auth.changePassword(pwForm.oldPw, pwForm.newPw)
       setShowPwModal(false)
       setPwForm({ oldPw: "", newPw: "", confirmPw: "" })
-    } catch (err: any) { setPwError(err.error || "Failed") }
+    } catch (err: any) { setPwError(translateApiError(t, err)) }
     setPwSaving(false)
   }
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">{t("settings.settings")}</h1>
+        <LanguageSwitcher />
+      </div>
 
       <Card className="space-y-3">
-        <h3 className="font-medium flex items-center gap-2"><UserRound className="w-4 h-4" /> Account</h3>
+        <h3 className="font-medium flex items-center gap-2"><UserRound className="w-4 h-4" /> {t("settings.account")}</h3>
         <div className="space-y-1 p-3 rounded-lg bg-zinc-800/50">
-          <p className="text-sm text-zinc-400">Username: {user?.username}</p>
-          <p className="text-sm text-zinc-400">Email: {user?.email}</p>
-          <p className="text-sm text-zinc-400">Role: <span className="text-green-500">{roleLabel(user?.role || "")}</span></p>
+          <p className="text-sm text-zinc-400">{t("settings.username")}: {user?.username}</p>
+          <p className="text-sm text-zinc-400">{t("settings.email")}: {user?.email}</p>
+          <p className="text-sm text-zinc-400">{t("settings.role")}: <span className="text-green-500">{roleLabel(user?.role || "")}</span></p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => setShowPwModal(true)}>Change Password</Button>
+        <Button variant="primary" size="sm" onClick={() => setShowPwModal(true)}>{t("settings.changePassword")}</Button>
       </Card>
 
       {isAdmin && (
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-medium flex items-center gap-2"><SquareLibrary className="w-4 h-4" /> Libraries</h3>
-            <Button size="sm" onClick={() => setShowForm(!showForm)} className="px-2 py-1 text-xs"><Plus className="w-3.5 h-3.5 mr-0.5" />Add</Button>
+            <h3 className="font-medium flex items-center gap-2"><SquareLibrary className="w-4 h-4" /> {t("settings.libraries")}</h3>
+            <Button size="sm" onClick={() => setShowForm(!showForm)} className="px-2 py-1 text-xs"><Plus className="w-3.5 h-3.5 mr-0.5" />{t("settings.add")}</Button>
           </div>
 
           {showForm && (
             <div className="space-y-3 p-3 rounded-lg bg-zinc-800">
-              <Input placeholder="Library name" value={name} onChange={e => setName(e.target.value)} />
+              <Input placeholder={t("settings.libraryName")} value={name} onChange={e => setName(e.target.value)} />
               <div>
                 <button onClick={() => setDirPickerOpen(true)}
                   className="w-full flex items-center gap-2 bg-zinc-800 text-sm text-zinc-300 rounded-lg px-3 py-2.5 border border-zinc-700 hover:border-zinc-500 cursor-pointer text-left">
                   <FolderOpen className="w-4 h-4 text-yellow-500 shrink-0" />
-                  <span className="truncate flex-1">{path || "Select music directory..."}</span>
+                  <span className="truncate flex-1">{path || t("settings.selectDirectory")}</span>
                 </button>
               </div>
               <DirectoryPicker open={dirPickerOpen} initialPath={path} onClose={() => setDirPickerOpen(false)} onSelect={setPath} />
-              <Button size="sm" onClick={create}>Create</Button>
+              <Button size="sm" onClick={create}>{t("settings.create")}</Button>
             </div>
           )}
 
@@ -233,7 +237,7 @@ export default function SettingsPage() {
                       <p className="text-sm font-medium truncate flex items-center gap-2">
                         {lib.name}
                         {(lib.last_scan_errors || 0) > 0 && (
-                          <span className="text-yellow-500 text-xs flex items-center gap-0.5 shrink-0" title={`${lib.last_scan_errors} scan error(s)`}>
+                          <span className="text-yellow-500 text-xs flex items-center gap-0.5 shrink-0" title={t("settings.scanErrors", { count: lib.last_scan_errors })}>
                             <TriangleAlert className="w-4 h-4" />
                             {lib.last_scan_errors}
                           </span>
@@ -279,52 +283,52 @@ export default function SettingsPage() {
       {showPwModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowPwModal(false)}>
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold">Change Password</h2>
+            <h2 className="text-lg font-bold">{t("settings.changePassword")}</h2>
 
             {pwError && <p className="text-sm text-red-400">{pwError}</p>}
 
-            <Input type="password" placeholder="Current password" value={pwForm.oldPw}
+            <Input type="password" placeholder={t("settings.currentPassword")} value={pwForm.oldPw}
               onChange={e => setPwForm({...pwForm, oldPw: e.target.value})} />
-            <Input type="password" placeholder="New password" value={pwForm.newPw}
+            <Input type="password" placeholder={t("settings.newPassword")} value={pwForm.newPw}
               onChange={e => setPwForm({...pwForm, newPw: e.target.value})} />
-            <Input type="password" placeholder="Confirm new password" value={pwForm.confirmPw}
+            <Input type="password" placeholder={t("settings.confirmPassword")} value={pwForm.confirmPw}
               onChange={e => setPwForm({...pwForm, confirmPw: e.target.value})}
               onKeyDown={e => e.key === "Enter" && changePassword()} />
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" onClick={() => { setShowPwModal(false); setPwError(""); setPwForm({oldPw:"",newPw:"",confirmPw:""}) }}>Cancel</Button>
+              <Button variant="ghost" onClick={() => { setShowPwModal(false); setPwError(""); setPwForm({oldPw:"",newPw:"",confirmPw:""}) }}>{t("settings.cancel")}</Button>
               <Button variant="primary" onClick={changePassword} disabled={pwSaving || !pwForm.oldPw || !pwForm.newPw || !pwForm.confirmPw}>
-                {pwSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update"}
+                {pwSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : t("settings.update")}
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      <Button variant="danger" onClick={logout}>Sign Out</Button>
+      <Button variant="danger" onClick={logout}>{t("settings.signOut")}</Button>
 
       {/* Scan dialog */}
       {scanDialogLib && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setScanDialogLib(null)}>
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold">Scan Library</h2>
+            <h2 className="text-lg font-bold">{t("settings.scanLibrary")}</h2>
             <label className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800 cursor-pointer" onClick={() => setScanOverwrite(false)}>
               <input type="radio" checked={!scanOverwrite} onChange={() => setScanOverwrite(false)} className="accent-green-500" />
               <div>
-                <p className="text-sm font-medium">Search missing metadata</p>
-                <p className="text-xs text-zinc-400">Only fill empty fields from MusicBrainz</p>
+                <p className="text-sm font-medium">{t("settings.searchMissing")}</p>
+                <p className="text-xs text-zinc-400">{t("settings.searchMissingDesc")}</p>
               </div>
             </label>
             <label className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800 cursor-pointer" onClick={() => setScanOverwrite(true)}>
               <input type="radio" checked={scanOverwrite} onChange={() => setScanOverwrite(true)} className="accent-green-500" />
               <div>
-                <p className="text-sm font-medium">Overwrite all metadata</p>
-                <p className="text-xs text-zinc-400">Replace existing data with MusicBrainz results</p>
+                <p className="text-sm font-medium">{t("settings.overwriteAll")}</p>
+                <p className="text-xs text-zinc-400">{t("settings.overwriteAllDesc")}</p>
               </div>
             </label>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" onClick={() => setScanDialogLib(null)}>Cancel</Button>
-              <Button variant="primary" onClick={() => { const id = scanDialogLib; const mode = scanOverwrite ? "overwrite" : "missing"; setScanDialogLib(null); startScan(id, mode) }}>Start Scan</Button>
+              <Button variant="ghost" onClick={() => setScanDialogLib(null)}>{t("settings.cancel")}</Button>
+              <Button variant="primary" onClick={() => { const id = scanDialogLib; const mode = scanOverwrite ? "overwrite" : "missing"; setScanDialogLib(null); startScan(id, mode) }}>{t("settings.startScan")}</Button>
             </div>
           </div>
         </div>
@@ -341,7 +345,7 @@ export default function SettingsPage() {
             <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-6">
               <input
                 type="text"
-                placeholder="Search tracks..."
+                placeholder={t("search.searchTracks")}
                 value={manageSearch}
                 onChange={e => { setManageSearch(e.target.value); setManagePage(1) }}
                 onKeyDown={e => { if (e.key === "Enter") { clearTimeout(timerRef.current); skipDebounceRef.current = true; doLoad() } }}
@@ -364,7 +368,7 @@ export default function SettingsPage() {
           <div className="flex-1 overflow-y-auto pb-6">
             <div className="sticky top-0 z-10 bg-zinc-950 py-2">
               <div className="flex items-center justify-end px-6 mb-2">
-                <span className="text-sm text-zinc-400">{manageTotal} tracks</span>
+                <span className="text-sm text-zinc-400">{t("settings.trackCount", { count: manageTotal })}</span>
                 <div className="flex items-center bg-zinc-800 rounded-lg ml-2">
                   <div className="relative">
                     <button onClick={() => setManagePerPageOpen(!managePerPageOpen)}
@@ -420,63 +424,63 @@ export default function SettingsPage() {
                   </div>
                   <span className="w-px h-4 bg-zinc-700" />
                   <button disabled={managePage <= 1} onClick={() => setManagePage(p => p - 1)}
-                    className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-                    <ChevronLeft className="w-4 h-4" />Prev
+                     className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
+                     <ChevronLeft className="w-4 h-4" />{t("trackTable.prev")}
                   </button>
                   <span className="w-px h-4 bg-zinc-700" />
                   <button disabled={managePage >= manageTotalPages} onClick={() => setManagePage(p => p + 1)}
-                    className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-                    Next<ChevronRight className="w-4 h-4" />
+                     className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
+                     {t("trackTable.next")}<ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>
               <div className="flex items-center gap-1 text-xs text-zinc-500 px-6 py-1">
-                <span className="flex-1 min-w-0">Title</span>
-                <span className="w-24 shrink-0 text-center">Version</span>
-                <span className="w-32 shrink-0 text-center hidden sm:block">Artists</span>
-                <span className="w-32 shrink-0 text-center hidden sm:block">Album</span>
-                <span className="w-16 shrink-0 text-center">Format</span>
-                <span className="w-16 shrink-0 text-center">Duration</span>
-                <span className="w-36 shrink-0 text-center">Actions</span>
+                <span className="flex-1 min-w-0">{t("trackTable.title")}</span>
+                <span className="w-24 shrink-0 text-center">{t("trackTable.version")}</span>
+                <span className="w-32 shrink-0 text-center hidden sm:block">{t("trackTable.artist")}</span>
+                <span className="w-32 shrink-0 text-center hidden sm:block">{t("trackTable.album")}</span>
+                <span className="w-16 shrink-0 text-center">{t("trackTable.format")}</span>
+                <span className="w-16 shrink-0 text-center">{t("trackTable.duration")}</span>
+                <span className="w-36 shrink-0 text-center">{t("trackTable.actions")}</span>
               </div>
             </div>
             {manageLoading ? (
               <div className="flex items-center justify-center h-[50vh] text-zinc-500">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading tracks...
+                <Loader2 className="w-5 h-5 animate-spin mr-2" /> {t("settings.loadingTracks")}
               </div>
             ) : manageTracks.length === 0 ? (
-              <div className="flex items-center justify-center h-[50vh] text-zinc-500">No results</div>
+              <div className="flex items-center justify-center h-[50vh] text-zinc-500">{t("trackTable.noResults")}</div>
             ) : (
               <div className="space-y-1 px-6">
-                {manageTracks.map((t: any) => (
-                  <div key={t.id} className="flex items-center gap-1 py-1 rounded-lg hover:bg-zinc-800/50 text-sm group">
-                    <span className="flex-1 min-w-0 truncate">{t.title}</span>
-                    <span className={`w-24 shrink-0 text-center truncate text-xs ${t.version >= 1 ? "text-blue-400" : "text-zinc-600"}`}>{t.version_label || (t.version ? `V${t.version}` : "")}</span>
-                    <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block"><ArtistLink artists={t.artists} /></span>
-                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{t.albums?.[0]?.id ? <Link to={`/albums/${t.albums[0].id}`} className="hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{t.albums[0].title || ""}</Link> : <span>{t.albums?.[0]?.title || ""}</span>}</span>
-                    <span className="w-16 shrink-0 text-center text-zinc-500">{t.suffix || t.file_format || ""}</span>
-                    <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(t.duration)}</span>
+                {manageTracks.map((trk: any) => (
+                  <div key={trk.id} className="flex items-center gap-1 py-1 rounded-lg hover:bg-zinc-800/50 text-sm group">
+                    <span className="flex-1 min-w-0 truncate">{trk.title}</span>
+                    <span className={`w-24 shrink-0 text-center truncate text-xs ${trk.version >= 1 ? "text-blue-400" : "text-zinc-600"}`}>{trk.version_label || (trk.version ? `V${trk.version}` : "")}</span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-400 hidden sm:block"><ArtistLink artists={trk.artists} /></span>
+                    <span className="w-32 shrink-0 truncate text-center text-zinc-500 hidden sm:block">{trk.albums?.[0]?.id ? <Link to={`/albums/${trk.albums[0].id}`} className="hover:text-white transition-colors" onClick={e => e.stopPropagation()}>{trk.albums[0].title || ""}</Link> : <span>{trk.albums?.[0]?.title || ""}</span>}</span>
+                    <span className="w-16 shrink-0 text-center text-zinc-500">{trk.suffix || trk.file_format || ""}</span>
+                    <span className="w-16 shrink-0 text-center text-zinc-400">{formatDuration(trk.duration)}</span>
                     <span className="w-36 shrink-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={async () => {
-                        setSearching(t.id); setSearchModal({ track: t, edit: {} })
+                        setSearching(trk.id); setSearchModal({ track: trk, edit: {} })
                         try {
                           const res = await fetch("/api/metadata/search/track", {
                             method: "POST",
                             headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
                             body: JSON.stringify({
-                              track_id: t.id,
-                              title: t.title,
-                              artist: performerNames(t.artists),
-                              album: t.albums?.[0]?.title || "",
-                              mbid: t.mbid || "",
+                              track_id: trk.id,
+                              title: trk.title,
+                              artist: performerNames(trk.artists),
+                              album: trk.albums?.[0]?.title || "",
+                              mbid: trk.mbid || "",
                             }),
                           })
-                          setSearchModal({ track: t, result: await res.json(), edit: {} })
-                        } catch { setSearchModal({ track: t, error: "Search failed" }) }
+                          setSearchModal({ track: trk, result: await res.json(), edit: {} })
+                        } catch { setSearchModal({ track: trk, error: t("settings.searchFailed") }) }
                         setSearching("")
                       }}
                         className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Identify with MusicBrainz">
-                        {searching === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
+                        {searching === trk.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
                       </button>
                       <button className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Edit lyrics">
                         <FileText className="w-4 h-4" />
@@ -503,6 +507,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
   data: any; onClose: () => void; onUpdate: (e: any) => void
   onSaved?: () => void
 }) {
+  const { t: tModal } = useTranslation()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState("")
   const [selectedArtists, setSelectedArtists] = useState<SelectedArtist[]>([])
@@ -668,7 +673,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
             <div className="w-full h-1 bg-zinc-700 rounded-full overflow-hidden">
               <div className="h-full bg-green-500 animate-pulse rounded-full w-full" />
             </div>
-            <p className="text-sm text-zinc-400 text-center">Searching MusicBrainz...</p>
+            <p className="text-sm text-zinc-400 text-center">{tModal("settings.searchingMusicBrainz")}</p>
           </div>
         ) : data.error ? (
           <p className="text-sm text-red-400">{data.error}</p>
@@ -891,14 +896,14 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                 }),
               })
               if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: "Save failed" }))
-                setSaveError(err.error || "Save failed")
+                const err = await res.json().catch(() => ({ error: tModal("settings.saveFailed") }))
+                setSaveError(translateApiError(tModal, err))
                 return
               }
               onSaved?.()
               onClose()
             } catch {
-              setSaveError("Network error")
+              setSaveError(tModal("settings.networkError"))
             }
             setSaving(false)
           }} disabled={saving || (isMatched && mbidError)}
@@ -912,6 +917,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
 }
 
 function DeviceManager() {
+  const { t } = useTranslation()
   const [devices, setDevices] = useState<any[]>([])
   const [detected, setDetected] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -944,7 +950,7 @@ function DeviceManager() {
       setAddForm({ name: "", device_type: "local", device_id: "", driver: "pulseaudio" })
       load()
     } catch (e: any) {
-      setError(e.error || e.message || "Failed to create")
+      setError(translateApiError(t, e))
     } finally { setAdding(false) }
   }
 
@@ -972,10 +978,10 @@ function DeviceManager() {
     <Card className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="font-medium flex items-center gap-2">
-          <Speaker className="w-4 h-4" /> Audio Devices
+          <Speaker className="w-4 h-4" /> {t("settings.audioDevices")}
         </h2>
         <Button size="sm" onClick={() => setShowAdd(!showAdd)} className="px-2 py-1 text-xs">
-          <Plus className="w-3.5 h-3.5 mr-0.5" /> Add
+          <Plus className="w-3.5 h-3.5 mr-0.5" /> {t("settings.add")}
         </Button>
       </div>
 
@@ -1000,7 +1006,7 @@ function DeviceManager() {
               {addForm.device_type === "local" && (
                 <div className="space-y-1 max-h-40 overflow-y-auto border border-zinc-800 rounded-lg p-1">
                   {filteredDetected.length === 0 ? (
-                    <p className="text-xs text-zinc-500 text-center py-4">All detected devices are already configured</p>
+                    <p className="text-xs text-zinc-500 text-center py-4">{t("settings.allDetectedConfigured")}</p>
                   ) : filteredDetected.map((d: any) => (
                     <button key={d.id} onClick={() => selectDetected(d)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${addForm.device_id === d.id ? "bg-green-600/20" : "hover:bg-zinc-800"}`}>
@@ -1013,22 +1019,22 @@ function DeviceManager() {
 
               <div className="space-y-2">
                 <Input value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})}
-                  placeholder={addForm.device_type === "local" ? "Name (auto-filled)" : "Device Name"} />
+                  placeholder={addForm.device_type === "local" ? t("settings.nameAutoFilled") : t("settings.deviceName")} />
                 <Input value={addForm.device_id} onChange={e => setAddForm({...addForm, device_id: e.target.value})}
-                  placeholder="Device ID" />
+                  placeholder={t("settings.deviceId")} />
               </div>
 
               <div className="flex justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => { setShowAdd(false); setError("") }}>Cancel</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setShowAdd(false); setError("") }}>{t("settings.cancel")}</Button>
                 <Button variant="primary" size="sm" onClick={handleAdd}
                   disabled={adding || !addForm.name || !addForm.device_id}>
-                  {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create"}
+                  {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : t("settings.create")}
                 </Button>
               </div>
             </div>
           )}
           {devices.length === 0 ? (
-            <p className="text-zinc-500 text-center py-4">No devices configured</p>
+            <p className="text-zinc-500 text-center py-4">{t("settings.noDevices")}</p>
           ) : (
             <div className="space-y-2">
               {devices.map((d: any) => (
@@ -1058,6 +1064,7 @@ function DeviceManager() {
 }
 
 function SubsonicJukeboxSetting() {
+  const { t } = useTranslation()
   const [jukeboxes, setJukeboxes] = useState<JukeboxInfo[]>([])
   const [selected, setSelected] = useState("")
   const [loading, setLoading] = useState(true)
@@ -1072,9 +1079,9 @@ function SubsonicJukeboxSetting() {
     ]).then(([jbList, settings]) => {
       setJukeboxes(jbList.jukeboxes || [])
       setSelected(settings.subsonic_jukebox_id || "")
-    }).catch(() => setError("Failed to load jukebox settings"))
+    }).catch(() => setError(t("settings.failedToLoadJukebox")))
       .finally(() => setLoading(false))
-  }, [])
+  }, [t])
 
   const save = async (id: string) => {
     const prev = selected
@@ -1085,7 +1092,7 @@ function SubsonicJukeboxSetting() {
       await api.admin.updateSettings({ subsonic_jukebox_id: id || "" })
     } catch {
       setSelected(prev)
-      setError("Failed to save jukebox setting")
+      setError(t("settings.failedToSaveJukebox"))
     } finally { setSaving(false) }
   }
 
@@ -1094,14 +1101,14 @@ function SubsonicJukeboxSetting() {
   return (
     <Card className="p-4 space-y-3">
       <h2 className="font-medium flex items-center gap-2">
-        <img src="/subsonic.png" className="w-4 h-4" /> Subsonic Jukebox
-        {selected && <span className="text-xs text-green-400 ml-auto">Subsonic clients can control this jukebox.</span>}
+        <img src="/subsonic.png" className="w-4 h-4" /> {t("settings.subsonicJukebox")}
+        {selected && <span className="text-xs text-green-400 ml-auto">{t("settings.subsonicHint")}</span>}
       </h2>
       {error && <p className="text-xs text-red-400">{error}</p>}
       {loading ? (
         <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
       ) : jukeboxes.length === 0 ? (
-        <p className="text-xs text-zinc-500">No jukeboxes configured. Create one first.</p>
+        <p className="text-xs text-zinc-500">{t("settings.noJukeboxesHint")}</p>
       ) : (
         <div className="relative">
           <button
@@ -1118,8 +1125,8 @@ function SubsonicJukeboxSetting() {
                 </>
               ) : (
                 <>
-                  <div className="text-white text-sm">Disabled</div>
-                  <div className="text-xs text-zinc-500">No device</div>
+                  <div className="text-white text-sm">{t("settings.disabled")}</div>
+                  <div className="text-xs text-zinc-500">{t("jukebox.noDevice")}</div>
                 </>
               )}
             </span>
@@ -1133,8 +1140,8 @@ function SubsonicJukeboxSetting() {
               >
                 <Turntable className="w-4 h-4 shrink-0 text-zinc-500" />
                 <div className="min-w-0">
-                  <div className="text-sm">Disabled</div>
-                  <div className="text-xs text-zinc-500">No device</div>
+                  <div className="text-sm">{t("settings.disabled")}</div>
+                  <div className="text-xs text-zinc-500">{t("jukebox.noDevice")}</div>
                 </div>
               </button>
               {jukeboxes.map((j) => (

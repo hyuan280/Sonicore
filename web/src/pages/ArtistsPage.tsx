@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { api } from "../api/client"
 import { Card, CardGrid } from "../components/ui/card"
@@ -6,21 +7,23 @@ import { Mic2, LayoutGrid, List, Music, X, ChevronLeft, ChevronRight, ChevronDow
 import { coverUrl } from "../lib/utils"
 import { usePerPage } from "../hooks/usePerPage"
 
-const roleLabels: Record<string, string> = {
-  performer: "Singer", composer: "Composer", lyricist: "Lyricist",
-  arranger: "Arranger", album_artist: "Album Artist", producer: "Producer",
-  conductor: "Conductor", remixer: "Remixer",
-}
-
-function formatRoles(roles?: string[]): string {
-  if (!roles || roles.length === 0) return ""
-  return roles.map(r => roleLabels[r] || r).join(" · ")
-}
-
 export default function ArtistsPage() {
   const [artists, setArtists] = useState<any[]>([])
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = usePerPage("artists", 10)
+  const { t } = useTranslation()
+
+  const roleLabels: Record<string, string> = {
+    performer: t("artist.singer"), composer: t("artist.composer"), lyricist: t("artist.lyricist"),
+    arranger: t("artist.arranger"), album_artist: t("artist.albumArtist"), producer: t("artist.producer"),
+    conductor: t("artist.conductor"), remixer: t("artist.remixer"),
+  }
+
+  function formatRoles(roles?: string[]): string {
+    if (!roles || roles.length === 0) return ""
+    return roles.map(r => roleLabels[r] || r).join(" · ")
+  }
+
   const [total, setTotal] = useState(0)
   const [layout, setLayout] = useState<"grid" | "list">("grid")
   const [searchQ, setSearchQ] = useState("")
@@ -58,11 +61,11 @@ export default function ArtistsPage() {
     <>
       <div className="sticky top-0 z-10 bg-black px-6 pt-6 pb-4 space-y-2">
         <div className="relative flex items-center">
-          <h1 className="text-2xl font-bold shrink-0">Artists</h1>
+          <h1 className="text-2xl font-bold shrink-0">{t("nav.artists")}</h1>
           <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
             <input
               type="text"
-              placeholder="Search artists..."
+              placeholder={t("search.searchArtists")}
               value={searchQ}
               onChange={e => { setSearchQ(e.target.value); setPage(1) }}
               className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -84,7 +87,7 @@ export default function ArtistsPage() {
         </div>
 
         <div className="flex items-center justify-end gap-2">
-          <span className="text-sm text-zinc-400">{total} artists</span>
+          <span className="text-sm text-zinc-400">{t("artist.totalArtists", { count: total })}</span>
           <div className="flex items-center bg-zinc-800 rounded-lg">
             <div className="relative">
               <button onClick={() => setPerPageOpen(!perPageOpen)}
@@ -141,12 +144,12 @@ export default function ArtistsPage() {
             <span className="w-px h-4 bg-zinc-700" />
             <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
               className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-              <ChevronLeft className="w-4 h-4" />Prev
+              <ChevronLeft className="w-4 h-4" />{t("trackTable.prev")}
             </button>
             <span className="w-px h-4 bg-zinc-700" />
             <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
               className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-              Next<ChevronRight className="w-4 h-4" />
+              {t("trackTable.next")}<ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -167,7 +170,7 @@ export default function ArtistsPage() {
                     <Mic2 className={`w-8 h-8 text-zinc-500 ${a.cover_image_id ? "hidden" : ""}`} />
                   </div>
                 <p className="font-medium text-sm text-center">{a.name}</p>
-                <p className="text-xs text-zinc-500 text-center">{a.track_count} tracks</p>
+                <p className="text-xs text-zinc-500 text-center">{t("artist.tracks", { count: a.track_count })}</p>
                 {a.roles && a.roles.length > 0 && (
                   <p className="text-xs text-zinc-500 text-center">{formatRoles(a.roles)}</p>
                 )}
@@ -190,13 +193,13 @@ export default function ArtistsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm truncate">{a.name}</p>
-                  <p className="text-xs text-zinc-500 truncate">{a.track_count} tracks{a.roles && a.roles.length > 0 ? ` · ${formatRoles(a.roles)}` : ""}</p>
+                  <p className="text-xs text-zinc-500 truncate">{t("artist.tracks", { count: a.track_count })}{a.roles && a.roles.length > 0 ? ` · ${formatRoles(a.roles)}` : ""}</p>
                 </div>
               </Link>
             ))}
           </div>
         )}
-        {artists.length === 0 && <p className="text-zinc-500 text-center py-12">No artists found</p>}
+        {artists.length === 0 && <p className="text-zinc-500 text-center py-12">{t("trackTable.noArtistsFound")}</p>}
       </div>
     </>
   )

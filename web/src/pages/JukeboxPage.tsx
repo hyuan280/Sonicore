@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { useJukebox } from "../stores/jukebox"
 import { api } from "../api/client"
@@ -7,6 +8,7 @@ import { Input } from "../components/ui/input"
 import { Plus, Loader2, Turntable, ChevronRight, Trash2, Shield, X } from "lucide-react"
 
 export default function JukeboxPage() {
+  const { t } = useTranslation()
   const { list, loading, loadList, create, delete: delJbx } = useJukebox()
   const [showCreate, setShowCreate] = useState(false)
   const role = localStorage.getItem("role")
@@ -28,11 +30,11 @@ export default function JukeboxPage() {
   return (
     <div className="p-6 space-y-6 pb-24">
       <div className="relative flex items-center">
-        <h1 className="text-2xl font-bold shrink-0">Jukeboxes</h1>
+        <h1 className="text-2xl font-bold shrink-0">{t("nav.jukeboxes")}</h1>
         <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
           <input
             type="text"
-            placeholder="Search jukeboxes..."
+            placeholder={t("search.searchJukeboxes")}
             value={searchQ}
             onChange={e => setSearchQ(e.target.value)}
             className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -47,7 +49,7 @@ export default function JukeboxPage() {
         <div className="flex-1" />
         {isAdmin && (
           <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="w-4 h-4 mr-1" /> New Jukebox
+            <Plus className="w-4 h-4 mr-1" /> {t("jukebox.newJukebox")}
           </Button>
         )}
       </div>
@@ -61,12 +63,12 @@ export default function JukeboxPage() {
       {!loading && filtered.length === 0 && (
         <div className="text-center py-20 text-zinc-500">
           <Turntable className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p>No jukeboxes configured</p>
+          <p>{t("jukebox.noJukeboxes")}</p>
           {isAdmin ? (
-            <p className="text-sm mt-1">Click "New Jukebox" to get started.</p>
+            <p className="text-sm mt-1">{t("jukebox.getStarted")}</p>
           ) : (
             <p className="text-sm mt-1 flex items-center justify-center gap-1">
-              <Shield className="w-3 h-3" /> Contact administrator to create
+              <Shield className="w-3 h-3" /> {t("jukebox.contactAdmin")}
             </p>
           )}
         </div>
@@ -86,9 +88,9 @@ export default function JukeboxPage() {
               {isAdmin && (delId === j.id ? (
                 <>
                   <button onClick={() => handleDelete(j.id)}
-                    className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">Delete?</button>
+                    className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 cursor-pointer">{t("jukebox.delete")}</button>
                   <button onClick={() => setDelId(null)}
-                    className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">No</button>
+                    className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-white cursor-pointer">{t("jukebox.no")}</button>
                 </>
               ) : (
                 <button onClick={() => setDelId(j.id)}
@@ -114,6 +116,7 @@ function CreateModal({ onClose, onCreate }: {
   onClose: () => void
   onCreate: (name: string, configId: string) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState("")
   const [configId, setConfigId] = useState("")
   const [devices, setDevices] = useState<any[]>([])
@@ -136,18 +139,18 @@ function CreateModal({ onClose, onCreate }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">Create Jukebox</h2>
+        <h2 className="text-lg font-bold mb-4">{t("jukebox.createJukebox")}</h2>
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-zinc-400 block mb-1">Name</label>
+            <label className="text-sm text-zinc-400 block mb-1">{t("jukebox.name")}</label>
             <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Living Room"
               onKeyDown={e => e.key === "Enter" && handleCreate()} />
           </div>
           <div>
-            <label className="text-sm text-zinc-400 block mb-1">Audio Device</label>
+            <label className="text-sm text-zinc-400 block mb-1">{t("jukebox.audioDevice")}</label>
             {devices.length === 0 ? (
               <div className="text-sm text-zinc-500 py-2 border border-zinc-800 rounded-lg px-3">
-                No available devices. Configure one in Settings → Devices.
+                {t("jukebox.noDevices")}
               </div>
             ) : (
               <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -169,9 +172,9 @@ function CreateModal({ onClose, onCreate }: {
           </div>
         </div>
         <div className="flex justify-end gap-2 mt-6">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
           <Button variant="primary" onClick={handleCreate} disabled={submitting || !name.trim() || !configId}>
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create"}
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : t("common.create")}
           </Button>
         </div>
       </div>

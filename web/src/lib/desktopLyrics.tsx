@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { createRoot, type Root } from "react-dom/client"
 import { X, Settings, ChevronLeft, ChevronRight } from "lucide-react"
 import { usePlayer } from "../stores/player"
@@ -89,6 +90,7 @@ export function closeDesktopLyrics(): void {
 }
 
 function DesktopLyrics() {
+  const { t } = useTranslation()
   const { track, lyrics, lyricsFormat, position, lyricsOffset, adjustLyricsOffset } = usePlayer()
   const [settings, setSettings] = useState<LyricsSettings>(loadLyricsSettings)
   const [showSettings, setShowSettings] = useState(false)
@@ -127,7 +129,7 @@ function DesktopLyrics() {
       {/* top bar */}
       <div className="absolute top-1 left-2 right-2 flex items-center gap-0.5 z-20">
         <span className="text-base text-white/80 truncate flex-1">
-          {track ? <>Now Playing: {track.title}</> : "Not playing"}
+          {track ? <>{t("player.nowPlaying")}: {track.title}</> : ""}
         </span>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <button onClick={() => updateSettings({ fontSize: Math.max(16, settings.fontSize - 4) })}
@@ -221,7 +223,7 @@ function DesktopLyrics() {
           </div>
         ) : (
           <div className="text-zinc-600 italic text-center pt-5" style={{ fontSize: Math.round(settings.fontSize * 0.6) }}>
-            {track ? "No lyrics" : "Not playing"}
+            {track ? t("player.noLyrics") : t("player.notPlaying")}
           </div>
         )}
       </div>

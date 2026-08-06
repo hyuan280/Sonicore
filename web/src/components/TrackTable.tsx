@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { Play, Clock, CheckSquare, Check, Plus, ListPlus, Heart, Music, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
 import { Link } from "react-router-dom"
 import { usePlayer } from "../stores/player"
@@ -79,9 +80,10 @@ export default function TrackTable({
   extraColumn,
   extraColumnHeader,
   extraAction,
-  emptyText = "No tracks found",
+  emptyText,
   onBulkChange,
 }: TrackTableProps) {
+  const { t } = useTranslation()
   const player = usePlayer()
   const [plOpen, setPlOpen] = useState(false)
   const [playlists, setPlaylists] = useState<any[]>([])
@@ -196,26 +198,26 @@ export default function TrackTable({
             <button onClick={onMultiToggle}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-colors ${multi ? "bg-green-600/20 text-green-500" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}>
               <CheckSquare className="w-4 h-4" />
-              {multi && selected.size > 0 ? `${selected.size} selected` : "Select"}
+              {multi && selected.size > 0 ? t("trackTable.selected", { count: selected.size }) : t("trackTable.select")}
             </button>
             {multi && selected.size > 0 && (
               <div className="flex items-center gap-2">
                 {bulkQueue && (
                   <button onClick={handleBulkQueue}
                     className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
-                    <Plus className="w-4 h-4" /> Queue
+                    <Plus className="w-4 h-4" /> {t("trackTable.queue")}
                   </button>
                 )}
                 {bulkPlaylist && (
                   <div className="relative">
                     <button onClick={openPlaylistDropdown}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
-                      <ListPlus className="w-4 h-4" /> Playlist
+                      <ListPlus className="w-4 h-4" /> {t("trackTable.playlist")}
                     </button>
                     {plOpen && (
                       <div className="absolute left-0 top-8 w-48 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-50 py-1 max-h-48 overflow-y-auto"
                         onClick={e => e.stopPropagation()}>
-                        <p className="text-xs text-zinc-500 px-3 py-1.5">Add to playlist</p>
+                        <p className="text-xs text-zinc-500 px-3 py-1.5">{t("trackTable.addToPlaylist")}</p>
                         {playlists.map((p: any) => {
                            const sids = selIds()
                            const allIn = sids.length > 0 && sids.every((id: string) =>
@@ -225,11 +227,11 @@ export default function TrackTable({
                                className="w-full text-left px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700 cursor-pointer flex items-center gap-2">
                                {allIn ? <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> : <span className="w-3.5 flex-shrink-0" />}
                                <span className="flex-1 truncate">{p.name}</span>
-                               {allIn && <span className="text-xs text-zinc-600 ml-auto">added</span>}
+                               {allIn && <span className="text-xs text-zinc-600 ml-auto">{t("trackTable.added")}</span>}
                              </button>
                            )
                          })}
-                        {playlists.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">No playlists</p>}
+                        {playlists.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">{t("trackTable.noPlaylists")}</p>}
                       </div>
                     )}
                   </div>
@@ -238,7 +240,7 @@ export default function TrackTable({
                   <button onClick={handleBulkFavorite}
                     className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer">
                      <Heart className={`w-4 h-4 ${selIds().every(id => favoriteIds.has(id)) ? "fill-current" : ""}`} />
-                     {selIds().every(id => favoriteIds.has(id)) ? "Unfavorite" : "Favorite"}
+                     {selIds().every(id => favoriteIds.has(id)) ? t("trackTable.unfavorite") : t("trackTable.favorite")}
                   </button>
                 )}
                 {extraBulkActions}
@@ -247,7 +249,7 @@ export default function TrackTable({
           </div>
           {(
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-sm text-zinc-400">{total} tracks</span>
+              <span className="text-sm text-zinc-400">{t("trackTable.tracks", { count: total })}</span>
               <div className="flex items-center bg-zinc-800 rounded-lg">
                 <div className="relative">
                   <button onClick={() => setPerPageOpen(!perPageOpen)}
@@ -304,12 +306,12 @@ export default function TrackTable({
                 <span className="w-px h-4 bg-zinc-700" />
                 <button disabled={page <= 1} onClick={() => handlePageChange(page - 1)}
                   className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-                  <ChevronLeft className="w-4 h-4" />Prev
+                  <ChevronLeft className="w-4 h-4" />{t("trackTable.prev")}
                 </button>
                 <span className="w-px h-4 bg-zinc-700" />
                 <button disabled={page >= totalPages} onClick={() => handlePageChange(page + 1)}
                   className="flex items-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 min-w-[3.5rem] justify-center disabled:hover:bg-transparent cursor-pointer transition-colors">
-                  Next<ChevronRight className="w-4 h-4" />
+                  {t("trackTable.next")}<ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -374,12 +376,12 @@ export default function TrackTable({
               <span className="w-px h-4 bg-zinc-700" />
               <button disabled={page <= 1} onClick={() => handlePageChange(page - 1)}
                 className="flex items-center justify-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer transition-colors min-w-[3.5rem]">
-                <ChevronLeft className="w-4 h-4" />Prev
+                <ChevronLeft className="w-4 h-4" />{t("trackTable.prev")}
               </button>
               <span className="w-px h-4 bg-zinc-700" />
               <button disabled={page >= totalPages} onClick={() => handlePageChange(page + 1)}
                 className="flex items-center gap-1 px-2 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-r-lg disabled:opacity-30 min-w-[3.5rem] justify-center disabled:hover:bg-transparent cursor-pointer transition-colors">
-                Next<ChevronRight className="w-4 h-4" />
+                {t("trackTable.next")}<ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -396,17 +398,17 @@ export default function TrackTable({
             ) : (
               <span className="w-10 shrink-0" />
             )}
-            <span className="w-7 text-right shrink-0">#</span>
-            <span className="flex-1 min-w-0 ml-3">Title</span>
+            <span className="w-7 text-right shrink-0">{t("trackTable.number")}</span>
+            <span className="flex-1 min-w-0 ml-3">{t("trackTable.title")}</span>
           </div>
           <div className="flex items-center gap-1 flex-1">
             <span className="w-20 shrink-0" />
             <span className="flex-1 min-w-0" />
             {showArtist && (
-              <span className="w-24 shrink-0 text-center hidden sm:block">Artist</span>
+              <span className="w-24 shrink-0 text-center hidden sm:block">{t("trackTable.artist")}</span>
             )}
             {showAlbum && (
-              <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">Album</span>
+              <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">{t("trackTable.album")}</span>
             )}
             {showDuration && (
               <span className="w-16 shrink-0 text-center"><Clock className="w-3 h-3 inline" /></span>
@@ -499,7 +501,7 @@ export default function TrackTable({
             </div>
           )
         })}
-        {tracks.length === 0 && <p className="text-zinc-500 text-center py-12">{emptyText}</p>}
+        {tracks.length === 0 && <p className="text-zinc-500 text-center py-12">{emptyText || t("trackTable.noTracksFound")}</p>}
       </div>
     </div>
   )

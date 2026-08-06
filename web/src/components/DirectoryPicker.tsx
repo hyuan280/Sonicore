@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react"
+import { useTranslation } from "react-i18next"
+import { translateApiError } from "../i18n/errorCodes"
 import { api } from "../api/client"
 import { Folder, ChevronRight, ArrowUp, Loader2 } from "lucide-react"
 
@@ -22,6 +24,7 @@ function parentOf(p: string): string {
 }
 
 export default function DirectoryPicker({ open, initialPath, onClose, onSelect }: Props) {
+  const { t } = useTranslation()
   const [data, setData] = useState<DirData | null>(null)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -34,7 +37,7 @@ export default function DirectoryPicker({ open, initialPath, onClose, onSelect }
       setData(d)
       if (d) setInput(d.current || "")
     }).catch((err: any) => {
-      setError(err.error || "failed")
+      setError(translateApiError(t, err))
     }).finally(() => {
       setLoading(false)
     })

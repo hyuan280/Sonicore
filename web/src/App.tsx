@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Routes, Route, Navigate, Link, useLocation, Outlet } from "react-router-dom"
 import { useAuth } from "./stores/auth"
 import { useLibrary } from "./stores/library"
@@ -30,18 +31,6 @@ import { restorePlayerState } from "./stores/player"
 import SettingsPage from "./pages/SettingsPage"
 import AdminPage from "./pages/AdminPage"
 
-const navItems = [
-  { to: "/songs", icon: Music, label: "Songs" },
-  { to: "/albums", icon: Disc2, label: "Albums" },
-  { to: "/artists", icon: Mic2, label: "Artists" },
-  { type: "divider" as const },
-  { to: "/playlists", icon: ListMusic, label: "Playlists" },
-]
-
-const navItemsAfter = [
-  { to: "/favorites", icon: Heart, label: "Favorites" },
-  { to: "/history", icon: History, label: "History" },
-]
 
 function Sidebar() {
   const location = useLocation()
@@ -49,6 +38,18 @@ function Sidebar() {
   const { list: playlists, load: loadPlaylists } = usePlaylists()
   const [plOpen, setPlOpen] = useState(false)
   const [jbxOpen, setJbxOpen] = useState(false)
+  const { t } = useTranslation()
+  const navItems = [
+    { to: "/songs", icon: Music, label: t("nav.songs") },
+    { to: "/albums", icon: Disc2, label: t("nav.albums") },
+    { to: "/artists", icon: Mic2, label: t("nav.artists") },
+    { type: "divider" as const },
+    { to: "/playlists", icon: ListMusic, label: t("nav.playlists") },
+  ]
+  const navItemsAfter = [
+    { to: "/favorites", icon: Heart, label: t("nav.favorites") },
+    { to: "/history", icon: History, label: t("nav.history") },
+  ]
 
   useEffect(() => {
     if (plOpen) loadPlaylists()
@@ -125,7 +126,7 @@ function Sidebar() {
               inJukebox ? "bg-green-600/20 text-green-500" : "text-zinc-400 hover:text-white hover:bg-zinc-800"
             }`}>
             <Turntable className="w-4 h-4" />
-            <span className="flex-1">Jukeboxes</span>
+            <span className="flex-1">{t("nav.jukeboxes")}</span>
             {anyJukeboxPlaying && <div className="w-2 h-2 rounded-full bg-green-500 shrink-0" />}
             <ChevronRight onClick={e => { e.preventDefault(); e.stopPropagation(); setJbxOpen(!jbxOpen) }}
               className={`w-3.5 h-3.5 transition-transform ${jbxOpen ? "rotate-90" : ""}`} />
@@ -162,7 +163,7 @@ function Sidebar() {
             location.pathname === "/settings" ? "bg-green-600/20 text-green-500" : "text-zinc-400 hover:text-white hover:bg-zinc-800"
           }`}>
           <Settings className="w-4 h-4" />
-          Settings
+          {t("nav.settings")}
         </Link>
       </nav>
 
@@ -176,7 +177,7 @@ function Sidebar() {
               location.pathname === "/admin" ? "bg-green-600/20 text-green-500" : "text-zinc-400 hover:text-white hover:bg-zinc-800"
             }`}>
             <Shield className="w-4 h-4" />
-            Administration
+            {t("nav.administration")}
           </Link>
         )}
       </div>
@@ -190,12 +191,13 @@ function Sidebar() {
 }
 
 function LogoutButton() {
+  const { t } = useTranslation()
   const { logout, user } = useAuth()
   return (
     <button onClick={logout}
       className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left cursor-pointer text-zinc-400 hover:text-red-400 hover:bg-zinc-800">
       <LogOut className="w-4 h-4" />
-      {user?.username || "Sign out"}
+      {user?.username || t("nav.signOut")}
     </button>
   )
 }

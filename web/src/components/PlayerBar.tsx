@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { usePlayer, savePlayerState } from "../stores/player"
 import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
@@ -12,9 +13,9 @@ import { setMediaSessionMetadata, setMediaSessionPlaybackState, setMediaSessionP
 import { useMseAudio, streamInitUrl } from "../hooks/useMseAudio"
 
 const qualityOptions = [
-  { key: "standard", label: "SQ", title: "AAC 256k", desc: "Standard" },
-  { key: "high", label: "HQ", title: "AAC 320k", desc: "High" },
-  { key: "lossless", label: "LOS", title: "FLAC", desc: "Lossless" },
+  { key: "standard", labelKey: "player.qualityStandardShort" as const, titleKey: "player.qualityStandardDesc" as const, descKey: "player.qualityStandard" as const },
+  { key: "high", labelKey: "player.qualityHighShort" as const, titleKey: "player.qualityHighDesc" as const, descKey: "player.qualityHigh" as const },
+  { key: "lossless", labelKey: "player.qualityLosslessShort" as const, titleKey: "player.qualityLosslessDesc" as const, descKey: "player.qualityLossless" as const },
 ] as const
 
 function loadQuality(): string {
@@ -26,6 +27,8 @@ function saveQuality(q: string) {
 }
 
 export default function PlayerBar() {
+  const { t } = useTranslation()
+  const modeTitles: Record<string, string> = { normal: t("player.modeNormal"), all: t("player.modeRepeatAll"), one: t("player.modeRepeatOne"), shuffle: t("player.modeShuffle") }
   const ps = usePlayer()
   const { logout } = useAuth()
   const progressRef = useRef<HTMLDivElement>(null)
@@ -173,11 +176,11 @@ export default function PlayerBar() {
     if (!session && ps.track) {
       const tok = localStorage.getItem("token")
       if (tok) {
-        const msg = "Server updated: please sign in again to continue playing."
+        const msg = t("settings.serverUpdated")
         if (confirm(msg)) { logout(); window.location.href = "/login" }
       }
     }
-  }, [ps.track?.id])
+  }, [ps.track?.id, t])
 
   useEffect(() => {
     const el = audioRef.current
@@ -427,7 +430,7 @@ export default function PlayerBar() {
       {recovering && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-amber-600 text-white rounded-none shadow-2xl px-5 py-3 flex items-center gap-3 text-sm">
           <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin shrink-0" />
-          <span>Server or network error, retrying...</span>
+          <span>{t("player.recovering")}</span>
           <button onClick={stopPolling}
             className="bg-red-500 hover:bg-amber-700 text-white rounded w-6 h-6 flex items-center justify-center cursor-pointer shrink-0 transition-colors">
             &times;
@@ -487,7 +490,7 @@ export default function PlayerBar() {
                 <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 flex items-center justify-center">
                   <Music className="w-5 h-5 text-zinc-600" />
                 </div>
-                <div className="text-sm text-zinc-500">No track playing</div>
+                <div className="text-sm text-zinc-500">{t("player.noTrackPlaying")}</div>
               </>
             )}
           </div>
@@ -503,8 +506,8 @@ export default function PlayerBar() {
                   setShowQuality(!showQuality)
                 }}
                   className="text-[11px] font-semibold px-1.5 py-0.5 rounded text-zinc-400 hover:text-white cursor-pointer flex items-center gap-1 w-14 justify-center"
-                  title={currentQ.desc}>
-                  {qIcons[quality]}{currentQ.label}
+                  title={t(currentQ.descKey)}>
+                  {qIcons[quality]}{t(currentQ.labelKey)}
                 </button>
               </div>
               <button onClick={ps.prev} className="p-1 text-zinc-400 hover:text-white cursor-pointer">
@@ -521,15 +524,13 @@ export default function PlayerBar() {
                 {ps.track && (
                   <button onClick={toggleFav}
                     className={`p-1 cursor-pointer text-zinc-500 hover:text-red-400 ${fav ? "text-red-500" : ""}`}
-                    title={fav ? "Remove from favorites" : "Add to favorites"}>
+                    title={fav ? t("player.removeFromFavorites") : t("player.addToFavorites")}>
                     <Heart className={`w-5 h-5 ${fav ? "fill-red-500" : ""}`} />
                   </button>
                 )}
               </span>
               <button onClick={ps.cycleMode}
-                className="p-1 cursor-pointer relative group" title={
-                  ps.mode === "normal" ? "Normal" : ps.mode === "all" ? "Repeat all" : ps.mode === "one" ? "Repeat one" : "Shuffle"
-                }>
+                className="p-1 cursor-pointer relative group" title={modeTitles[ps.mode]}>
                 {ps.mode === "shuffle" ? (
                   <Shuffle className={`w-5 h-5 ${ps.mode === "shuffle" ? "text-green-500 group-hover:text-white" : "text-zinc-500 group-hover:text-white"}`} />
                 ) : ps.mode === "one" ? (
@@ -543,17 +544,17 @@ export default function PlayerBar() {
                   <>
                     <button onClick={() => setShowVersions(!showVersions)}
                       className="p-1 text-zinc-400 hover:text-white cursor-pointer flex items-center gap-0.5 whitespace-nowrap"
-                      title={track.version_label || "Versions"}>
+                      title={track.version_label || t("player.versions")}>
                       <FileMusic className="w-4 h-4" />V{track.version || 1}
                     </button>
                     {showVersions && (
                       <div className="absolute bottom-full right-0 mb-1 w-64 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-[60] py-1 max-h-72 overflow-y-auto">
-                        <p className="text-xs text-zinc-500 px-3 py-1.5">Select version</p>
+                        <p className="text-xs text-zinc-500 px-3 py-1.5">{t("player.selectVersion")}</p>
                         <div className="border-t border-zinc-700 pt-1">
                           <div className="w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 text-green-500">
                             <FileMusic className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="truncate">{track.version_label || track.suffix?.toUpperCase() + " · current"}</span>
-                            <span className="text-xs text-green-500 ml-auto shrink-0">current</span>
+                            <span className="truncate">{track.version_label || track.suffix?.toUpperCase() + " · " + t("player.current")}</span>
+                            <span className="text-xs text-green-500 ml-auto shrink-0">{t("player.current")}</span>
                           </div>
                           {track.versions!.filter(v => v.id !== track.id).map(v => (
                             <button key={v.id} onClick={() => switchVersion(v)}
@@ -591,7 +592,7 @@ export default function PlayerBar() {
               {track && (
                 <button onClick={() => setShowLyrics(!showLyrics)}
                   className={`p-1 cursor-pointer ${showLyrics ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
-                  title="Lyrics">
+                  title={t("player.lyrics")}>
                   <FileText className="w-4 h-4" />
                 </button>
               )}
@@ -600,7 +601,7 @@ export default function PlayerBar() {
               {isDesktopLyricsSupported() && (
                 <button onClick={toggleDesktopLyrics}
                   className={`p-1 cursor-pointer ${desktopLyricsOpen ? "text-green-500" : "text-zinc-400 hover:text-white"}`}
-                  title="Desktop Lyrics">
+                  title={t("player.desktopLyrics")}>
                   <PictureInPicture2 className="w-4 h-4" />
                 </button>
               )}
@@ -617,9 +618,9 @@ export default function PlayerBar() {
         {showQueue && (
           <div className="absolute bottom-full right-0 w-96 max-h-80 bg-zinc-900 border border-zinc-800 rounded-t-xl shadow-xl flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-              <span className="text-xs text-zinc-500">Queue ({ps.queue.length})</span>
+              <span className="text-xs text-zinc-500">{t("player.queue")} ({ps.queue.length})</span>
               <button onClick={ps.clearQueue}
-                className="p-1 rounded text-zinc-500 hover:text-red-400 cursor-pointer" title="Clear queue">
+                className="p-1 rounded text-zinc-500 hover:text-red-400 cursor-pointer" title={t("player.clearQueue")}>
                 <Trash2 className="w-3.5 h-3.5" />
             </button>
             </div>
@@ -647,7 +648,7 @@ export default function PlayerBar() {
                   </div>
                 )
               })}
-              {ps.queue.length === 0 && <p className="text-xs text-zinc-600 text-center py-4">Empty</p>}
+              {ps.queue.length === 0 && <p className="text-xs text-zinc-600 text-center py-4">{t("player.empty")}</p>}
             </div>
           </div>
         )}
@@ -658,7 +659,7 @@ export default function PlayerBar() {
               <button key={o.key}
                 onClick={() => { setShowQuality(false); setQuality(o.key); saveQuality(o.key) }}
                 className={`w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-700 cursor-pointer flex items-center gap-1.5 ${quality === o.key ? "text-green-500" : "text-zinc-400"}`}>
-                {qIcons[o.key]} {o.label} <span className="text-zinc-600 ml-1">{o.title}</span>
+                {qIcons[o.key]} {t(o.labelKey)} <span className="text-zinc-600 ml-1">{t(o.titleKey)}</span>
               </button>
             ))}
           </div>

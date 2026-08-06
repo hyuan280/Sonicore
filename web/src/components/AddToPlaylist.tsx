@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { api } from "../api/client"
 import { usePlayer } from "../stores/player"
 import { Plus, ListMusic, Check, Heart, ListPlus, FileMusic } from "lucide-react"
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function AddBtn({ trackId, onDone }: Props) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [playlists, setPlaylists] = useState<{ id: string; name: string; has: boolean }[]>([])
   const ref = useRef<HTMLDivElement>(null)
@@ -43,21 +45,21 @@ export function AddBtn({ trackId, onDone }: Props) {
   return (
     <div ref={ref} className="relative inline-flex">
         <button onClick={e => { e.stopPropagation(); setOpen(!open) }}
-          className="p-1 text-zinc-500 hover:text-green-500 cursor-pointer" title="Add to playlist">
+          className="p-1 text-zinc-500 hover:text-green-500 cursor-pointer" title={t("trackTable.addToPlaylist")}>
           <ListPlus className="w-4 h-4" />
         </button>
       {open && (
         <div className="absolute left-1/2 -translate-x-1/2 top-7 w-52 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-[60] py-1 max-h-48 overflow-y-auto"
           onClick={e => e.stopPropagation()}>
-          <p className="text-xs text-zinc-500 px-3 py-1.5">Add to playlist</p>
-          {playlists.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">No playlists yet</p>}
+          <p className="text-xs text-zinc-500 px-3 py-1.5">{t("trackTable.addToPlaylist")}</p>
+          {playlists.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">{t("trackTable.noPlaylistsYet")}</p>}
           {playlists.map(p => (
             <button key={p.id} onClick={() => !p.has && add(p.id)}
               className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 cursor-pointer ${p.has ? "text-zinc-600" : "hover:bg-zinc-700 text-zinc-300"}`}
               disabled={p.has}>
               {p.has ? <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> : <ListMusic className="w-3.5 h-3.5 flex-shrink-0" />}
               {p.name}
-              {p.has && <span className="text-xs text-zinc-600 ml-auto">added</span>}
+              {p.has && <span className="text-xs text-zinc-600 ml-auto">{t("trackTable.added")}</span>}
             </button>
           ))}
         </div>
@@ -73,6 +75,7 @@ interface FavProps {
 }
 
 export function FavBtn({ trackId, initiallyFav, onToggle }: FavProps) {
+  const { t } = useTranslation()
   const [fav, setFav] = useState(initiallyFav || false)
   useEffect(() => { setFav(initiallyFav || false) }, [initiallyFav, trackId])
 
@@ -91,7 +94,7 @@ export function FavBtn({ trackId, initiallyFav, onToggle }: FavProps) {
   return (
     <button onClick={toggle}
       className={`p-1 cursor-pointer text-zinc-500 hover:text-red-400`}
-      title={fav ? "Remove from favorites" : "Add to favorites"}>
+      title={fav ? t("player.removeFromFavorites") : t("player.addToFavorites")}>
       <Heart className={`w-4 h-4 ${fav ? "fill-current" : ""}`} />
     </button>
   )
@@ -103,6 +106,7 @@ interface AddQueueProps {
 }
 
 export function AddQueueBtn({ track, versions }: AddQueueProps) {
+  const { t } = useTranslation()
   const ps = usePlayer()
   const [open, setOpen] = useState(false)
   const [flipUp, setFlipUp] = useState(false)
@@ -152,20 +156,20 @@ export function AddQueueBtn({ track, versions }: AddQueueProps) {
     <div ref={ref} className="relative inline-flex">
       <button onClick={handleClick}
         className={`p-1 cursor-pointer transition-colors ${open ? "text-blue-400" : "text-zinc-500 hover:text-blue-400"}`}
-        title={hasVersions ? "Select version to add" : "Add to queue"}>
+        title={hasVersions ? t("player.selectVersionToAdd") : t("player.addToQueue")}>
         <Plus className="w-4 h-4" />
       </button>
       {open && hasVersions && (
         <div
           className={`absolute left-1/2 -translate-x-1/2 ${posClass} w-64 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-[60] py-1 max-h-72 overflow-y-auto`}
           onClick={e => e.stopPropagation()}>
-          <p className="text-xs text-zinc-500 px-3 py-1.5">Select version</p>
+          <p className="text-xs text-zinc-500 px-3 py-1.5">{t("player.selectVersion")}</p>
           <div className="border-t border-zinc-700 pt-1">
             <button onClick={() => addTrack(track.id, track.title, track.duration, trackSuffix)}
               className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-700 cursor-pointer flex items-center gap-2">
               <FileMusic className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
               <span className="text-zinc-200">{trackSuffix.toUpperCase()} · {track.title.slice(0, 15)}</span>
-              <span className="text-xs text-green-500 ml-auto">current</span>
+              <span className="text-xs text-green-500 ml-auto">{t("player.current")}</span>
             </button>
             {versions.map(v => (
               <button key={v.id} onClick={() => addTrack(v.id, track.title, v.duration, v.suffix, v.version_label)}

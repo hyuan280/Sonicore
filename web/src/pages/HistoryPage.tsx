@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { api } from "../api/client"
 import { Button } from "../components/ui/button"
@@ -7,6 +8,7 @@ import TrackTable, { type TrackRow } from "../components/TrackTable"
 import { usePerPage } from "../hooks/usePerPage"
 
 export default function HistoryPage() {
+  const { t } = useTranslation()
   const player = usePlayer()
   const [records, setRecords] = useState<any[]>([])
   const [page, setPage] = useState(1)
@@ -42,7 +44,7 @@ export default function HistoryPage() {
   const tracks: TrackRow[] = records.map(h => ({
     id: h.id,
     trackId: h.track_id,
-    title: h.title || "Unknown",
+    title: h.title || t("common.unknown"),
     duration: h.duration || 0,
     suffix: h.suffix || "mp3",
     cover_image_id: h.cover_image_id,
@@ -53,7 +55,7 @@ export default function HistoryPage() {
 
   const playAll = () => {
     const ptracks: PlayerTrack[] = records.map(h => ({
-      id: h.track_id, title: h.title || "Unknown", duration: h.duration || 0,
+      id: h.track_id, title: h.title || t("common.unknown"), duration: h.duration || 0,
       suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id,
       albums: h.albums,
     }))
@@ -62,7 +64,7 @@ export default function HistoryPage() {
 
   const playTrack = (h: any) => {
     const track: PlayerTrack = {
-      id: h.track_id, title: h.title || "Unknown", duration: h.duration || 0,
+      id: h.track_id, title: h.title || t("common.unknown"), duration: h.duration || 0,
       suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id,
       artists: h.artists, albums: h.albums,
     }
@@ -83,7 +85,7 @@ export default function HistoryPage() {
   }
 
   const batchDelete = async () => {
-    if (!confirm(`Remove ${selected.size} history entr${selected.size > 1 ? "ies" : "y"}?`)) return
+    if (!confirm(t("history.removeEntries", { count: selected.size }))) return
     await api.user.deleteHistoryItems([...selected])
     setRecords(prev => prev.filter(h => !selected.has(h.id)))
     setSelected(new Set())
@@ -109,7 +111,7 @@ export default function HistoryPage() {
         extraBulkActions={
           <button onClick={batchDelete}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-red-400 cursor-pointer">
-            <Trash2 className="w-4 h-4" /> Delete
+            <Trash2 className="w-4 h-4" /> {t("trackTable.delete")}
           </button>
         }
         onPlay={(i) => {
@@ -117,9 +119,9 @@ export default function HistoryPage() {
           if (h) playTrack(h)
         }}
         currentTrackId={player.track?.id ?? null}
-        extraColumnHeader="Played At"
-        extraColumn={(t) => {
-          const h = records.find(r => r.id === t.id)
+        extraColumnHeader={t("trackTable.playedAt")}
+        extraColumn={(row) => {
+          const h = records.find(r => r.id === row.id)
           if (!h?.played_at) return null
           return (
             <span className="leading-tight">
@@ -135,16 +137,16 @@ export default function HistoryPage() {
             <Trash2 className="w-4 h-4" />
           </button>
         )}
-        emptyText="No listening history yet"
+        emptyText={t("trackTable.noHistoryYet")}
         header={
           <div className="relative flex items-center">
             <div className="shrink-0">
-              <h1 className="text-2xl font-bold">History</h1>
+              <h1 className="text-2xl font-bold">{t("nav.history")}</h1>
             </div>
             <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
               <input
                 type="text"
-                placeholder="Search history..."
+                placeholder={t("search.searchHistory")}
                 value={searchQ}
                 onChange={e => { setSearchQ(e.target.value); setPage(1) }}
                 className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -158,7 +160,7 @@ export default function HistoryPage() {
             </div>
             <div className="flex-1" />
             {records.length > 0 && (
-              <Button size="sm" onClick={playAll}><Play className="w-4 h-4 mr-1" />Play All</Button>
+              <Button size="sm" onClick={playAll}><Play className="w-4 h-4 mr-1" />{t("player.playAll")}</Button>
             )}
           </div>
         }

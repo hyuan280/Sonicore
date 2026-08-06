@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { api } from "../api/client"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { Button } from "../components/ui/button"
@@ -7,6 +8,7 @@ import TrackTable, { type TrackRow } from "../components/TrackTable"
 import { usePerPage } from "../hooks/usePerPage"
 
 export default function FavoritesPage() {
+  const { t } = useTranslation()
   const player = usePlayer()
   const [records, setRecords] = useState<any[]>([])
   const [page, setPage] = useState(1)
@@ -35,7 +37,7 @@ export default function FavoritesPage() {
   }, [searchQ])
 
   const tracks: TrackRow[] = records.map(h => ({
-    id: h.item_id, title: h.title || "Unknown", duration: h.duration || 0,
+    id: h.item_id, title: h.title || t("common.unknown"), duration: h.duration || 0,
     suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id,
     artists: h.artists, albums: h.albums, versions: h.versions,
   }))
@@ -46,7 +48,7 @@ export default function FavoritesPage() {
 
   const playAll = () => {
     const ptracks: PlayerTrack[] = records.map(h => ({
-      id: h.item_id, title: h.title || "Unknown", duration: h.duration || 0,
+      id: h.item_id, title: h.title || t("common.unknown"), duration: h.duration || 0,
       suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id,
       artists: h.artists, albums: h.albums,
     }))
@@ -55,7 +57,7 @@ export default function FavoritesPage() {
 
   const playTrack = (h: any) => {
     const track: PlayerTrack = {
-      id: h.item_id, title: h.title || "Unknown", duration: h.duration || 0,
+      id: h.item_id, title: h.title || t("common.unknown"), duration: h.duration || 0,
       suffix: h.suffix || "mp3", cover_image_id: h.cover_image_id,
       artists: h.artists, albums: h.albums,
     }
@@ -95,12 +97,12 @@ export default function FavoritesPage() {
         header={
           <div className="relative flex items-center">
             <div className="shrink-0">
-              <h1 className="text-2xl font-bold">Favorites</h1>
+              <h1 className="text-2xl font-bold">{t("nav.favorites")}</h1>
             </div>
             <div className="absolute left-1/2 -translate-x-1/2 w-full max-w-[60%] min-w-[200px] px-4">
               <input
                 type="text"
-                placeholder="Search favorites..."
+                placeholder={t("search.searchFavorites")}
                 value={searchQ}
                 onChange={e => { setSearchQ(e.target.value); setPage(1) }}
                 className="w-full px-3 py-1.5 pr-8 text-sm bg-zinc-800 text-zinc-300 border-none outline-none placeholder-zinc-500"
@@ -114,11 +116,11 @@ export default function FavoritesPage() {
             </div>
             <div className="flex-1" />
             {records.length > 0 && (
-              <Button size="sm" onClick={playAll}><Play className="w-4 h-4 mr-1" />Play All</Button>
+              <Button size="sm" onClick={playAll}><Play className="w-4 h-4 mr-1" />{t("player.playAll")}</Button>
             )}
           </div>
         }
-        emptyText="No favorites yet"
+        emptyText={t("trackTable.noFavoritesYet")}
       />
     </div>
   )

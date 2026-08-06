@@ -1,4 +1,5 @@
 import { usePlayer } from "../stores/player"
+import { useTranslation } from "react-i18next"
 import { Button } from "../components/ui/button"
 import { SkipForward, Music, Play } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -6,22 +7,25 @@ import { formatDuration, performerNames, coverUrl } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
 export default function PlayerPage() {
+  const { t } = useTranslation()
   const ps = usePlayer()
+
+  const modeLabels: Record<"normal" | "all" | "one" | "shuffle", string> = { normal: t("player.modeNormal"), all: t("player.modeRepeatAll"), one: t("player.modeRepeatOne"), shuffle: t("player.modeShuffle") }
 
   return (
     <div className="p-6 space-y-6 pb-24">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Player Queue</h1>
+        <h1 className="text-2xl font-bold">{t("player.playerQueue")}</h1>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={ps.clearQueue}>Clear</Button>
+          <Button variant="ghost" size="sm" onClick={ps.clearQueue}>{t("player.clear")}</Button>
         </div>
       </div>
 
       <div className="space-y-1">
         <div className="flex items-center text-xs text-zinc-500 px-4 py-2 border-b border-zinc-800">
-          <span className="w-8">#</span>
-          <span className="flex-1">Title</span>
-          <span className="w-16 text-right">Duration</span>
+          <span className="w-8">{t("trackTable.number")}</span>
+          <span className="flex-1">{t("player.title")}</span>
+          <span className="w-16 text-right">{t("player.duration")}</span>
         </div>
         {ps.queue.map((t, i) => {
           return (
@@ -49,14 +53,14 @@ export default function PlayerPage() {
             </div>
           )
         })}
-        {ps.queue.length === 0 && <p className="text-zinc-500 text-center py-12">Queue is empty</p>}
+        {ps.queue.length === 0 && <p className="text-zinc-500 text-center py-12">{t("player.queueIsEmpty")}</p>}
       </div>
 
       <div className="flex gap-2 items-center">
-        <span className="text-sm text-zinc-400">Loop:</span>
+        <span className="text-sm text-zinc-400">{t("player.loopLabel")}</span>
           {(["normal", "all", "one", "shuffle"] as const).map(m => (
             <Button key={m} variant={ps.mode === m ? "primary" : "ghost"} size="sm" onClick={() => ps.cycleMode()}>
-              {m === "normal" ? "Normal" : m === "all" ? "All" : m === "one" ? "One" : "Shuffle"}
+              {modeLabels[m]}
           </Button>
         ))}
       </div>

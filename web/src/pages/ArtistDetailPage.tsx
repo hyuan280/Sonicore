@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { useParams, Link } from "react-router-dom"
 import { api } from "../api/client"
 import { usePlayer, type PlayerTrack } from "../stores/player"
@@ -23,6 +24,7 @@ interface RawTrack {
 }
 
 export default function ArtistDetailPage() {
+  const { t } = useTranslation()
   const { artistId } = useParams()
   const player = usePlayer()
   const [artist, setArtist] = useState<any>(null)
@@ -64,7 +66,7 @@ export default function ArtistDetailPage() {
     setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
 
-  if (!artist) return <div className="p-6 text-zinc-500">Loading...</div>
+  if (!artist) return <div className="p-6 text-zinc-500">{t("common.loading")}</div>
 
   return (
     <div>
@@ -83,7 +85,7 @@ export default function ArtistDetailPage() {
               <Mic2 className={`w-12 h-12 text-zinc-500 ${artist.cover_image_id ? "hidden" : ""}`} />
             </div>
             <div className="flex flex-col justify-end">
-              <p className="text-xs uppercase tracking-wider text-zinc-400">Artist</p>
+              <p className="text-xs uppercase tracking-wider text-zinc-400">{t("artist.label")}</p>
               <h1 className="text-3xl font-bold mt-1">{artist.name}</h1>
               <p className="text-sm text-zinc-500 mt-1">
                 {artist.country ? `${artist.country} · ` : ""}
@@ -92,7 +94,7 @@ export default function ArtistDetailPage() {
               </p>
               <button className="mt-4 w-fit px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-500 cursor-pointer flex items-center gap-2"
                 onClick={() => { if (allPlayerTracks.length > 0) player.setQueue(allPlayerTracks, 0) }}>
-                <Play className="w-4 h-4" />Play All
+                <Play className="w-4 h-4" />{t("player.playAll")}
               </button>
             </div>
           </div>
@@ -109,7 +111,7 @@ export default function ArtistDetailPage() {
           if (i >= 0 && i < allPlayerTracks.length) player.setQueue(allPlayerTracks, i)
         }}
         currentTrackId={player.track?.id ?? null}
-        emptyText="No tracks for this artist"
+        emptyText={t("trackTable.noTracksArtist")}
       />
     </div>
   )
