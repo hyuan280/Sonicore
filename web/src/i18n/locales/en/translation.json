@@ -9,7 +9,8 @@
     "history": "History",
     "settings": "Settings",
     "administration": "Administration",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "discover": "Discover"
   },
   "auth": {
     "signIn": "Sign In",
@@ -403,6 +404,24 @@
       "OUT_OF_RANGE": "Out of range",
       "STREAM_TRACK_NOT_FOUND": "Track not found",
       "STREAM_FORBIDDEN": "Forbidden"
+    },
+    "platform": {
+      "UNKNOWN_PLATFORM": "Unknown platform",
+      "INVALID_PLATFORM_ID": "Invalid resource id",
+      "UNSUPPORTED_SEARCH_TYPE": "Unsupported search type",
+      "PLATFORM_UPSTREAM_ERROR": "The platform service is temporarily unavailable. Please try again later."
     }
+  },
+  "discover": {
+    "noPlatform": "No music platforms enabled. Enable one in the config file (e.g. platforms.netease.enabled = true).",
+    "searchPlaceholder": "Search songs, artists...",
+    "noCharts": "No charts available",
+    "searchHint": "Search for songs or artists on the platform",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "noLyrics": "No lyrics available",
+    "loadError": "Failed to load. Please try again.",
+    "clearSearch": "Clear search",
+    "search": "Search"
   }
 }

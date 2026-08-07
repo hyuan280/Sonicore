@@ -57,6 +57,16 @@ refresh_expiration = "720h"
 # musicbrainz_api_url = "https://musicbrainz.org/ws/2"
 # musicbrainz_rate_limit = 1
 
+[platforms]
+# 外部音乐平台（榜单/搜索/详情）。当前仅支持网易云音乐。
+# 两种启用方式：在 enabled 中列出，或设置对应平台的 enabled = true
+# enabled = ["netease"]
+
+[platforms.netease]
+enabled = false
+# 可选：登录后导出的 Cookie（含 MUSIC_U/MUSIC_A）。留空则使用匿名访问。
+# cookie = ""
+
 [log]
 level = "info"
 format = "console"

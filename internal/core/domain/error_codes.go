@@ -127,6 +127,15 @@ const (
 	ErrStreamOutOfRange      ErrorCode = 607
 )
 
+// ---- platform (700-799) ----
+
+const (
+	ErrPlatUnknownPlatform  ErrorCode = 700
+	ErrPlatInvalidID        ErrorCode = 701
+	ErrPlatUnsupportedType  ErrorCode = 702
+	ErrPlatUpstream         ErrorCode = 703
+)
+
 // Category returns the category label for the error code's range.
 func (c ErrorCode) Category() string {
 	switch {
@@ -144,6 +153,8 @@ func (c ErrorCode) Category() string {
 		return "jukebox"
 	case c >= 600 && c <= 699:
 		return "stream"
+	case c >= 700 && c <= 799:
+		return "platform"
 	default:
 		return "common"
 	}
@@ -246,6 +257,10 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrStreamTranscodeTimeout:    "TRANSCODE_TIMEOUT",
 	ErrStreamMSEUnavailable:      "MSE_UNAVAILABLE",
 	ErrStreamOutOfRange:          "OUT_OF_RANGE",
+	ErrPlatUnknownPlatform:       "UNKNOWN_PLATFORM",
+	ErrPlatInvalidID:             "INVALID_PLATFORM_ID",
+	ErrPlatUnsupportedType:       "UNSUPPORTED_SEARCH_TYPE",
+	ErrPlatUpstream:              "PLATFORM_UPSTREAM_ERROR",
 }
 
 // errorCodeMessages maps each code to its default English fallback message.
@@ -328,4 +343,8 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrStreamTranscodeTimeout:    "Transcode timeout",
 	ErrStreamMSEUnavailable:      "MSE unavailable",
 	ErrStreamOutOfRange:          "Out of range",
+	ErrPlatUnknownPlatform:       "Unknown platform",
+	ErrPlatInvalidID:             "Invalid resource id",
+	ErrPlatUnsupportedType:       "Unsupported search type",
+	ErrPlatUpstream:              "Upstream platform error",
 }

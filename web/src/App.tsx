@@ -10,7 +10,7 @@ import { api } from "./api/client"
 import { APP_VERSION } from "./lib/constants"
 import {
   Turntable, Music, Disc2, Mic2, ListMusic, Heart, History, Settings, LogOut, Shield,
-  ChevronRight,
+  ChevronRight, Compass,
 } from "lucide-react"
 import i18n from "./i18n"
 import Logo from "./components/Logo"
@@ -73,6 +73,11 @@ const JukeboxDetailPage = lazy(() => import("./pages/JukeboxDetailPage"))
 const PlaylistDetailPage = lazy(() => import("./pages/PlaylistDetailPage"))
 const SettingsPage = lazy(() => import("./pages/SettingsPage"))
 const AdminPage = lazy(() => import("./pages/AdminPage"))
+const DiscoverPage = lazy(() => import("./pages/DiscoverPage"))
+const DiscoverChartPage = lazy(() => import("./pages/DiscoverChartPage"))
+const DiscoverSearchPage = lazy(() => import("./pages/DiscoverSearchPage"))
+const DiscoverArtistPage = lazy(() => import("./pages/DiscoverArtistPage"))
+const DiscoverTrackPage = lazy(() => import("./pages/DiscoverTrackPage"))
 
 
 
@@ -189,6 +194,15 @@ function Sidebar() {
             </div>
           )}
         </div>
+
+        <div className="border-t border-zinc-800 my-2" />
+        <Link to="/discover"
+          className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+            location.pathname.startsWith("/discover") ? "bg-green-600/20 text-green-500" : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+          }`}>
+          <Compass className="w-4 h-4" />
+          {t("nav.discover")}
+        </Link>
 
         <div className="border-t border-zinc-800 my-2" />
         {navItemsAfter.map((item) => (
@@ -313,6 +327,11 @@ export default function App() {
         <Route path="playlists/:id" element={<PlaylistDetailPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="history" element={<HistoryPage />} />
+        <Route path="discover" element={<DiscoverPage />} />
+        <Route path="discover/charts/:platform/:chartId" element={<DiscoverChartPage />} />
+        <Route path="discover/search/:platform" element={<DiscoverSearchPage />} />
+        <Route path="discover/artists/:platform/:artistId" element={<DiscoverArtistPage />} />
+        <Route path="discover/tracks/:platform/:trackId" element={<DiscoverTrackPage />} />
         <Route path="jukebox" element={<JukeboxPage />} />
         <Route path="jukebox/:id" element={<JukeboxDetailPage />} />
         <Route path="player" element={<PlayerPage />} />

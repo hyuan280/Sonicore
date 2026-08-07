@@ -17,6 +17,18 @@ type Config struct {
 	Log      LogConfig      `mapstructure:"log"`
 	Audio    AudioConfig    `mapstructure:"audio"`
 	Metadata MetadataConfig `mapstructure:"metadata"`
+	Platforms PlatformsConfig `mapstructure:"platforms"`
+}
+
+// PlatformsConfig controls external music platform integration.
+type PlatformsConfig struct {
+	Enabled []string             `mapstructure:"enabled"`
+	Netease NeteasePlatformConfig `mapstructure:"netease"`
+}
+
+type NeteasePlatformConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Cookie  string `mapstructure:"cookie"`
 }
 
 type MetadataConfig struct {
@@ -127,6 +139,10 @@ func Load() *Config {
 	v.SetDefault("metadata.musicbrainz_rate_limit", 1)
 	v.SetDefault("metadata.musicbrainz_app_name", "Sonicore")
 	v.SetDefault("metadata.musicbrainz_app_version", "0.1.0")
+
+	v.SetDefault("platforms.enabled", []string{})
+	v.SetDefault("platforms.netease.enabled", false)
+	v.SetDefault("platforms.netease.cookie", "")
 
 	v.AutomaticEnv()
 	v.SetEnvPrefix("SONICORE")

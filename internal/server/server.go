@@ -18,10 +18,12 @@ import (
 	"github.com/sonicore/server/internal/api/subsonic"
 	"github.com/sonicore/server/internal/api/ws"
 	"github.com/sonicore/server/internal/config"
+	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/download"
+	"github.com/sonicore/server/internal/infrastructure/external/netease"
 	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
@@ -91,9 +93,11 @@ func New(cfg *config.Config) (*Server, error) {
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
+	platformProviders := buildPlatformProviders(cfg)
+
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -113,7 +117,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -233,6 +237,20 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/libraries/{id}/downloads/{jobId}", downloadHandler.Get).Methods("GET")
 	protected.HandleFunc("/libraries/{id}/downloads/{jobId}", downloadHandler.Cancel).Methods("DELETE")
 
+	// External music platforms (charts, search, details). /plat/list is
+	// always registered so the frontend can distinguish "no platform
+	// enabled" from a broken proxy.
+	platformHandler := rest.NewPlatformHandler(platformProviders)
+	protected.HandleFunc("/plat/list", platformHandler.List).Methods("GET")
+	if len(platformProviders) > 0 {
+		protected.HandleFunc("/plat/{name}/charts", platformHandler.ListCharts).Methods("GET")
+		protected.HandleFunc("/plat/{name}/charts/{id}", platformHandler.GetChart).Methods("GET")
+		protected.HandleFunc("/plat/{name}/search", platformHandler.Search).Methods("GET")
+		protected.HandleFunc("/plat/{name}/tracks/{id}", platformHandler.GetTrack).Methods("GET")
+		protected.HandleFunc("/plat/{name}/artists/{id}", platformHandler.GetArtist).Methods("GET")
+		protected.HandleFunc("/plat/{name}/artists/{id}/tracks", platformHandler.GetArtistTracks).Methods("GET")
+	}
+
 	// Jukebox
 	jukeboxHandler := rest.NewJukeboxHandler(db, engineManager, wsHub)
 	jukebox := r.PathPrefix("/api/jukeboxes").Subrouter()
@@ -299,6 +317,30 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, distDir+"/index.html")
 	})
+}
+
+// buildPlatformProviders instantiates the enabled external music platforms.
+func buildPlatformProviders(cfg *config.Config) map[string]port.PlatformProvider {
+	providers := map[string]port.PlatformProvider{}
+
+	enabled := map[string]bool{}
+	for _, name := range cfg.Platforms.Enabled {
+		enabled[name] = true
+	}
+	if cfg.Platforms.Netease.Enabled {
+		enabled["netease"] = true
+	}
+
+	if enabled["netease"] {
+		client := netease.NewClient()
+		if cfg.Platforms.Netease.Cookie != "" {
+			client.SetCookie(cfg.Platforms.Netease.Cookie)
+		}
+		providers["netease"] = netease.NewProvider(client)
+		log.Println("[platform] enabled: netease")
+	}
+
+	return providers
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

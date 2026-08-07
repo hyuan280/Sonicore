@@ -11,6 +11,7 @@ import type { TFunction } from "i18next"
 // 400 – 499  metadata
 // 500 – 599  jukebox
 // 600 – 699  stream
+// 700 – 799  platform
 
 export const ERROR_CODES = {
   // ---- common (1-99) ----
@@ -104,6 +105,12 @@ export const ERROR_CODES = {
   TRANSCODE_TIMEOUT: 605,
   MSE_UNAVAILABLE: 606,
   OUT_OF_RANGE: 607,
+
+  // ---- platform (700-799) ----
+  UNKNOWN_PLATFORM: 700,
+  INVALID_PLATFORM_ID: 701,
+  UNSUPPORTED_SEARCH_TYPE: 702,
+  PLATFORM_UPSTREAM_ERROR: 703,
 } as const
 
 const CODE_TO_I18N_KEY: Record<number, string> = {}
@@ -121,6 +128,7 @@ function getCategory(code: number): string {
   if (code <= 499) return "metadata"
   if (code <= 599) return "jukebox"
   if (code <= 699) return "stream"
+  if (code <= 799) return "platform"
   return "common"
 }
 

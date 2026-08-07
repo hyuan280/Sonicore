@@ -9,7 +9,8 @@
     "history": "历史",
     "settings": "设置",
     "administration": "管理",
-    "signOut": "退出登录"
+    "signOut": "退出登录",
+    "discover": "发现"
   },
   "auth": {
     "signIn": "登录",
@@ -403,6 +404,24 @@
       "OUT_OF_RANGE": "超出范围",
       "STREAM_TRACK_NOT_FOUND": "曲目不存在",
       "STREAM_FORBIDDEN": "禁止访问"
+    },
+    "platform": {
+      "UNKNOWN_PLATFORM": "未知平台",
+      "INVALID_PLATFORM_ID": "无效的资源 ID",
+      "UNSUPPORTED_SEARCH_TYPE": "不支持的搜索类型",
+      "PLATFORM_UPSTREAM_ERROR": "平台服务暂时不可用，请稍后重试。"
     }
+  },
+  "discover": {
+    "noPlatform": "未启用音乐平台，请在配置文件中启用（如 platforms.netease.enabled = true）。",
+    "searchPlaceholder": "搜索歌曲、艺术家...",
+    "noCharts": "暂无榜单",
+    "searchHint": "在平台上搜索歌曲或艺术家",
+    "expand": "展开",
+    "collapse": "收起",
+    "noLyrics": "暂无歌词",
+    "loadError": "加载失败，请重试。",
+    "clearSearch": "清空搜索",
+    "search": "搜索"
   }
 }

@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* right-leaning parallelogram tab shape */
+@utility clip-plat {
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+}
+
+/* fully hidden scrollbar (overrides the global *::-webkit-scrollbar rule) */
+.no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+
 :root {
   --bg: #0a0a0a;
   --fg: #fafafa;

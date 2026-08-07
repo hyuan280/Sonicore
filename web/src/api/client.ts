@@ -157,4 +157,16 @@ export const api = {
     deleteDeviceConfig: (id: string) =>
       request(`/api/audio/device/configs/${id}`, { method: "DELETE" }),
   },
+  platform: {
+    list: () => request("/api/plat/list"),
+    charts: (name: string) => request(`/api/plat/${encodeURIComponent(name)}/charts`),
+    chart: (name: string, id: string, page = 1, limit = 30) =>
+      request(`/api/plat/${encodeURIComponent(name)}/charts/${encodeURIComponent(id)}?page=${page}&limit=${limit}`),
+    search: (name: string, q: string, type = "track", page = 1, limit = 30) =>
+      request(`/api/plat/${encodeURIComponent(name)}/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&page=${page}&limit=${limit}`),
+    track: (name: string, id: string) => request(`/api/plat/${encodeURIComponent(name)}/tracks/${encodeURIComponent(id)}`),
+    artist: (name: string, id: string) => request(`/api/plat/${encodeURIComponent(name)}/artists/${encodeURIComponent(id)}`),
+    artistTracks: (name: string, id: string, page = 1, limit = 30) =>
+      request(`/api/plat/${encodeURIComponent(name)}/artists/${encodeURIComponent(id)}/tracks?page=${page}&limit=${limit}`),
+  },
 }
