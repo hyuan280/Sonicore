@@ -2,6 +2,15 @@ import { create } from "zustand"
 import type { User, Role } from "../types"
 import { api } from "../api/client"
 
+function clearAuthStorage() {
+  localStorage.removeItem("token")
+  localStorage.removeItem("refresh_token")
+  localStorage.removeItem("session_token")
+  localStorage.removeItem("role")
+  localStorage.removeItem("playerState")
+  localStorage.removeItem("playerQueue")
+}
+
 interface AuthState {
   user: User | null; token: string | null; loading: boolean
   allowRegistration: boolean
@@ -36,7 +45,7 @@ export const useAuth = create<AuthState>((set) => ({
 
   logout: async () => {
     await api.auth.logout().catch(() => {})
-    localStorage.clear()
+    clearAuthStorage()
     set({ user: null, token: null })
   },
 
@@ -46,7 +55,7 @@ export const useAuth = create<AuthState>((set) => ({
       localStorage.setItem("role", u.role)
       set({ user: u })
     } catch {
-      localStorage.clear()
+      clearAuthStorage()
       set({ user: null, token: null })
     }
   },

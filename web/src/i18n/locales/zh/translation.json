@@ -307,7 +307,9 @@
     "close": "关闭",
     "remove": "移除",
     "clear": "清空",
-    "unknown": "未知错误"
+    "unknown": "未知错误",
+    "errorLoadingPage": "加载页面时出错。",
+    "retry": "重试"
   },
   "errors": {
     "common": {

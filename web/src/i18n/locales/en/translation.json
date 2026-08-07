@@ -307,7 +307,9 @@
     "close": "Close",
     "remove": "Remove",
     "clear": "Clear",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "errorLoadingPage": "Something went wrong loading this page.",
+    "retry": "Retry"
   },
   "errors": {
     "common": {

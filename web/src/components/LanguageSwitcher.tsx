@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Globe, ChevronDown } from "lucide-react"
+import { switchLanguage } from "../i18n"
 
 const LANGUAGES = { en: "English", zh: "中文" } as const
 
@@ -18,7 +19,7 @@ export default function LanguageSwitcher() {
     return () => document.removeEventListener("mousedown", handler)
   }, [open])
 
-  const current = i18n.resolvedLanguage as keyof typeof LANGUAGES | undefined
+  const current = (i18n.language?.split("-")[0]) as keyof typeof LANGUAGES | undefined
 
   return (
     <div ref={ref} className="relative">
@@ -34,7 +35,7 @@ export default function LanguageSwitcher() {
           {(Object.keys(LANGUAGES) as (keyof typeof LANGUAGES)[]).map((lang) => (
             <button key={lang}
             onClick={async () => {
-              try { await i18n.changeLanguage(lang) } catch (e) { console.error("Failed to switch language", e) }
+              try { await switchLanguage(lang) } catch (e) { console.error("Failed to switch language", e) }
               setOpen(false)
             }}
               className={`w-full text-left px-4 py-2 text-sm cursor-pointer transition-colors ${

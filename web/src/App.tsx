@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { Component, lazy, type ReactNode, Suspense, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Routes, Route, Navigate, Link, useLocation, Outlet } from "react-router-dom"
 import { useAuth } from "./stores/auth"
@@ -12,24 +12,68 @@ import {
   Turntable, Music, Disc2, Mic2, ListMusic, Heart, History, Settings, LogOut, Shield,
   ChevronRight,
 } from "lucide-react"
-import LoginPage from "./pages/LoginPage"
+import i18n from "./i18n"
 import Logo from "./components/Logo"
-import SongsPage from "./pages/SongsPage"
-import AlbumsPage from "./pages/AlbumsPage"
-import AlbumDetailPage from "./pages/AlbumDetailPage"
-import ArtistsPage from "./pages/ArtistsPage"
-import ArtistDetailPage from "./pages/ArtistDetailPage"
-import PlaylistsPage from "./pages/PlaylistsPage"
-import FavoritesPage from "./pages/FavoritesPage"
-import HistoryPage from "./pages/HistoryPage"
-import PlayerPage from "./pages/PlayerPage"
-import JukeboxPage from "./pages/JukeboxPage"
-import JukeboxDetailPage from "./pages/JukeboxDetailPage"
-import PlaylistDetailPage from "./pages/PlaylistDetailPage"
 import PlayerBar from "./components/PlayerBar"
 import { restorePlayerState } from "./stores/player"
-import SettingsPage from "./pages/SettingsPage"
-import AdminPage from "./pages/AdminPage"
+
+const pageFallback = (
+  <div className="flex items-center justify-center h-full">
+    <div className="animate-spin rounded-full h-8 w-8 border-2 border-zinc-700 border-t-green-500" />
+  </div>
+)
+
+const PageSuspense = ({ children }: { children: ReactNode }) => (
+  <Suspense fallback={pageFallback}>{children}</Suspense>
+)
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+  componentDidCatch(error: Error) {
+    console.error("Page error:", error)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center space-y-3">
+            <p className="text-zinc-400">{i18n.t("common.errorLoadingPage")}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm hover:bg-green-500 transition-colors cursor-pointer"
+            >
+              {i18n.t("common.retry")}
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+const LoginPage = lazy(() => import("./pages/LoginPage"))
+const SongsPage = lazy(() => import("./pages/SongsPage"))
+const AlbumsPage = lazy(() => import("./pages/AlbumsPage"))
+const AlbumDetailPage = lazy(() => import("./pages/AlbumDetailPage"))
+const ArtistsPage = lazy(() => import("./pages/ArtistsPage"))
+const ArtistDetailPage = lazy(() => import("./pages/ArtistDetailPage"))
+const PlaylistsPage = lazy(() => import("./pages/PlaylistsPage"))
+const FavoritesPage = lazy(() => import("./pages/FavoritesPage"))
+const HistoryPage = lazy(() => import("./pages/HistoryPage"))
+const PlayerPage = lazy(() => import("./pages/PlayerPage"))
+const JukeboxPage = lazy(() => import("./pages/JukeboxPage"))
+const JukeboxDetailPage = lazy(() => import("./pages/JukeboxDetailPage"))
+const PlaylistDetailPage = lazy(() => import("./pages/PlaylistDetailPage"))
+const SettingsPage = lazy(() => import("./pages/SettingsPage"))
+const AdminPage = lazy(() => import("./pages/AdminPage"))
+
 
 
 function Sidebar() {
@@ -203,11 +247,18 @@ function LogoutButton() {
 }
 
 function Layout() {
+  const location = useLocation()
   return (
     <div className="h-screen flex flex-col bg-black">
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto pb-16"><Outlet /></main>
+        <main className="flex-1 overflow-y-auto pb-16">
+          <ErrorBoundary key={location.pathname}>
+            <PageSuspense>
+              <Outlet />
+            </PageSuspense>
+          </ErrorBoundary>
+        </main>
       </div>
       <PlayerBar />
     </div>
@@ -248,7 +299,9 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={token ? <Navigate to={hasLibraries ? "/songs" : "/settings"} replace /> : <LoginPage />} />
+      <Route path="/login" element={
+        token ? <Navigate to={hasLibraries ? "/songs" : "/settings"} replace /> : <ErrorBoundary><PageSuspense><LoginPage /></PageSuspense></ErrorBoundary>
+      } />
       <Route path="/" element={token ? <Layout /> : <Navigate to="/login" replace />}>
         <Route index element={<Navigate to="/songs" replace />} />
         <Route path="songs" element={<SongsPage />} />
