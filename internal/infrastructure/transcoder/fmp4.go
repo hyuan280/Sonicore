@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -359,6 +360,7 @@ func serveMseInit(ctx context.Context, w http.ResponseWriter, cPath, filePath st
 				if _, rerr := f.ReadAt(buf, 0); rerr == nil || rerr == io.EOF {
 					f.Close()
 					w.Header().Set("Content-Type", "audio/mp4")
+					w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
 					w.Header().Set("Cache-Control", "private, max-age=86400")
 					w.Write(buf)
 					return
@@ -391,6 +393,7 @@ func serveMseRange(ctx context.Context, w http.ResponseWriter, cPath, filePath s
 					if buf, xerr := extractFragments(f, idx, startSec, need); xerr == nil {
 						f.Close()
 						w.Header().Set("Content-Type", "audio/mp4")
+						w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
 						w.Header().Set("Cache-Control", "private, max-age=86400")
 						w.Write(buf)
 						return
@@ -400,6 +403,7 @@ func serveMseRange(ctx context.Context, w http.ResponseWriter, cPath, filePath s
 						if buf, xerr := extractFragments(f, idx, startSec, idx.duration); xerr == nil {
 							f.Close()
 							w.Header().Set("Content-Type", "audio/mp4")
+							w.Header().Set("Content-Length", strconv.Itoa(len(buf)))
 							w.Header().Set("Cache-Control", "private, max-age=86400")
 							w.Write(buf)
 							return
