@@ -18,6 +18,13 @@ const BLOCK = 5
 const ceilBlock = (t: number) => Math.ceil(t / BLOCK) * BLOCK
 const floorGrid = (t: number, grid: number) => Math.floor(t / grid) * grid
 
+class SbError extends Error {
+  constructor(msg: string) {
+    super(msg)
+    this.name = "SbError"
+  }
+}
+
 export function streamInitUrl(trackId: string, quality: string): string {
   const session = localStorage.getItem("session_token")
   if (!session || !trackId) return ""
@@ -46,6 +53,8 @@ export function useMseAudio(onFatal: () => void) {
   const errorRef = useRef(0)
   const playingRef = useRef(false)
   const fatalRef = useRef(onFatal)
+  const quotaHitRef = useRef(false)
+  const removeWaitRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     fatalRef.current = onFatal
@@ -88,26 +97,130 @@ export function useMseAudio(onFatal: () => void) {
   const appendBytes = useCallback((bytes: ArrayBuffer): Promise<void> => {
     const sb = sbRef.current
     if (!sb) return Promise.resolve()
-    if (clearWaitRef.current) return clearWaitRef.current.then(() => appendBytes(bytes))
+    const ver = versionRef.current
+    if (clearWaitRef.current) {
+      return clearWaitRef.current.then(() => {
+        if (versionRef.current !== ver) return
+        return appendBytes(bytes)
+      })
+    }
+    if (sb.updating) {
+      return new Promise<void>((resolve, reject) => {
+        let settled = false
+        const rej = (msg: string) => {
+          if (settled) return
+          settled = true
+          sb.removeEventListener("updateend", onEnd)
+          sb.removeEventListener("error", onErr)
+          clearTimeout(timer)
+          const err = new SbError(msg)
+          reject(err)
+        }
+        const succeed = () => {
+          if (settled) return
+          settled = true
+          sb.removeEventListener("updateend", onEnd)
+          sb.removeEventListener("error", onErr)
+          clearTimeout(timer)
+          if (versionRef.current !== ver) return resolve()
+          appendBytes(bytes).then(resolve).catch(reject)
+        }
+        const onEnd = () => succeed()
+        const onErr = () => rej("sourcebuffer error while waiting")
+        const timer = setTimeout(() => { try { sb.abort() } catch {}; rej("sourcebuffer wait timed out") }, 10000)
+        sb.addEventListener("updateend", onEnd)
+        sb.addEventListener("error", onErr)
+      })
+    }
     return new Promise<void>((resolve, reject) => {
-      const onEnd = () => { sb.removeEventListener("updateend", onEnd); resolve() }
-      const onErr = () => { sb.removeEventListener("error", onErr); reject(new Error("sourcebuffer append failed")) }
+      let settled = false
+      const rej = (msg: string) => {
+        if (settled) return
+        settled = true
+        sb.removeEventListener("updateend", onEnd)
+        sb.removeEventListener("error", onErr)
+        clearTimeout(timer)
+        const err = new SbError(msg)
+        reject(err)
+      }
+      const onEnd = () => {
+        if (settled) return
+        settled = true
+        sb.removeEventListener("updateend", onEnd)
+        sb.removeEventListener("error", onErr)
+        clearTimeout(timer)
+        resolve()
+      }
+      const onErr = () => rej("sourcebuffer append failed")
+      const timer = setTimeout(() => { try { sb.abort() } catch {}; rej("sourcebuffer append timed out") }, 10000)
       sb.addEventListener("updateend", onEnd)
       sb.addEventListener("error", onErr)
       try {
         sb.appendBuffer(bytes)
       } catch (e) {
         sb.removeEventListener("updateend", onEnd)
+        sb.removeEventListener("error", onErr)
+        clearTimeout(timer)
         reject(e)
       }
     })
   }, [])
 
-  const clearBuffer = useCallback(() => {
+  const clearBuffer = useCallback((): Promise<void> => {
     const sb = sbRef.current
     if (!sb || sb.buffered.length === 0) {
       clearWaitRef.current = null
       return Promise.resolve()
+    }
+    if (sb.updating) {
+      const wait = new Promise<void>(resolve => {
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          sb.removeEventListener("updateend", onEnd)
+          sb.removeEventListener("error", onErr)
+          clearTimeout(timer)
+          resolve()
+        }
+        const onEnd = () => done()
+        const onErr = () => done()
+        const timer = setTimeout(() => done(), 5000)
+        sb.addEventListener("updateend", onEnd)
+        sb.addEventListener("error", onErr)
+      })
+      const retry = (): Promise<void> => {
+        if (clearWaitRef.current === chained) {
+          clearWaitRef.current = null
+        }
+        const sb2 = sbRef.current
+        if (!sb2 || sb2.buffered.length === 0) {
+          return Promise.resolve()
+        }
+        if (sb2.updating) {
+          try { sb2.abort() } catch {}
+        }
+        if (!sb2 || sb2.buffered.length === 0) {
+          return Promise.resolve()
+        }
+        const end = sb2.buffered.end(sb2.buffered.length - 1)
+        const p = new Promise<void>((resolve) => {
+          const onEnd2 = () => { sb2.removeEventListener("updateend", onEnd2); resolve() }
+          sb2.addEventListener("updateend", onEnd2)
+          try {
+            sb2.remove(0, end)
+          } catch {
+            sb2.removeEventListener("updateend", onEnd2)
+            resolve()
+          }
+        })
+        const chained2 = p.then(() => { if (clearWaitRef.current === chained2) clearWaitRef.current = null })
+        clearWaitRef.current = chained2
+        return chained2
+      }
+      const chained: Promise<void> = wait.then(retry)
+      clearWaitRef.current = chained
+      return chained
     }
     const end = sb.buffered.end(sb.buffered.length - 1)
     const p = new Promise<void>((resolve) => {
@@ -119,8 +232,9 @@ export function useMseAudio(onFatal: () => void) {
         resolve()
       }
     })
-    clearWaitRef.current = p
-    return p
+    const chained = p.then(() => { if (clearWaitRef.current === chained) clearWaitRef.current = null })
+    clearWaitRef.current = chained
+    return chained
   }, [])
 
   const fetchSegment = useCallback(async (start: number, dur: number) => {
@@ -140,11 +254,43 @@ export function useMseAudio(onFatal: () => void) {
   const fetchChunk = useCallback(async (chunk: number, startOverride?: number) => {
     const start = startOverride !== undefined ? startOverride : floorGrid(alignedEnd(), chunk)
     const before = bufferedEndRef.current
-    const bytes = await fetchSegment(start, chunk)
-    await appendBytes(bytes)
-    refreshBuffered()
-    // Stall threshold (6 ticks), 2s backoff, error threshold (4 consecutive), 10s init abort.
+    const ver = versionRef.current
+    try {
+      const bytes = await fetchSegment(start, chunk)
+      if (versionRef.current !== ver) return true
+      await appendBytes(bytes)
+      if (versionRef.current !== ver) return true
+      refreshBuffered()
+    } catch (e: unknown) {
+      const errName = (e as { name?: string })?.name
+      if (errName === "QuotaExceededError") {
+        quotaHitRef.current = true
+        console.warn("[mse] buffer quota exceeded, pausing buffering")
+        return false
+      }
+      if (errName === "InvalidStateError") {
+        const ms2 = msRef.current
+        if (ms2 && ms2.readyState === "ended") return false
+      }
+      if (e instanceof SbError) {
+        errorRef.current++
+        console.warn("[mse] sourcebuffer error, retrying")
+        if (errorRef.current >= 4) throw e
+        return false
+      }
+      throw e
+    }
     if (bufferedEndRef.current <= before + 0.05) {
+      const t = trackRef.current
+      if (t && t.duration > 0 && before >= t.duration - 1) {
+        const ms = msRef.current
+        if (ms && ms.readyState === "open") {
+          try { ms.endOfStream() } catch {}
+        }
+        stallRef.current = 0
+        errorRef.current = 0
+        return true
+      }
       stallRef.current++
       if (stallRef.current >= 6) {
         console.warn("[mse] buffer stalled, retrying")
@@ -156,6 +302,7 @@ export function useMseAudio(onFatal: () => void) {
       stallRef.current = 0
       errorRef.current = 0
     }
+    return true
   }, [alignedEnd, appendBytes, fetchSegment, refreshBuffered])
 
   const stop = useCallback(() => {
@@ -188,16 +335,87 @@ export function useMseAudio(onFatal: () => void) {
     }
   }, [stop])
 
+  const trimPlayed = useCallback(() => {
+    const sb = sbRef.current
+    const el = audioRef.current
+    if (!sb || !el || sb.buffered.length === 0) return
+    if (removeWaitRef.current) return
+    if (clearWaitRef.current) return
+    const margin = quotaHitRef.current ? 30 : 60
+    const currentTime = el.currentTime
+    if (currentTime < margin) return
+    const bufEnd = sb.buffered.end(sb.buffered.length - 1)
+    const bufStart = sb.buffered.start(0)
+    const totalBuffered = bufEnd - bufStart
+    const minBuffer = quotaHitRef.current ? 60 : 120
+    if (totalBuffered < minBuffer) return
+    for (let i = 0; i < sb.buffered.length; i++) {
+      const s = sb.buffered.start(i)
+      const e = sb.buffered.end(i)
+      if (s < currentTime - margin) {
+        const ver = versionRef.current
+        const removeEnd = Math.min(e, currentTime - margin)
+        try {
+          sb.remove(s, removeEnd)
+          const p = new Promise<void>(resolve => {
+            let settled = false
+            const done = () => {
+              if (settled) return
+              settled = true
+              sb.removeEventListener("updateend", onEnd)
+              sb.removeEventListener("error", onErr)
+              clearTimeout(timer)
+              resolve()
+            }
+            const onEnd = () => done()
+            const onErr = () => done()
+            const timer = setTimeout(() => { try { sb.abort() } catch {}; done() }, 5000)
+            sb.addEventListener("updateend", onEnd)
+            sb.addEventListener("error", onErr)
+          })
+          removeWaitRef.current = p.then(() => {
+            removeWaitRef.current = null
+            if (versionRef.current === ver) refreshBuffered()
+          })
+        } catch {
+          console.warn("[mse] trim remove failed (sourcebuffer busy)")
+        }
+        break
+      }
+    }
+  }, [refreshBuffered])
+
   const tick = useCallback(async () => {
     const el = audioRef.current
     const t = trackRef.current
     if (!el || !t || !initRef.current || busyRef.current) return
     if (!playingRef.current) return
 
+    if (quotaHitRef.current) {
+      const sb = sbRef.current
+      if (sb && sb.buffered.length > 0) {
+        const bufEnd = sb.buffered.end(sb.buffered.length - 1)
+        const ahead = bufEnd - el.currentTime
+        if (ahead < 10) {
+          quotaHitRef.current = false
+          refreshBuffered()
+        } else {
+          trimPlayed()
+          return
+        }
+      } else {
+        quotaHitRef.current = false
+      }
+    }
+
+    trimPlayed()
+
     const ms = msRef.current
     const duration = t.duration || 0
     const playhead = el.currentTime
     const buf = bufferedEndRef.current
+
+    if (ms && ms.readyState === "ended") return
 
     if (buf >= duration - 0.05 && duration > 0) {
       if (ms && ms.readyState === "open") {
@@ -224,14 +442,15 @@ export function useMseAudio(onFatal: () => void) {
     const ver = versionRef.current
     busyRef.current = true
     try {
-      await fetchChunk(chunk)
+      const ok = await fetchChunk(chunk)
+      if (!ok) return
     } catch (e) {
       console.warn("[mse] buffer error:", e)
-      await handleChunkError(ver)
+      if (versionRef.current === ver) await handleChunkError(ver)
     } finally {
       busyRef.current = false
     }
-  }, [alignedEnd, fetchChunk, handleChunkError])
+  }, [alignedEnd, fetchChunk, handleChunkError, trimPlayed])
 
   const fastFillTo = useCallback(async (target: number) => {
     const t = trackRef.current
@@ -246,8 +465,9 @@ export function useMseAudio(onFatal: () => void) {
     busyRef.current = true
     setWaiting(true)
     try {
-      while (alignedEnd() < targetEnd && versionRef.current === ver && !errorRef.current) {
-        await fetchChunk(20, alignedEnd())
+      while (alignedEnd() < targetEnd && versionRef.current === ver && !errorRef.current && !quotaHitRef.current) {
+        const ok = await fetchChunk(20, alignedEnd())
+        if (!ok) break
       }
     } catch (e) {
       console.warn("[mse] fill error:", e)
@@ -271,6 +491,7 @@ export function useMseAudio(onFatal: () => void) {
   const seek = useCallback((time: number) => {
     const el = audioRef.current
     if (!el || !trackRef.current) return
+    versionRef.current++
     const sb = sbRef.current
     const startOfBuffer = sb && sb.buffered.length > 0 ? sb.buffered.start(0) : Infinity
     const bufEnd = bufferedEndRef.current
@@ -278,6 +499,8 @@ export function useMseAudio(onFatal: () => void) {
       setWaiting(true)
       clearBuffer().then(() => {
         bufferedEndRef.current = 0
+        quotaHitRef.current = false
+        removeWaitRef.current = null
         setBuffered([])
         try { el.currentTime = Math.max(0, time) } catch {}
         if (playingRef.current) fastFillTo(time)
@@ -303,6 +526,8 @@ export function useMseAudio(onFatal: () => void) {
     clearWaitRef.current = null
     stallRef.current = 0
     errorRef.current = 0
+    quotaHitRef.current = false
+    removeWaitRef.current = null
     bufferedEndRef.current = 0
     setBuffered([])
     setWaiting(true)

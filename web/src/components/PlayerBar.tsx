@@ -253,7 +253,14 @@ export default function PlayerBar() {
 
     const onError = () => {
       if (switchingRef.current) return
-      console.warn("[audio] stream error | code:", el.error?.code, "| message:", el.error?.message)
+      const code = el.error?.code
+      if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && !el.src) {
+        // Expected after mse.stop() clears el.src during teardown — skip onFatal to avoid recovery loop.
+        usePlayer.getState().setPlaying(false)
+        savePlayerState()
+        return
+      }
+      console.warn("[audio] stream error | code:", code, "| message:", el.error?.message)
       switchingRef.current = false
       usePlayer.getState().setPlaying(false)
       savePlayerState()
