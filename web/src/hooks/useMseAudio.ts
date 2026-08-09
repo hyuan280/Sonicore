@@ -490,7 +490,7 @@ export function useMseAudio(onFatal: () => void) {
 
   const seek = useCallback((time: number) => {
     const el = audioRef.current
-    if (!el || !trackRef.current) return
+    if (!el || !trackRef.current || !initRef.current) return
     versionRef.current++
     const sb = sbRef.current
     const startOfBuffer = sb && sb.buffered.length > 0 ? sb.buffered.start(0) : Infinity

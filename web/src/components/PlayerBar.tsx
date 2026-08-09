@@ -10,7 +10,7 @@ import ArtistLink from "../components/ArtistLink"
 import LyricsPanel from "../components/LyricsPanel"
 import { isDesktopLyricsSupported, isDesktopLyricsOpen, openDesktopLyrics, closeDesktopLyrics, subscribeDesktopLyrics } from "../lib/desktopLyrics"
 import { setMediaSessionMetadata, setMediaSessionPlaybackState, setMediaSessionPositionState, bindMediaSessionActions, clearMediaSessionActions } from "../lib/mediaSession"
-import { useMseAudio, streamInitUrl } from "../hooks/useMseAudio"
+import { useMseAudio } from "../hooks/useMseAudio"
 
 const qualityOptions = [
   { key: "standard", labelKey: "player.qualityStandardShort" as const, titleKey: "player.qualityStandardDesc" as const, descKey: "player.qualityStandard" as const },
@@ -51,9 +51,11 @@ export default function PlayerBar() {
   const soundStartedRef = useRef(false)
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollCtrlRef = useRef<AbortController | null>(null)
+  const resumePosRef = useRef(0)
   const session = localStorage.getItem("session_token")
 
   const stopPolling = () => {
+    resumePosRef.current = 0
     if (pollCtrlRef.current) {
       pollCtrlRef.current.abort()
       pollCtrlRef.current = null
@@ -70,18 +72,21 @@ export default function PlayerBar() {
     if (!track) return
     const sid = localStorage.getItem("session_token")
     if (!sid) return
+    if (resumePosRef.current === 0) {
+      resumePosRef.current = usePlayer.getState().position
+    }
+    const resumePos = resumePosRef.current
     setRecovering(true)
     if (pollRef.current) {
       clearTimeout(pollRef.current)
       pollRef.current = null
     }
     const trackId = track.id
-    const url = streamInitUrl(trackId, quality)
 
     const poll = () => {
       const cur = usePlayer.getState().track
       if (!cur || cur.id !== trackId) {
-        setRecovering(false)
+        stopPolling()
         return
       }
       if (pollCtrlRef.current) {
@@ -89,18 +94,21 @@ export default function PlayerBar() {
       }
       pollCtrlRef.current = new AbortController()
       const timer = setTimeout(() => pollCtrlRef.current?.abort(), 5000)
-      fetch(url, { signal: pollCtrlRef.current.signal })
-        .then(res => {
+      fetch("/api/health", { signal: pollCtrlRef.current.signal, cache: "no-store" })
+        .then(res => res.json())
+        .then(data => {
           clearTimeout(timer)
           pollCtrlRef.current = null
-          if (res.ok) {
+          if (data?.status === "ok") {
             if (usePlayer.getState().track?.id !== trackId) {
               stopPolling()
               return
             }
             setRecovering(false)
             pollRef.current = null
-            usePlayer.setState({ playing: true, playEpoch: usePlayer.getState().playEpoch + 1 })
+            const cur = usePlayer.getState()
+            const finalPos = cur.position > 0 && cur.position !== resumePos ? cur.position : resumePos
+            usePlayer.setState({ position: finalPos, playing: true, playEpoch: cur.playEpoch + 1 })
             savePlayerState()
           } else {
             pollRef.current = setTimeout(poll, 3000)
@@ -131,7 +139,7 @@ export default function PlayerBar() {
     usePlayer.getState().setPlaying(false)
     savePlayerState()
     startPolling()
-  }, [quality])
+  }, [])
   const mse = useMseAudio(onFatal)
   const audioRef = mse.audioRef
 
