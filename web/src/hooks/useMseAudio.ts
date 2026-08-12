@@ -12,7 +12,7 @@ export interface MseTrack {
 
 const CODEC_AAC = 'audio/mp4; codecs="mp4a.40.2"'
 const CODEC_FLAC = 'audio/mp4; codecs="flac"'
-const codecFor = (q: string) => (q === "lossless" ? CODEC_FLAC : CODEC_AAC)
+export const codecFor = (q: string) => (q === "lossless" ? CODEC_FLAC : CODEC_AAC)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const BLOCK = 5
 const ceilBlock = (t: number) => Math.ceil(t / BLOCK) * BLOCK
