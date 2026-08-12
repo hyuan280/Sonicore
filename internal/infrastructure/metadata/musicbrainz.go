@@ -55,6 +55,9 @@ func NewMBClient(cfg MBConfig) *MBClient {
 func (c *MBClient) rateLimit() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.rateLimitPerSec <= 0 {
+		return
+	}
 	interval := time.Second / time.Duration(c.rateLimitPerSec)
 	elapsed := time.Since(c.lastReq)
 	if elapsed < interval {

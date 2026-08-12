@@ -97,6 +97,12 @@ func Probe(path string) (*AudioMeta, error) {
 		return nil, fmt.Errorf("failed to parse ffprobe output for %s: %w", path, err)
 	}
 
+	return buildAudioMeta(path, &result), nil
+}
+
+// buildAudioMeta maps parsed ffprobe output onto AudioMeta. Pure function,
+// no external dependencies — unit-testable without ffprobe installed.
+func buildAudioMeta(path string, result *ProbeResult) *AudioMeta {
 	meta := &AudioMeta{
 		FilePath:   path,
 		FileFormat: result.Format.FormatName,
@@ -171,7 +177,7 @@ func Probe(path string) (*AudioMeta, error) {
 		meta.Title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 
-	return meta, nil
+	return meta
 }
 
 func hasCoverArt(streams []ProbeStream) bool {

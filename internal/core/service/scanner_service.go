@@ -124,6 +124,10 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string) {
 		}
 		s.mu.Unlock()
 	})
+	// ScanLibrary may return (nil, err) on DB failure — never dereference nil stats.
+	if stats == nil {
+		stats = &scanner.ScanStats{}
+	}
 
 	s.mu.Lock()
 	if p := s.activeScan[libraryID]; p != nil {

@@ -108,7 +108,11 @@ func (s *DirectSource) Fetch(ctx context.Context, job *domain.DownloadJob) error
 }
 
 func detectExt(contentType, url string) string {
-	ext := filepath.Ext(url)
+	path := url
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	ext := filepath.Ext(path)
 	if ext != "" {
 		return strings.TrimPrefix(ext, ".")
 	}

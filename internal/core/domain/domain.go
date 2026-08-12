@@ -2,6 +2,7 @@ package domain
 
 import (
 	"crypto/rand"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -183,7 +184,7 @@ type ImageVariant struct {
 
 type ImageVariants []ImageVariant
 
-func (v ImageVariants) Value() ([]byte, error) {
+func (v ImageVariants) Value() (driver.Value, error) {
 	return json.Marshal(v)
 }
 
