@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,11 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrNotFound is returned when the MusicBrainz API answers 404 for a lookup
+// (the queried entity does not exist). Callers use it to distinguish "not
+// found" from temporary availability failures.
+var ErrNotFound = errors.New("musicbrainz: not found")
 
 type MBClient struct {
 	http           *http.Client
@@ -90,6 +96,9 @@ func (c *MBClient) get(path string, params url.Values, out interface{}) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("musicbrainz HTTP %d: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
