@@ -29,6 +29,7 @@ type Engine struct {
 	umRepo         *repository.UserMetadataRepo
 	coverExtractor *metadata.CoverExtractor
 	resolver       *metadata.Resolver
+	entities       *metadata.EntityResolver
 	lyricsStore    *lyrics.Store
 }
 
@@ -48,6 +49,7 @@ func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig, lyricsDir 
 		umRepo:         repository.NewUserMetadataRepo(db),
 		coverExtractor: metadata.NewCoverExtractor(imagesDir),
 		resolver:       resolver,
+		entities:       metadata.NewEntityResolver(db),
 		lyricsStore:    lyrics.NewStore(lyricsDir),
 	}
 }
@@ -190,8 +192,27 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 				}
 			}
 
-			if ApplyEnrichment(ctx, existing, meta, enrichment, lib.ID, overwrite, e.trackRepo, e.artistRepo, e.albumRepo) {
+			if ApplyEnrichment(ctx, existing, meta, enrichment, lib.ID, overwrite, e.trackRepo, e.artistRepo, e.albumRepo, e.entities) {
 				changed = true
+			}
+
+			// Backfill cover art when it is missing (e.g. after a database
+			// rebuild, existing tracks are re-scanned without re-creating).
+			if meta.HasCoverArt {
+				albumID := ""
+				if len(existing.Albums) > 0 {
+					albumID = existing.Albums[0].AlbumID
+				}
+				if !mainCoverExists(e.coverExtractor, lib.ID, existing.ID) ||
+					(albumID != "" && !mainAlbumCoverExists(e.coverExtractor, albumID)) {
+					var album *domain.Album
+					if albumID != "" {
+						album, _ = e.albumRepo.FindByID(ctx, albumID)
+					}
+					if e.extractCover(ctx, lib.ID, existing, album, path, stats) {
+						changed = true
+					}
+				}
 			}
 
 			if sContent, sFmt := e.findSidecarLyrics(path); sContent != "" {
@@ -359,20 +380,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		if meta.HasCoverArt {
-			if !thumbnailExists(e.coverExtractor, lib.ID, trackID, 64) {
-				if data, _, err := e.coverExtractor.ExtractFromFile(path); err == nil {
-					thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), lib.ID)
-					os.MkdirAll(thumbDir, 0755)
-					thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", trackID))
-					metadata.ResizeToThumbnail(data, thumbPath, 64)
-					track.CoverImageID = &trackID
-					stats.CoversExtracted++
-					if album != nil && album.CoverImageID == nil {
-						e.coverExtractor.Save("album", "album", album.ID, data, "jpg", 256)
-						album.CoverImageID = &album.ID
-						e.albumRepo.Update(ctx, album)
-					}
-				}
+			if e.extractCover(ctx, lib.ID, track, album, path, stats) {
+				// nothing to flag: the track record is written below anyway
 			}
 		}
 
@@ -444,6 +453,28 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 				shuffle_idx = 0`, pq.Array(deletedIDs))
 	}
 
+	// Remove covers of albums that no longer have any track before pruning them.
+	if rows, err := e.db.QueryContext(ctx,
+		`SELECT id FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`); err == nil {
+		var orphanIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				log.Printf("[scan] orphan album scan error: %v", err)
+				continue
+			}
+			orphanIDs = append(orphanIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("[scan] orphan album iteration error: %v", err)
+		}
+		rows.Close()
+		for _, id := range orphanIDs {
+			metadata.RemoveAlbumCover(e.coverExtractor.ImagesDir(), id)
+		}
+	} else {
+		log.Printf("[scan] orphan album query error: %v", err)
+	}
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
@@ -476,7 +507,7 @@ func (e *Engine) ExtractCovers(ctx context.Context, lib *domain.Library, onProgr
 		default:
 		}
 
-		if thumbnailExists(e.coverExtractor, lib.ID, t.ID, 64) {
+		if mainCoverExists(e.coverExtractor, lib.ID, t.ID) {
 			continue
 		}
 
@@ -485,7 +516,13 @@ func (e *Engine) ExtractCovers(ctx context.Context, lib *domain.Library, onProgr
 			continue
 		}
 		thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), lib.ID)
-		os.MkdirAll(thumbDir, 0755)
+		if err := os.MkdirAll(thumbDir, 0755); err != nil {
+			continue
+		}
+		mainPath := metadata.CoverPath(e.coverExtractor.ImagesDir(), lib.ID, "track", t.ID, "jpg")
+		if err := os.WriteFile(mainPath, data, 0644); err != nil {
+			continue
+		}
 		thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", t.ID))
 		metadata.ResizeToThumbnail(data, thumbPath, 64)
 
@@ -494,6 +531,54 @@ func (e *Engine) ExtractCovers(ctx context.Context, lib *domain.Library, onProgr
 		}
 	}
 	return nil
+}
+
+// extractCover extracts embedded cover art for a track and its primary album
+// when either is missing on disk. The track gate is the main cover file
+// (always written at original size); the 64px thumbnail is only produced for
+// sources larger than 64px, so it cannot serve as the existence check. Track
+// and album state are judged by file existence, so deleted image files are
+// restored on the next scan even when the DB pointers still reference them.
+// It returns true when the track's cover state changed (CoverImageID set).
+func (e *Engine) extractCover(ctx context.Context, libraryID string, track *domain.Track, album *domain.Album, audioPath string, stats *ScanStats) bool {
+	trackMissing := !mainCoverExists(e.coverExtractor, libraryID, track.ID)
+	albumMissing := album != nil && !mainAlbumCoverExists(e.coverExtractor, album.ID)
+	if !trackMissing && !albumMissing {
+		return false
+	}
+
+	data, _, err := e.coverExtractor.ExtractFromFile(audioPath)
+	if err != nil {
+		return false
+	}
+
+	changed := false
+	if trackMissing {
+		thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), libraryID)
+		if err := os.MkdirAll(thumbDir, 0755); err != nil {
+			log.Printf("[scan] cover mkdir error for %s: %v", audioPath, err)
+			return false
+		}
+		mainPath := metadata.CoverPath(e.coverExtractor.ImagesDir(), libraryID, "track", track.ID, "jpg")
+		if err := os.WriteFile(mainPath, data, 0644); err != nil {
+			log.Printf("[scan] cover write error for %s: %v", audioPath, err)
+			return false
+		}
+		thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", track.ID))
+		metadata.ResizeToThumbnail(data, thumbPath, 64)
+		track.CoverImageID = &track.ID
+		stats.CoversExtracted++
+		changed = true
+	}
+	if albumMissing {
+		if _, err := e.coverExtractor.Save("album", "album", album.ID, data, "jpg", 256); err != nil {
+			log.Printf("[scan] album cover save error for %s: %v", audioPath, err)
+			return changed
+		}
+		album.CoverImageID = &album.ID
+		e.albumRepo.Update(ctx, album)
+	}
+	return changed
 }
 
 func mainCoverExists(ce *metadata.CoverExtractor, libraryID, trackID string) bool {
@@ -552,9 +637,39 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 	if track == nil {
 		return false
 	}
+
+	// Non-MusicBrainz sources (e.g. NetEase) do not expose country/genre and
+	// may not carry the source ID in mbid; require only the fields they
+	// actually provide so the track is not re-identified on every scan.
+	// Checked before the MBID guard below.
+	if track.MetadataSource != "" && track.MetadataSource != metadata.SourceMusicBrainz {
+		if track.Title == "" {
+			return false
+		}
+		trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
+		if err != nil || len(trackArtists) == 0 {
+			return false
+		}
+		for _, ta := range trackArtists {
+			artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
+			if err != nil || artist.Name == "" || artist.Name == "Unknown Artist" {
+				return false
+			}
+		}
+		for _, tal := range track.Albums {
+			album, err := e.albumRepo.FindByID(ctx, tal.AlbumID)
+			if err != nil || album.Title == "" || album.Title == "Unknown Album" {
+				return false
+			}
+		}
+		return true
+	}
+
 	if track.MBID == "" {
 		return false
 	}
+
+	// MusicBrainz completeness requires the full MB profile.
 	// Check artists via track_artists
 	trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
 	if err != nil || len(trackArtists) == 0 {
@@ -596,146 +711,91 @@ func matchArtistEnrichment(name string, enrichment *metadata.EnrichmentResult) *
 }
 
 func (e *Engine) findOrCreateArtist(ctx context.Context, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
-	return findOrCreateArtist(ctx, e.artistRepo, libraryID, name, enrichment)
+	return findOrCreateArtist(ctx, e.entities, e.artistRepo, libraryID, name, enrichment)
 }
 
-func findOrCreateArtist(ctx context.Context, artistRepo *repository.ArtistRepo, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
-	if name == "" {
-		name = "Unknown Artist"
-	}
-
-	if enrichment != nil && enrichment.ArtistMBID != "" {
-		if artist, err := artistRepo.FindByMBID(ctx, enrichment.ArtistMBID); err == nil {
-			if artist.Name == "" && enrichment.Artist != "" {
-				artist.Name = enrichment.Artist
-				artist.SortName = enrichment.Artist
-				artistRepo.Update(ctx, artist)
-			}
-			if artist.Country == "" && enrichment.ArtistCountry != "" {
-				artist.Country = enrichment.ArtistCountry
-				artistRepo.Update(ctx, artist)
-			}
-			return artist, nil
-		}
-	}
-
-	artist, err := artistRepo.FindByName(ctx, name)
-	if err == nil {
-		if artist.MBID == "" && enrichment != nil && enrichment.ArtistMBID != "" {
-			artist.MBID = enrichment.ArtistMBID
-			artistRepo.Update(ctx, artist)
-		}
-		if artist.Country == "" && enrichment != nil && enrichment.ArtistCountry != "" {
-			artist.Country = enrichment.ArtistCountry
-			artistRepo.Update(ctx, artist)
-		}
-		return artist, nil
-	}
-
-	now := time.Now()
-	artist = &domain.Artist{
-		ID:        domain.NewID(),
-		Name:      name,
-		SortName:  name,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+// findOrCreateArtist resolves an artist through the shared cross-source
+// lookup chain (primary ID → alias → normalized name) and backfills
+// enrichment fields (MBID, country) on an existing record.
+func findOrCreateArtist(ctx context.Context, er *metadata.EntityResolver, artistRepo *repository.ArtistRepo, libraryID, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
+	source := metadata.SourceMusicBrainz
+	externalID := ""
 	if enrichment != nil {
-		artist.MBID = enrichment.ArtistMBID
-		artist.Country = enrichment.ArtistCountry
+		externalID = enrichment.ArtistMBID
 	}
 
-	err = artistRepo.BatchCreate(ctx, []domain.Artist{*artist})
+	artist, err := er.FindOrCreateArtist(ctx, source, externalID, name)
 	if err != nil {
 		return nil, err
 	}
 
+	if enrichment != nil {
+		updated := false
+		if artist.Name == "" && enrichment.Artist != "" {
+			artist.Name = enrichment.Artist
+			artist.SortName = enrichment.Artist
+			updated = true
+		}
+		if artist.Country == "" && enrichment.ArtistCountry != "" {
+			artist.Country = enrichment.ArtistCountry
+			updated = true
+		}
+		if updated {
+			artistRepo.Update(ctx, artist)
+		}
+	}
 	return artist, nil
 }
 
 func (e *Engine) findOrCreateAlbum(ctx context.Context, libraryID, title, artistID string, year int, genre string, enrichment *metadata.EnrichmentResult) (*domain.Album, error) {
-	if title == "" {
-		title = "Unknown Album"
-	}
+	return findOrCreateAlbum(ctx, e.entities, e.albumRepo, libraryID, title, artistID, year, genre, enrichment)
+}
 
-	if enrichment != nil && enrichment.AlbumMBID != "" {
-		if album, err := e.albumRepo.FindByMBID(ctx, enrichment.AlbumMBID); err == nil {
-			updated := false
-			if album.Title == "Unknown Album" && enrichment.Album != "" {
-				album.Title = enrichment.Album
-				updated = true
-			}
-			if album.Year == 0 && enrichment.Year != 0 {
-				album.Year = enrichment.Year
-				updated = true
-			}
-			if album.Genre == "" && enrichment.Genre != "" {
-				album.Genre = enrichment.Genre
-				updated = true
-			}
-			if album.Country == "" && enrichment.AlbumCountry != "" {
-				album.Country = enrichment.AlbumCountry
-				updated = true
-			}
-			if updated {
-				e.albumRepo.Update(ctx, album)
-			}
-			return album, nil
-		}
-	}
-
-	album, err := e.albumRepo.FindByTitleAndArtist(ctx, title, artistID)
-	if err == nil {
-		updated := false
-		if album.MBID == "" && enrichment != nil && enrichment.AlbumMBID != "" {
-			album.MBID = enrichment.AlbumMBID
-			updated = true
-		}
-		if enrichment != nil && album.Year == 0 && enrichment.Year != 0 {
-			album.Year = enrichment.Year
-			updated = true
-		}
-		if enrichment != nil && album.Genre == "" && enrichment.Genre != "" {
-			album.Genre = enrichment.Genre
-			updated = true
-		}
-		if enrichment != nil && album.Country == "" && enrichment.AlbumCountry != "" {
-			album.Country = enrichment.AlbumCountry
-			updated = true
-		}
-		if updated {
-			e.albumRepo.Update(ctx, album)
-		}
-		return album, nil
-	}
-
-	now := time.Now()
-	album = &domain.Album{
-		ID:        domain.NewID(),
-		Title:     title,
-		ArtistID:  artistID,
-		Year:      year,
-		Genre:     genre,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+// findOrCreateAlbum resolves an album through the shared cross-source lookup
+// chain (primary ID → alias → normalized title within artist) and backfills
+// enrichment fields (MBID, year, genre, country).
+func findOrCreateAlbum(ctx context.Context, er *metadata.EntityResolver, albumRepo *repository.AlbumRepo, libraryID, title, artistID string, year int, genre string, enrichment *metadata.EnrichmentResult) (*domain.Album, error) {
+	source := metadata.SourceMusicBrainz
+	externalID := ""
 	if enrichment != nil {
-		album.MBID = enrichment.AlbumMBID
-		album.Country = enrichment.AlbumCountry
-		if year == 0 && enrichment.Year != 0 {
-			album.Year = enrichment.Year
-		}
-		if genre == "" && enrichment.Genre != "" {
-			album.Genre = enrichment.Genre
-		}
+		externalID = enrichment.AlbumMBID
 	}
 
-	err = e.albumRepo.BatchCreate(ctx, []domain.Album{*album})
+	album, err := er.FindOrCreateAlbum(ctx, source, externalID, title, artistID, year, genre, albumCountry(enrichment))
 	if err != nil {
 		return nil, err
 	}
 
+	if enrichment != nil {
+		updated := false
+		if album.Title == "Unknown Album" && enrichment.Album != "" {
+			album.Title = enrichment.Album
+			updated = true
+		}
+		if album.Year == 0 && enrichment.Year != 0 {
+			album.Year = enrichment.Year
+			updated = true
+		}
+		if album.Genre == "" && enrichment.Genre != "" {
+			album.Genre = enrichment.Genre
+			updated = true
+		}
+		if album.Country == "" && enrichment.AlbumCountry != "" {
+			album.Country = enrichment.AlbumCountry
+			updated = true
+		}
+		if updated {
+			albumRepo.Update(ctx, album)
+		}
+	}
 	return album, nil
+}
+
+func albumCountry(enrichment *metadata.EnrichmentResult) string {
+	if enrichment != nil {
+		return enrichment.AlbumCountry
+	}
+	return ""
 }
 
 func hashFile(path string) (string, error) {
@@ -759,7 +819,7 @@ func timePtr(t time.Time) *time.Time {
 
 // ApplyEnrichment applies enrichment results to an existing track. When overwrite is true,
 // all fields are replaced; when false, only empty/unknown fields are filled.
-func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.AudioMeta, enrichment *metadata.EnrichmentResult, libraryID string, overwrite bool, trackRepo *repository.TrackRepo, artistRepo *repository.ArtistRepo, albumRepo *repository.AlbumRepo) (changed bool) {
+func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.AudioMeta, enrichment *metadata.EnrichmentResult, libraryID string, overwrite bool, trackRepo *repository.TrackRepo, artistRepo *repository.ArtistRepo, albumRepo *repository.AlbumRepo, er *metadata.EntityResolver) (changed bool) {
 	if meta.MBID != "" && (track.MBID == "" || overwrite) {
 		track.MBID = meta.MBID
 		changed = true
@@ -816,7 +876,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 							ArtistCountry: ar.Country,
 							Artist:        ar.Name,
 						}
-						artist, err := findOrCreateArtist(ctx, artistRepo, libraryID, ar.Name, enrich)
+						artist, err := findOrCreateArtist(ctx, er, artistRepo, libraryID, ar.Name, enrich)
 						if err != nil {
 							continue
 						}
@@ -868,10 +928,11 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 	return
 }
 
-// resolveVersions groups tracks by non-empty mbid and sets version/version_label.
+// resolveVersions groups tracks by (metadata_source, mbid) and sets
+// version/version_label.
 func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 	rows, err := e.db.QueryContext(ctx,
-		`SELECT mbid, array_agg(id ORDER BY
+		`SELECT metadata_source, mbid, array_agg(id ORDER BY
 		 CASE file_format
 		 WHEN 'flac' THEN 0 WHEN 'alac' THEN 1 WHEN 'wav' THEN 2
 		 WHEN 'aiff' THEN 3 WHEN 'mp3' THEN 4 WHEN 'aac' THEN 5
@@ -880,8 +941,8 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 		 file_path
 		 ) AS ids
 		 FROM tracks WHERE library_id = $1 AND mbid != ''
-		 GROUP BY mbid
-		 ORDER BY mbid`, libraryID)
+		 GROUP BY metadata_source, mbid
+		 ORDER BY metadata_source, mbid`, libraryID)
 	if err != nil {
 		return fmt.Errorf("query tracks by mbid: %w", err)
 	}
@@ -889,14 +950,15 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 
 	for rows.Next() {
 		var mbid string
+		var source string
 		var ids []string
-		if err := rows.Scan(&mbid, pq.Array(&ids)); err != nil {
+		if err := rows.Scan(&source, &mbid, pq.Array(&ids)); err != nil {
 			return fmt.Errorf("scan mbid group: %w", err)
 		}
 
 		if len(ids) < 2 {
 			e.db.ExecContext(ctx, `UPDATE tracks SET version = 0, version_label = '' WHERE id = $1`, ids[0])
-			e.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE mbid = $1 AND library_id = $2`, mbid, libraryID)
+			e.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE metadata_source = $1 AND mbid = $2 AND library_id = $3`, source, mbid, libraryID)
 			continue
 		}
 
@@ -910,19 +972,19 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 			label := ExtractVersionLabel(ctx, e.db, id)
 			res, err := e.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, label, id)
 			if err != nil {
-				log.Printf("[scan] version update error: mbid=%s ver=%d id=%s err=%v", mbid, version, id, err)
+				log.Printf("[scan] version update error: source=%s mbid=%s ver=%d id=%s err=%v", source, mbid, version, id, err)
 			} else if n, _ := res.RowsAffected(); n == 0 {
-				log.Printf("[scan] version update affected 0 rows: mbid=%s ver=%d id=%s", mbid, version, id)
+				log.Printf("[scan] version update affected 0 rows: source=%s mbid=%s ver=%d id=%s", source, mbid, version, id)
 			}
 			e.db.ExecContext(ctx,
-				`INSERT INTO track_version_groups (mbid, library_id, track_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-				mbid, libraryID, id)
+				`INSERT INTO track_version_groups (metadata_source, mbid, library_id, track_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+				source, mbid, libraryID, id)
 		}
 	}
 
 	// Clean up: tracks that used to be in a group but no longer have a group mbid
 	e.db.ExecContext(ctx,
-		`DELETE FROM track_version_groups WHERE library_id = $1 AND mbid NOT IN (SELECT DISTINCT mbid FROM tracks WHERE library_id = $1 AND mbid != '')`, libraryID)
+		`DELETE FROM track_version_groups WHERE library_id = $1 AND (metadata_source, mbid) NOT IN (SELECT DISTINCT metadata_source, mbid FROM tracks WHERE library_id = $1 AND mbid != '')`, libraryID)
 
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate mbid groups: %w", err)

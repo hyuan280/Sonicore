@@ -23,11 +23,11 @@ func expectTrackFindByID(mock sqlmock.Sqlmock, track *domain.Track) {
 		WithArgs(track.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 			"duration", "bit_rate", "sample_rate", "channels",
-			"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+			"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 			"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
 			AddRow(track.ID, track.LibraryID, track.Title, track.CoverImageID,
 				track.Duration, track.BitRate, track.SampleRate, track.Channels,
-				track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.MBID, track.AcoustID, track.Hash,
+				track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.MBID, "musicbrainz", track.AcoustID, track.Hash,
 				track.LyricsMask, track.LyricsOffset, track.Heat, track.PlayCount, track.LastPlayedAt, track.Metadata, track.Version, track.VersionLabel, track.CreatedAt, track.UpdatedAt))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
 		WithArgs(track.ID).
@@ -139,10 +139,10 @@ func TestLyricsGetRepairsStaleMask(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tracks SET title=$1, cover_image_id=$2,
 		 duration=$3, bit_rate=$4, sample_rate=$5, channels=$6,
-		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, mbid=$11, acoust_id=$12,
-		 hash=$13, lyrics_mask=$14, lyrics_offset=$15, heat=$16, play_count=$17,
-		 last_played_at=$18, metadata=$19, version=$20, version_label=$21, updated_at=NOW()
-		 WHERE id=$22`)).
+		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, mbid=$11, metadata_source=$12, acoust_id=$13,
+		 hash=$14, lyrics_mask=$15, lyrics_offset=$16, heat=$17, play_count=$18,
+		 last_played_at=$19, metadata=$20, version=$21, version_label=$22, updated_at=NOW()
+		 WHERE id=$23`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

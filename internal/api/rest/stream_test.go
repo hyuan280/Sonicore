@@ -37,9 +37,9 @@ func streamTestTrack() *sqlmock.Rows {
 	now := time.Now()
 	return sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, "/m/song.mp3", 12345, "mp3", "mp3", "", "", "h",
+		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, "/m/song.mp3", 12345, "mp3", "mp3", "", "musicbrainz", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", now, now)
 }
 
@@ -132,9 +132,9 @@ func TestStreamServesFileDirectly(t *testing.T) {
 	// point the mock track at the real temp file
 	rows = sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, audioFile, 8, "mp3", "mp3", "", "", "h",
+		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, audioFile, 8, "mp3", "mp3", "", "musicbrainz", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
 	expectStreamTrack(mock, rows)
 	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,

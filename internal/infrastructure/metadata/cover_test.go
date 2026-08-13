@@ -70,10 +70,11 @@ func TestResizeToThumbnailSmallImageNoFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "thumb.jpg")
 
-	// 50x50 smaller than max 64 → no file written
+	// 50x50 smaller than max 64 → no thumbnail written; the serving chain
+	// falls back to the original file.
 	ResizeToThumbnail(makePNG(t, 50), path, 64)
 	_, err := os.Stat(path)
-	assert.ErrorIs(t, err, os.ErrNotExist, "small image should not produce a file")
+	assert.ErrorIs(t, err, os.ErrNotExist, "small image should not produce a thumbnail")
 }
 
 func TestResizeToThumbnailLargeImage(t *testing.T) {

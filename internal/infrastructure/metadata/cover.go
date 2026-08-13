@@ -93,6 +93,9 @@ func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
 	w := bounds.Dx()
 	h := bounds.Dy()
 
+	// A source smaller than the target is left untouched: no thumbnail file
+	// is produced. Cover requests fall back to larger sizes / the original
+	// via the serving chain, so the missing file is not an error state.
 	if w <= maxSize && h <= maxSize {
 		return
 	}
@@ -131,4 +134,15 @@ func CoverPathWithSuffix(imagesDir, libraryID, ownerType, ownerID, suffix, ext s
 		name += suffix
 	}
 	return filepath.Join(imagesDir, libraryID, name+"."+ext)
+}
+
+// RemoveAlbumCover deletes every image file an album may own (main cover and
+// resized thumbnails). Missing files are ignored.
+func RemoveAlbumCover(imagesDir, albumID string) {
+	for _, suffix := range []string{"", "_64", "_256"} {
+		p := CoverPathWithSuffix(imagesDir, "album", "album", albumID, suffix, "jpg")
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			log.Printf("[cover] remove album cover error: %v", err)
+		}
+	}
 }

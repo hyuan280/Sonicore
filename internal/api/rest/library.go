@@ -1,8 +1,10 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -21,16 +24,18 @@ type LibraryHandler struct {
 	userRepo    *repository.UserRepo
 	perm        *middleware.PermissionChecker
 	imagesDir   string
+	lyricsDir   string
 	manager     *player.EngineManager
 }
 
-func NewLibraryHandler(db *sql.DB, imagesDir string, manager *player.EngineManager) *LibraryHandler {
+func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, manager *player.EngineManager) *LibraryHandler {
 	return &LibraryHandler{
 		db:          db,
 		libraryRepo: repository.NewLibraryRepo(db),
 		userRepo:    repository.NewUserRepo(db),
 		perm:        middleware.NewPermissionChecker(db),
 		imagesDir:   imagesDir,
+		lyricsDir:   lyricsDir,
 		manager:     manager,
 	}
 }
@@ -200,8 +205,17 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	h.libraryRepo.Delete(r.Context(), libID)
+	if err := h.libraryRepo.Delete(r.Context(), libID); err != nil {
+		log.Printf("[library] delete %s failed: %v", libID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete library"})
+		return
+	}
 
+	// Remove covers of albums that no longer have any track.
+	orphanAlbums := h.orphanAlbumIDs(r.Context())
+	for _, id := range orphanAlbums {
+		metadata.RemoveAlbumCover(h.imagesDir, id)
+	}
 	h.db.ExecContext(r.Context(),
 		`DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	h.db.ExecContext(r.Context(),
@@ -211,11 +225,40 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.db.ExecContext(r.Context(),
 		`DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 
-	if libDir := filepath.Join(h.imagesDir, libID); libDir != "" {
-		os.RemoveAll(libDir)
+	if libID != "" {
+		os.RemoveAll(filepath.Join(h.imagesDir, libID))
+	}
+	// Lyrics are stored per library under {data_dir}/lyrics/{library_id}.
+	if libID != "" {
+		os.RemoveAll(filepath.Join(h.lyricsDir, libID))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// orphanAlbumIDs returns the ids of albums that are not referenced by any
+// track. Called while a library's tracks have already been removed.
+func (h *LibraryHandler) orphanAlbumIDs(ctx context.Context) []string {
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT id FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
+	if err != nil {
+		log.Printf("[library] orphan album query error: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			log.Printf("[library] orphan album scan error: %v", err)
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[library] orphan album iteration error: %v", err)
+	}
+	return ids
 }
 
 func (h *LibraryHandler) AddMember(w http.ResponseWriter, r *http.Request) {

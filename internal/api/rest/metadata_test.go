@@ -37,9 +37,9 @@ func expectMBSettings(mock sqlmock.Sqlmock) {
 func metadataTrackRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", nil, 200, 320, 44100, 2, "/m/song.flac", 1000, "flac", "flac", "", "", "h",
+		AddRow("t-001", "lib-001", "Song", nil, 200, 320, 44100, 2, "/m/song.flac", 1000, "flac", "flac", "", "musicbrainz", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
 }
 
@@ -126,10 +126,10 @@ func TestMetadataIdentifySuccess(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tracks SET title=$1, cover_image_id=$2,
 		 duration=$3, bit_rate=$4, sample_rate=$5, channels=$6,
-		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, mbid=$11, acoust_id=$12,
-		 hash=$13, lyrics_mask=$14, lyrics_offset=$15, heat=$16, play_count=$17,
-		 last_played_at=$18, metadata=$19, version=$20, version_label=$21, updated_at=NOW()
-		 WHERE id=$22`)).
+		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, mbid=$11, metadata_source=$12, acoust_id=$13,
+		 hash=$14, lyrics_mask=$15, lyrics_offset=$16, heat=$17, play_count=$18,
+		 last_played_at=$19, metadata=$20, version=$21, version_label=$22, updated_at=NOW()
+		 WHERE id=$23`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM track_albums WHERE track_id = $1`)).
 		WithArgs("t-001").
@@ -148,23 +148,24 @@ func TestMetadataIdentifySuccess(t *testing.T) {
 	// artistRepo.FindByID
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE id = $1`)).
 		WithArgs("art-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "sort_name", "mbid", "country", "biography", "cover_image_id", "track_count", "created_at", "updated_at", "roles"}).
-			AddRow("art-1", "Band", "Band", "", "", "", nil, 0, time.Now(), time.Now(), ""))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "sort_name", "mbid", "metadata_source", "external_ids", "country", "biography", "cover_image_id", "track_count", "created_at", "updated_at", "roles"}).
+			AddRow("art-1", "Band", "Band", "", "musicbrainz", `{}`, "", "", nil, time.Now(), time.Now(), 0, ""))
 	// artistRepo.Update
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE artists SET name=$1, sort_name=$2, mbid=$3, country=$4, biography=$5,
-		 cover_image_id=$6, updated_at=NOW()
-		 WHERE id=$7`)).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE artists SET name=$1, sort_name=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+		 name_normalized=$6, country=$7, biography=$8, cover_image_id=$9, updated_at=NOW()
+		 WHERE id=$10`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// albumRepo.FindByID
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE id = $1`)).
 		WithArgs("alb-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
-			AddRow("alb-1", "Album", "art-1", "", "", 0, "", nil, 0, 0.0, time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
+			AddRow("alb-1", "Album", "art-1", "", "musicbrainz", `{}`, "", 0, "", nil, 0, 0.0, time.Now(), time.Now()))
 	// albumRepo.Update
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, mbid=$3, country=$4, year=$5, genre=$6,
-		 cover_image_id=$7, song_count=$8, duration=$9, updated_at=NOW()
-		 WHERE id=$10`)).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+		 title_normalized=$6, country=$7, year=$8, genre=$9,
+		 cover_image_id=$10, song_count=$11, duration=$12, updated_at=NOW()
+		 WHERE id=$13`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/metadata/identify",

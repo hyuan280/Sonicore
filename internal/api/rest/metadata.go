@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
-	"time"
 
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/internal/infrastructure/scanner"
+	"github.com/sonicore/server/pkg/utils"
 )
 
 type MetadataHandler struct {
@@ -23,6 +24,7 @@ type MetadataHandler struct {
 	umRepo       *repository.UserMetadataRepo
 	settingsRepo *repository.SettingsRepo
 	mbCfg        metadata.MBConfig
+	entities     *metadata.EntityResolver
 }
 
 func NewMetadataHandler(db *sql.DB, mbCfg metadata.MBConfig) *MetadataHandler {
@@ -33,7 +35,8 @@ func NewMetadataHandler(db *sql.DB, mbCfg metadata.MBConfig) *MetadataHandler {
 		artistRepo:   repository.NewArtistRepo(db),
 		umRepo:       repository.NewUserMetadataRepo(db),
 		settingsRepo: repository.NewSettingsRepo(db),
-		mbCfg:       mbCfg,
+		mbCfg:        mbCfg,
+		entities:     metadata.NewEntityResolver(db),
 	}
 }
 
@@ -60,29 +63,60 @@ func (h *MetadataHandler) newMBClient(ctx context.Context) *metadata.MBClient {
 func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	var req struct {
-		TrackID    string `json:"track_id"`
-		FileHash   string `json:"file_hash"`
-		TrackMBID  string `json:"track_mbid"`
-		Title      string `json:"title"`
-		Album      string `json:"album"`
-		Year       int    `json:"year"`
-		Genre      string `json:"genre"`
-		AlbumMBID  string `json:"album_mbid"`
+		TrackID      string `json:"track_id"`
+		FileHash     string `json:"file_hash"`
+		TrackMBID    string `json:"track_mbid"`
+		Source       string `json:"source"`
+		Title        string `json:"title"`
+		Album        string `json:"album"`
+		Year         int    `json:"year"`
+		Genre        string `json:"genre"`
+		AlbumMBID    string `json:"album_mbid"`
 		VersionLabel string `json:"version_label"`
-		Artists   []struct {
-			Name string `json:"name"`
-			MBID string `json:"mbid"`
+		Artists []struct {
+			Name   string `json:"name"`
+			MBID   string `json:"mbid"`
+			Source string `json:"source"`
 		} `json:"artists"`
-		Albums    []struct {
+		Albums []struct {
 			ID     string `json:"id"`
 			Title  string `json:"title"`
 			MBID   string `json:"mbid"`
 			Artist string `json:"artist"`
+			Source string `json:"source"`
 		} `json:"albums"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FileHash == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file_hash required"})
 		return
+	}
+
+	// Reject unknown metadata sources up front so no code path (track update
+	// or user-metadata cache) accepts a value that breaks equality checks
+	// and version grouping.
+	if req.Source != "" && !isValidSource(utils.NormalizeSource(req.Source)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported metadata source"})
+		return
+	}
+	for i := range req.Artists {
+		if req.Artists[i].Source != "" {
+			src := utils.NormalizeSource(req.Artists[i].Source)
+			if !isValidSource(src) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported artist metadata source"})
+				return
+			}
+			req.Artists[i].Source = src
+		}
+	}
+	for i := range req.Albums {
+		if req.Albums[i].Source != "" {
+			src := utils.NormalizeSource(req.Albums[i].Source)
+			if !isValidSource(src) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported album metadata source"})
+				return
+			}
+			req.Albums[i].Source = src
+		}
 	}
 
 	// If TrackMBID is provided but album data incomplete, look up from MB
@@ -119,14 +153,16 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(req.Artists) == 0 || (len(req.Artists) == 1 && req.Artists[0].Name == "Unknown Artist") {
 					var filled []struct {
-						Name string `json:"name"`
-						MBID string `json:"mbid"`
+						Name   string `json:"name"`
+						MBID   string `json:"mbid"`
+						Source string `json:"source"`
 					}
 					for _, ar := range result.Artists {
 						filled = append(filled, struct {
-							Name string `json:"name"`
-							MBID string `json:"mbid"`
-						}{Name: ar.Name, MBID: ar.MBID})
+							Name   string `json:"name"`
+							MBID   string `json:"mbid"`
+							Source string `json:"source"`
+						}{Name: ar.Name, MBID: ar.MBID, Source: metadata.SourceMusicBrainz})
 					}
 					if len(filled) > 0 {
 						req.Artists = filled
@@ -163,11 +199,15 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// Immediately update all metadata in DB
 	if req.TrackID != "" {
 		track, err := h.trackRepo.FindByID(r.Context(), req.TrackID)
-		var oldMBID string
+		var oldMBID, oldSource string
 		if err == nil {
 			oldMBID = track.MBID
+			oldSource = track.MetadataSource
 			if req.TrackMBID != "" {
 				track.MBID = req.TrackMBID
+			}
+			if req.Source != "" {
+				track.MetadataSource = utils.NormalizeSource(req.Source)
 			}
 			if req.Title != "" {
 				track.Title = metadata.TrimParenSuffix(req.Title)
@@ -180,13 +220,14 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			// Update artists association
 			if len(req.Artists) == 0 {
 				req.Artists = []struct {
-					Name string `json:"name"`
-					MBID string `json:"mbid"`
+					Name   string `json:"name"`
+					MBID   string `json:"mbid"`
+					Source string `json:"source"`
 				}{{Name: "Unknown Artist"}}
 			}
 			var newArtists []*domain.TrackArtist
 			for i, ar := range req.Artists {
-				a := h.findOrCreateArtist(r.Context(), ar.Name, ar.MBID)
+				a := h.findOrCreateArtist(r.Context(), ar.Name, ar.MBID, ar.Source)
 				if a == nil {
 					continue
 				}
@@ -202,21 +243,21 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Resolve artist helper for new albums
-			resolveArtistID := func(artistName, artistMBID string) string {
+			resolveArtistID := func(artistName, artistMBID, source string) string {
 				if artistMBID != "" {
-					if a := h.findOrCreateArtist(r.Context(), artistName, artistMBID); a != nil {
+					if a := h.findOrCreateArtist(r.Context(), artistName, artistMBID, source); a != nil {
 						return a.ID
 					}
 				}
 				if artistName != "" {
-					if a := h.findOrCreateArtist(r.Context(), artistName, ""); a != nil {
+					if a := h.findOrCreateArtist(r.Context(), artistName, "", source); a != nil {
 						return a.ID
 					}
 				}
 				if len(track.Artists) > 0 {
 					return track.Artists[0].ArtistID
 				}
-				if a := h.findOrCreateArtist(r.Context(), "Unknown Artist", ""); a != nil {
+				if a := h.findOrCreateArtist(r.Context(), "Unknown Artist", "", ""); a != nil {
 					return a.ID
 				}
 				return ""
@@ -227,14 +268,19 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				Title  string `json:"title"`
 				MBID   string `json:"mbid"`
 				Artist string `json:"artist"`
+				Source string `json:"source"`
 			}) (string, bool) {
 				if al.ID != "" {
 					return al.ID, true
 				}
+				source := al.Source
+				if source == "" {
+					source = metadata.SourceMusicBrainz
+				}
 				artistID := ""
 				var year int
 				var country, genre string
-				if al.MBID != "" {
+				if al.MBID != "" && source == metadata.SourceMusicBrainz {
 					if release, err := h.newMBClient(r.Context()).LookupRelease(al.MBID); err == nil {
 						if len(release.Date) >= 4 {
 							fmt.Sscanf(release.Date[:4], "%d", &year)
@@ -246,17 +292,19 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 							if release.Artists[0].Artist != nil {
 								mbid = release.Artists[0].Artist.ID
 							}
-							artistID = resolveArtistID(release.Artists[0].Name, mbid)
+							artistID = resolveArtistID(release.Artists[0].Name, mbid, metadata.SourceMusicBrainz)
 						}
 					}
-				} else {
-					artistID = resolveArtistID(al.Artist, "")
+				}
+				if artistID == "" {
+					artistID = resolveArtistID(al.Artist, al.MBID, al.Source)
 				}
 				if artistID == "" {
 					return "", false
 				}
-				if al.MBID != "" {
-					if album, err := h.albumRepo.FindByMBID(r.Context(), al.MBID); err == nil {
+				if al.MBID != "" || al.Title != "" {
+					album, err := h.entities.FindAlbum(r.Context(), source, al.MBID, al.Title, artistID)
+					if err == nil && album != nil {
 						// Update missing metadata
 						updated := false
 						if album.Year == 0 && year != 0 {
@@ -273,25 +321,11 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 						}
 						return album.ID, true
 					}
-					album := &domain.Album{
-						ID: domain.NewID(), Title: metadata.TrimParenSuffix(al.Title),
-						MBID: al.MBID, ArtistID: artistID,
-						Year: year, Country: country, Genre: genre,
-					}
-					if err := h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album}); err != nil {
-						return "", false
-					}
-					return album.ID, true
-				}
-				if al.Title != "" {
-					if album, err := h.albumRepo.FindByName(r.Context(), al.Title); err == nil {
+					album, err = h.entities.FindOrCreateAlbum(r.Context(), source, al.MBID, al.Title, artistID, year, genre, country)
+					if err == nil {
 						return album.ID, true
 					}
-					album := &domain.Album{ID: domain.NewID(), Title: metadata.TrimParenSuffix(al.Title), ArtistID: artistID}
-					if err := h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album}); err != nil {
-						return "", false
-					}
-					return album.ID, true
+					return "", false
 				}
 				return "", false
 			}
@@ -313,7 +347,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 					if album, err := h.albumRepo.FindByName(r.Context(), "Unknown Album"); err == nil {
 						trackAlbums = append(trackAlbums, &domain.TrackAlbum{AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1})
 					} else {
-						artistID := resolveArtistID("", "")
+						artistID := resolveArtistID("", "", "")
 						album := &domain.Album{ID: domain.NewID(), Title: "Unknown Album", ArtistID: artistID}
 						h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album})
 						trackAlbums = append(trackAlbums, &domain.TrackAlbum{AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1})
@@ -365,7 +399,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err == nil && oldMBID != track.MBID && track.MBID != "" {
-			h.reResolveVersions(r.Context(), track.LibraryID, oldMBID, track.MBID, track.ID)
+			h.reResolveVersions(r.Context(), track.LibraryID, oldMBID, track.MBID, track.ID, oldSource)
 		}
 	}
 
@@ -784,8 +818,12 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 	resolver.Close()
 
 	if enrichment != nil {
-		// MB found a match — apply with overwrite (uses MB data)
-		scanner.ApplyEnrichment(r.Context(), track, meta, enrichment, track.LibraryID, true, h.trackRepo, h.artistRepo, h.albumRepo)
+		// MB found a match — apply with overwrite (uses MB data).
+		// MB data is authoritative for a re-identified track; keep the
+		// metadata source in sync so version grouping and completeness
+		// checks see a consistent (source, mbid) pair.
+		scanner.ApplyEnrichment(r.Context(), track, meta, enrichment, track.LibraryID, true, h.trackRepo, h.artistRepo, h.albumRepo, h.entities)
+		track.MetadataSource = metadata.SourceMusicBrainz
 
 		track.MBID = enrichment.TrackMBID
 		if enrichment.Title != "" {
@@ -812,7 +850,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 		if len(meta.Artists) > 0 {
 			var newArtists []*domain.TrackArtist
 			for i, name := range meta.Artists {
-				a := h.findOrCreateArtist(r.Context(), name, "")
+				a := h.findOrCreateArtist(r.Context(), name, "", "")
 				if a == nil {
 					continue
 				}
@@ -828,7 +866,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			// No artists from probe either — reset to Unknown Artist
-			unknown := h.findOrCreateArtist(r.Context(), "Unknown Artist", "")
+			unknown := h.findOrCreateArtist(r.Context(), "Unknown Artist", "", "")
 			if unknown != nil {
 				h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, []*domain.TrackArtist{{
 					ArtistID:  unknown.ID,
@@ -849,7 +887,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			artistID = track.Artists[0].ArtistID
 		}
 		if artistID == "" {
-			if a := h.findOrCreateArtist(r.Context(), "Unknown Artist", ""); a != nil {
+			if a := h.findOrCreateArtist(r.Context(), "Unknown Artist", "", ""); a != nil {
 				artistID = a.ID
 			}
 		}
@@ -968,88 +1006,87 @@ func (h *MetadataHandler) buildTrackAlbums(ctx context.Context, track *domain.Tr
 	return result
 }
 
-func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, mbid string) *domain.Artist {
-	// If MBID is provided, try to look up by MBID first and fetch country
-	if mbid != "" {
-		if a, err := h.artistRepo.FindByMBID(ctx, mbid); err == nil {
-			if a.Name == "" || a.Name == "Unknown Artist" {
-				a.Name = name
-				a.SortName = name
-			}
-			if a.Country == "" {
-				full, err := h.newMBClient(ctx).LookupArtist(mbid)
-				if err == nil && full.Country != "" {
-					a.Country = full.Country
-				}
-			}
-			h.artistRepo.Update(ctx, a)
-			return a
-		}
-	}
-	// Look up by name
-	a, err := h.artistRepo.FindByName(ctx, name)
+func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, externalID, source string) *domain.Artist {
+	// Resolve through the shared cross-source chain (primary ID → alias →
+	// normalized name → create).
+	a, err := h.entities.FindOrCreateArtist(ctx, source, externalID, name)
 	if err != nil {
-		a = &domain.Artist{
-			ID:        domain.NewID(),
-			Name:      name,
-			SortName:  name,
-			MBID:      mbid,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+		return nil
+	}
+
+	// Backfill country from MusicBrainz when the external ID is a MBID.
+	if externalID != "" && a.Country == "" && sourceOrDefaultSource(source) == metadata.SourceMusicBrainz {
+		if full, err := h.newMBClient(ctx).LookupArtist(externalID); err == nil && full.Country != "" {
+			a.Country = full.Country
+			h.artistRepo.Update(ctx, a)
 		}
-		if mbid != "" {
-			full, err := h.newMBClient(ctx).LookupArtist(mbid)
-			if err == nil {
-				a.Country = full.Country
-				if a.Name == "" || a.Name == "Unknown Artist" {
-					a.Name = full.Name
-					a.SortName = full.SortName
-				}
-			}
-		}
-		h.artistRepo.BatchCreate(ctx, []domain.Artist{*a})
-		a, _ = h.artistRepo.FindByName(ctx, name)
-	} else if mbid != "" && a.MBID == "" {
-		a.MBID = mbid
-		if a.Country == "" {
-			full, err := h.newMBClient(ctx).LookupArtist(mbid)
-			if err == nil && full.Country != "" {
-				a.Country = full.Country
-			}
-		}
-		h.artistRepo.Update(ctx, a)
 	}
 	return a
 }
 
+func sourceOrDefaultSource(s string) string {
+	return utils.SourceOrDefault(s)
+}
+
+// validSources lists the metadata sources the Save endpoint accepts. Extend
+// when a new source registers (e.g. "netease" in Phase 3).
+var validSources = map[string]bool{utils.SourceMusicBrainz: true}
+
+func isValidSource(s string) bool {
+	return validSources[s]
+}
+
 // reResolveVersions handles version grouping after a track's MBID changes.
-func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldMBID, newMBID, trackID string) {
+// oldSource is the metadata source the track had before this save; when it
+// differs from the new source the old group rows are cleaned without a source
+// predicate so no stale (source, mbid) rows survive.
+func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldMBID, newMBID, trackID, oldSource string) {
+	// The previous source may have been empty on legacy rows; normalize it
+	// the same way the new source is normalized below.
+	oldSource = sourceOrDefaultSource(oldSource)
+	newSource, err := h.trackSource(ctx, trackID)
+	if err != nil {
+		log.Printf("[metadata] reResolveVersions: read source for %s: %v", trackID, err)
+		return
+	}
 	if oldMBID != "" {
-		ids := h.mbidGroupIDs(ctx, oldMBID, libraryID)
+		ids := h.mbidGroupIDs(ctx, oldSource, oldMBID, libraryID)
 		if len(ids) < 2 {
 			for _, id := range ids {
 				h.db.ExecContext(ctx, `UPDATE tracks SET version = 0, version_label = '' WHERE id = $1`, id)
 			}
+			// The source may have changed in this same save; drop every
+			// group row for the old MBID regardless of source.
 			h.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE mbid = $1 AND library_id = $2`, oldMBID, libraryID)
 		} else {
-			h.renumberGroup(ctx, ids, oldMBID, libraryID)
+			h.renumberGroup(ctx, oldSource, ids, oldMBID, libraryID)
 		}
 	}
 
-	ids := h.mbidGroupIDs(ctx, newMBID, libraryID)
+	ids := h.mbidGroupIDs(ctx, newSource, newMBID, libraryID)
 	if len(ids) >= 2 {
-		h.renumberGroup(ctx, ids, newMBID, libraryID)
+		h.renumberGroup(ctx, newSource, ids, newMBID, libraryID)
 	}
 }
 
-func (h *MetadataHandler) mbidGroupIDs(ctx context.Context, mbid, libraryID string) []string {
+// trackSource reads the metadata source of a track. A missing track is not
+// an error at this point; the value defaults to musicbrainz on empty.
+func (h *MetadataHandler) trackSource(ctx context.Context, trackID string) (string, error) {
+	var source string
+	if err := h.db.QueryRowContext(ctx, `SELECT metadata_source FROM tracks WHERE id = $1`, trackID).Scan(&source); err != nil {
+		return "", err
+	}
+	return sourceOrDefaultSource(source), nil
+}
+
+func (h *MetadataHandler) mbidGroupIDs(ctx context.Context, source, mbid, libraryID string) []string {
 	rows, err := h.db.QueryContext(ctx,
-		`SELECT id FROM tracks WHERE mbid = $1 AND library_id = $2 ORDER BY
+		`SELECT id FROM tracks WHERE metadata_source = $1 AND mbid = $2 AND library_id = $3 ORDER BY
 		 CASE file_format
 		 WHEN 'flac' THEN 0 WHEN 'alac' THEN 1 WHEN 'wav' THEN 2
 		 WHEN 'aiff' THEN 3 WHEN 'mp3' THEN 4 WHEN 'aac' THEN 5
 		 WHEN 'ogg' THEN 6 WHEN 'opus' THEN 7 ELSE 8 END,
-		 bit_rate DESC, file_path`, mbid, libraryID)
+		 bit_rate DESC, file_path`, source, mbid, libraryID)
 	if err != nil {
 		return nil
 	}
@@ -1063,7 +1100,7 @@ func (h *MetadataHandler) mbidGroupIDs(ctx context.Context, mbid, libraryID stri
 	return ids
 }
 
-func (h *MetadataHandler) renumberGroup(ctx context.Context, ids []string, mbid, libraryID string) {
+func (h *MetadataHandler) renumberGroup(ctx context.Context, source string, ids []string, mbid, libraryID string) {
 	for i, id := range ids {
 		version := 1
 		if i > 0 {
@@ -1076,7 +1113,7 @@ func (h *MetadataHandler) renumberGroup(ctx context.Context, ids []string, mbid,
 		}
 		h.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, existingLabel, id)
 		h.db.ExecContext(ctx,
-			`INSERT INTO track_version_groups (mbid, library_id, track_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-			mbid, libraryID, id)
+			`INSERT INTO track_version_groups (metadata_source, mbid, library_id, track_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+			source, mbid, libraryID, id)
 	}
 }

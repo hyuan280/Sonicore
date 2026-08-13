@@ -122,9 +122,9 @@ func TestCoverServesTrackImage(t *testing.T) {
 	// track with CoverImageID set, owner = u-001
 	rows := sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", "t-001", 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "", "h",
+		AddRow("t-001", "lib-001", "Song", "t-001", 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
 	expectStreamTrack(mock, rows)
 	// IsMember → IsOwner
@@ -156,9 +156,9 @@ func TestCoverFallsBackToAlbumImage(t *testing.T) {
 	// track WITHOUT cover but with album relation
 	rows := sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "", "h",
+		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM tracks WHERE id = $1`)).
 		WithArgs("t-001").
@@ -182,8 +182,8 @@ func TestCoverFallsBackToAlbumImage(t *testing.T) {
 	// albumRepo.FindByID
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE id = $1`)).
 		WithArgs("alb-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
-			AddRow("alb-1", "Album", "art-1", "", "", 0, "", "alb-1", 0, 0.0, time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
+			AddRow("alb-1", "Album", "art-1", "", "musicbrainz", `{}`, "", 0, "", "alb-1", 0, 0.0, time.Now(), time.Now()))
 
 	rec := httptest.NewRecorder()
 	h.Serve(rec, coverRequest(sess, "track", "t-001"))

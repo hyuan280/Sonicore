@@ -59,32 +59,36 @@ type LibraryMember struct {
 }
 
 type Artist struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	SortName     string    `json:"sort_name"`
-	MBID         string    `json:"mbid"`
-	Country      string    `json:"country"`
-	Biography    string    `json:"biography"`
-	CoverImageID *string   `json:"cover_image_id,omitempty"`
-	TrackCount   int       `json:"track_count"`
-	Roles        []string  `json:"roles,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	SortName     string            `json:"sort_name"`
+	MBID         string            `json:"mbid"`
+	MetadataSource string          `json:"metadata_source"`
+	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+	Country      string            `json:"country"`
+	Biography    string            `json:"biography"`
+	CoverImageID *string           `json:"cover_image_id,omitempty"`
+	TrackCount   int               `json:"track_count"`
+	Roles        []string          `json:"roles,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
 }
 
 type Album struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	ArtistID     string    `json:"artist_id"`
-	MBID         string    `json:"mbid"`
-	Country      string    `json:"country"`
-	Year         int       `json:"year"`
-	Genre        string    `json:"genre"`
-	CoverImageID *string   `json:"cover_image_id,omitempty"`
-	SongCount    int       `json:"song_count"`
-	Duration     float64   `json:"duration"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string            `json:"id"`
+	Title        string            `json:"title"`
+	ArtistID     string            `json:"artist_id"`
+	MBID         string            `json:"mbid"`
+	MetadataSource string          `json:"metadata_source"`
+	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+	Country      string            `json:"country"`
+	Year         int               `json:"year"`
+	Genre        string            `json:"genre"`
+	CoverImageID *string           `json:"cover_image_id,omitempty"`
+	SongCount    int               `json:"song_count"`
+	Duration     float64           `json:"duration"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
 
 	Artist *Artist `json:"artist,omitempty"`
 }
@@ -111,6 +115,7 @@ type Track struct {
 	FileFormat   string         `json:"file_format"`
 	AudioCodec   string         `json:"audio_codec"`
 	MBID         string         `json:"mbid"`
+	MetadataSource string       `json:"metadata_source"`
 	AcoustID     string         `json:"acoust_id"`
 	Hash         string         `json:"hash"`
 	LyricsMask   int            `json:"lyrics_mask"`

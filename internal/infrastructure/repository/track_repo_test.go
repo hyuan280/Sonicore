@@ -28,7 +28,8 @@ func testTrack() *domain.Track {
 		FileSize:    10_000_000,
 		FileFormat:  "mp3",
 		AudioCodec:  "mp3",
-		MBID:        "mbid-1",
+		MBID:         "mbid-1",
+		MetadataSource: "musicbrainz",
 		Hash:        "hash-1",
 		LyricsMask:  0,
 		LyricsOffset: 0,
@@ -44,7 +45,7 @@ func testTrack() *domain.Track {
 func trackColumns() []string {
 	return []string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}
 }
 
@@ -52,7 +53,7 @@ func trackValues(t *domain.Track) []driver.Value {
 	vals := []driver.Value{
 		t.ID, t.LibraryID, t.Title, t.CoverImageID,
 		t.Duration, t.BitRate, t.SampleRate, t.Channels,
-		t.FilePath, t.FileSize, t.FileFormat, t.AudioCodec, t.MBID, t.AcoustID, t.Hash,
+		t.FilePath, t.FileSize, t.FileFormat, t.AudioCodec, t.MBID, "musicbrainz", t.AcoustID, t.Hash,
 		t.LyricsMask, t.LyricsOffset, t.Heat, t.PlayCount, t.LastPlayedAt, t.Metadata, t.Version, t.VersionLabel, t.CreatedAt, t.UpdatedAt,
 	}
 	return vals
@@ -365,7 +366,7 @@ func TestTrackRepoBatchCreate(t *testing.T) {
 		WithArgs(
 			track.ID, track.LibraryID, track.Title, track.CoverImageID,
 			track.Duration, track.BitRate, track.SampleRate, track.Channels,
-			track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.MBID, track.AcoustID, track.Hash,
+			track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.MBID, "musicbrainz", track.AcoustID, track.Hash,
 			track.LyricsMask, track.LyricsOffset, track.Heat, track.PlayCount, track.Metadata, track.Version, track.VersionLabel, track.CreatedAt, track.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO track_artists`)).
