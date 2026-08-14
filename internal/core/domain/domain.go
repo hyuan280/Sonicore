@@ -197,7 +197,13 @@ func (v *ImageVariants) Scan(src interface{}) error {
 	if src == nil {
 		return nil
 	}
-	return json.Unmarshal(src.([]byte), v)
+	switch s := src.(type) {
+	case []byte:
+		return json.Unmarshal(s, v)
+	case string:
+		return json.Unmarshal([]byte(s), v)
+	}
+	return fmt.Errorf("unsupported ImageVariants scan type %T", src)
 }
 
 type Playlist struct {

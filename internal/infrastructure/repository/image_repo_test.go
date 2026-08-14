@@ -48,7 +48,7 @@ func TestImageRepoCreate(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO images (id, library_id, owner_type, owner_id, source, path,
 		 format, width, height, size, hash, variants, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`)).
+		 VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`)).
 		WithArgs(img.ID, img.LibraryID, img.OwnerType, img.OwnerID, img.Source, img.Path,
 			img.Format, img.Width, img.Height, img.Size, img.Hash, img.Variants, img.CreatedAt, img.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))

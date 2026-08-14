@@ -5,7 +5,7 @@ import { api } from "../api/client"
 import { usePlayer } from "../stores/player"
 import { Button } from "../components/ui/button"
 import { Play, Disc3, Music } from "lucide-react"
-import { coverUrl } from "../lib/utils"
+import { coverImageUrl } from "../lib/utils"
 import { Link } from "react-router-dom"
 import TrackTable, { type TrackRow } from "../components/TrackTable"
 import { usePerPage } from "../hooks/usePerPage"
@@ -61,7 +61,7 @@ export default function AlbumDetailPage() {
           <div className="flex gap-6 pb-2">
             <div className="w-48 h-48 rounded-xl bg-zinc-800 flex-shrink-0 flex items-center justify-center overflow-hidden">
               {album.cover_image_id ? (
-                <img src={coverUrl("album", album.id, 256)} alt={album.title}
+                <img src={coverImageUrl(album.cover_image_id, 256)} alt={album.title}
                   className="w-full h-full object-cover"
                   onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
               ) : null}

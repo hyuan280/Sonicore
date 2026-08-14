@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sonicore/server/internal/config"
 	"github.com/sonicore/server/internal/infrastructure/cache"
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func newCoverHandler(t *testing.T) (*CoverHandler, sqlmock.Sqlmock, *miniredis.M
 	t.Cleanup(func() { vk.Close() })
 
 	imagesDir := t.TempDir()
-	return NewCoverHandler(db, imagesDir, cache.NewSessionStore(vk)), mock, mr, imagesDir
+	return NewCoverHandler(db, imagesDir, cache.NewSessionStore(vk), metadata.NewCoverManager(imagesDir, db)), mock, mr, imagesDir
 }
 
 func coverSession(t *testing.T, h *CoverHandler) string {
@@ -41,17 +42,23 @@ func coverSession(t *testing.T, h *CoverHandler) string {
 	return sess
 }
 
-func coverRequest(session, ownerType, ownerID string) *http.Request {
-	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/covers/"+session+"/"+ownerType+"/"+ownerID, nil),
-		map[string]string{"session": session, "ownerType": ownerType, "ownerId": ownerID})
+func coverRequest(session, imageID string) *http.Request {
+	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/covers/"+session+"/"+imageID, nil),
+		map[string]string{"session": session, "imageId": imageID})
 	return req
+}
+
+func imageRows(imgID, libraryID, ownerType, ownerID, path, variants string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "library_id", "owner_type", "owner_id", "source", "path",
+		"format", "width", "height", "size", "hash", "variants", "created_at", "updated_at"}).
+		AddRow(imgID, libraryID, ownerType, ownerID, "embedded", path, "jpg", 800, 800, 1234, "h", variants, time.Now(), time.Now())
 }
 
 func TestCoverMissingSession(t *testing.T) {
 	h, _, _, _ := newCoverHandler(t)
 
 	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest("", "album", "alb-1"))
+	h.Serve(rec, coverRequest("", "img-1"))
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.Contains(t, rec.Body.String(), "missing session")
@@ -61,72 +68,74 @@ func TestCoverInvalidSession(t *testing.T) {
 	h, _, _, _ := newCoverHandler(t)
 
 	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest("bogus", "album", "alb-1"))
+	h.Serve(rec, coverRequest("bogus", "img-1"))
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestCoverMissingOwnerParams(t *testing.T) {
+func TestCoverMissingImageID(t *testing.T) {
 	h, _, mr, _ := newCoverHandler(t)
 	sess := coverSession(t, h)
 
 	rec := httptest.NewRecorder()
 	h.Serve(rec, mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/x", nil),
-		map[string]string{"session": sess, "ownerType": "", "ownerId": ""}))
+		map[string]string{"session": sess, "imageId": ""}))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	_ = mr
 }
 
-func TestCoverTrackNotFound(t *testing.T) {
+func TestCoverUnknownImage404(t *testing.T) {
 	h, mock, _, _ := newCoverHandler(t)
 	sess := coverSession(t, h)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM tracks WHERE id = $1`)).
-		WithArgs("missing").
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM images WHERE id = $1`)).
+		WithArgs("ghost").
 		WillReturnError(sql.ErrNoRows)
 
 	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest(sess, "track", "missing"))
+	h.Serve(rec, coverRequest(sess, "ghost"))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Contains(t, rec.Body.String(), "cover not found")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestCoverForbidden(t *testing.T) {
+func TestCoverForbiddenForForeignLibrary(t *testing.T) {
 	h, mock, _, _ := newCoverHandler(t)
 	sess := coverSession(t, h)
 
-	expectStreamTrack(mock, streamTestTrack())
+	// image belongs to lib-999, user u-001 is not a member
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM images WHERE id = $1`)).
+		WithArgs("img-1").
+		WillReturnRows(imageRows("img-1", "lib-999", "track", "t-1", "/x.jpg", "[]"))
 	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
 		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
 		 FROM libraries WHERE id = \$1`).
-		WithArgs("lib-001").
+		WithArgs("lib-999").
 		WillReturnError(sql.ErrNoRows)
 
 	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest(sess, "track", "t-001"))
+	h.Serve(rec, coverRequest(sess, "img-1"))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestCoverServesTrackImage(t *testing.T) {
 	h, mock, _, imagesDir := newCoverHandler(t)
 	sess := coverSession(t, h)
 
-	// create the thumbnail file the handler looks for (64px variant first)
-	thumbPath := filepath.Join(imagesDir, "lib-001", "track_t-001_64.jpg")
-	require.NoError(t, os.MkdirAll(filepath.Dir(thumbPath), 0755))
-	require.NoError(t, os.WriteFile(thumbPath, []byte("jpeg-data"), 0644))
+	// The images row points at a real file (original); the 64 variant fits
+	// the default size request.
+	mainPath := filepath.Join(imagesDir, "lib-001", "track_t-001.jpg")
+	require.NoError(t, os.MkdirAll(filepath.Dir(mainPath), 0755))
+	require.NoError(t, os.WriteFile(mainPath, []byte("jpeg-data"), 0644))
 
-	// track with CoverImageID set, owner = u-001
-	rows := sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
-		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
-		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", "t-001", 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
-			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
-	expectStreamTrack(mock, rows)
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM images WHERE id = $1`)).
+		WithArgs("img-1").
+		WillReturnRows(imageRows("img-1", "lib-001", "track", "t-001", mainPath,
+			`[{"path":"`+mainPath+`","width":800,"height":800,"size":1234}]`))
 	// IsMember → IsOwner
 	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
 		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
@@ -137,40 +146,24 @@ func TestCoverServesTrackImage(t *testing.T) {
 			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
 
 	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest(sess, "track", "t-001"))
+	h.Serve(rec, coverRequest(sess, "img-1"))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "jpeg-data", rec.Body.String())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestCoverFallsBackToAlbumImage(t *testing.T) {
+func TestCoverMissingFileTriesOnDemandThen404(t *testing.T) {
 	h, mock, _, imagesDir := newCoverHandler(t)
 	sess := coverSession(t, h)
 
-	// only the album-level image exists (album fallback uses "album" as dir)
-	albumImg := filepath.Join(imagesDir, "album", "album_alb-1_64.jpg")
-	require.NoError(t, os.MkdirAll(filepath.Dir(albumImg), 0755))
-	require.NoError(t, os.WriteFile(albumImg, []byte("album-jpeg"), 0644))
+	// images row exists but its file was deleted; the on-demand extraction
+	// fails (no real audio file), so the request ends in 404.
+	mainPath := filepath.Join(imagesDir, "lib-001", "track_t-001.jpg")
 
-	// track WITHOUT cover but with album relation
-	rows := sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
-		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
-		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
-			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM tracks WHERE id = $1`)).
-		WithArgs("t-001").
-		WillReturnRows(rows)
-	// albums query returns one album
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
-		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}).
-			AddRow("t-001", "alb-1", 1, 1, "Album", "alb-1"))
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
-		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM images WHERE id = $1`)).
+		WithArgs("img-1").
+		WillReturnRows(imageRows("img-1", "lib-001", "track", "t-001", mainPath, "[]"))
 	// IsMember → IsOwner
 	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
 		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
@@ -179,35 +172,25 @@ func TestCoverFallsBackToAlbumImage(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
 			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
 			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
-	// albumRepo.FindByID
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE id = $1`)).
-		WithArgs("alb-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
-			AddRow("alb-1", "Album", "art-1", "", "musicbrainz", `{}`, "", 0, "", "alb-1", 0, 0.0, time.Now(), time.Now()))
+	// On-demand extraction path: trackRepo.FindByID loads track + relations
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM tracks WHERE id = $1`)).
+		WithArgs("t-001").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
+			"duration", "bit_rate", "sample_rate", "channels",
+			"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
+			"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
+			AddRow("t-001", "lib-001", "Song", "img-1", 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+				0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
+		WithArgs("t-001").
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
+		WithArgs("t-001").
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
 
 	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest(sess, "track", "t-001"))
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "album-jpeg", rec.Body.String(), "falls back to album cover")
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestCoverNoImageFound(t *testing.T) {
-	h, mock, _, _ := newCoverHandler(t)
-	sess := coverSession(t, h)
-
-	expectStreamTrack(mock, streamTestTrack())
-	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
-		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
-		 FROM libraries WHERE id = \$1`).
-		WithArgs("lib-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
-			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
-			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
-
-	rec := httptest.NewRecorder()
-	h.Serve(rec, coverRequest(sess, "artist", "art-1"))
+	h.Serve(rec, coverRequest(sess, "img-1"))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

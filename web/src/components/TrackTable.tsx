@@ -6,7 +6,7 @@ import { usePlayer } from "../stores/player"
 import { api } from "../api/client"
 import { AddBtn, FavBtn, AddQueueBtn } from "./AddToPlaylist"
 import ArtistLink from "./ArtistLink"
-import { formatDuration, coverUrl } from "../lib/utils"
+import { formatDuration, coverImageUrl } from "../lib/utils"
 
 export interface TrackRow {
   id: string
@@ -433,7 +433,7 @@ export default function TrackTable({
                 <div className="w-10 h-10 rounded shrink-0 bg-zinc-800 flex items-center justify-center overflow-hidden relative group cursor-pointer"
                   onClick={(e) => { e.stopPropagation(); if (multi) onToggleSelect(t.id); else onPlay(i); }}>
                   {t.cover_image_id ? (
-                    <img src={coverUrl("track", tId, 64)} alt=""
+                    <img src={coverImageUrl(t.cover_image_id, 64)} alt=""
                       className={`w-full h-full object-cover ${multi && selected.has(t.id) ? "opacity-60" : ""}`}
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                   ) : null}

@@ -40,15 +40,15 @@ type Handler struct {
 	playlistRepo  *repository.PlaylistRepo
 	scanner       *service.ScannerService
 	engineManager *player.EngineManager
-	imagesDir     string
+	images        *repository.ImageRepo
 }
 
-func NewHandler(db *sql.DB, jwt *auth.JWTService, scanner *service.ScannerService, engineManager *player.EngineManager, imagesDir string) *Handler {
+func NewHandler(db *sql.DB, jwt *auth.JWTService, scanner *service.ScannerService, engineManager *player.EngineManager) *Handler {
 	return &Handler{
 		db:            db,
 		jwt:           jwt,
 		userRepo:      repository.NewUserRepo(db),
-		imagesDir:     imagesDir,
+		images:        repository.NewImageRepo(db),
 		trackRepo:     repository.NewTrackRepo(db),
 		albumRepo:     repository.NewAlbumRepo(db),
 		artistRepo:    repository.NewArtistRepo(db),
@@ -1339,6 +1339,9 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, q url.Valu
 	http.ServeFile(w, r, track.FilePath)
 }
 
+// serveCoverArt resolves the id as an images-row id and serves the stored
+// variant. Unknown ids are a hard 404 — clients are expected to pass the
+// coverArt id they received from the API.
 func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Values) {
 	id := q.Get("id")
 	if id == "" {
@@ -1346,61 +1349,33 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 		return
 	}
 
-	coverPath := func(libID, ownerType, ownerID string) string {
-		for _, s := range []int{64, 256} {
-			p := metadata.CoverPathWithSuffix(h.imagesDir, libID, ownerType, ownerID, fmt.Sprintf("_%d", s), "jpg")
-			if fileExists(p) {
-				return p
-			}
-		}
-		return metadata.CoverPathWithSuffix(h.imagesDir, libID, ownerType, ownerID, "", "jpg")
+	img, err := h.images.FindByID(r.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Error(w, "cover art not found", http.StatusNotFound)
+		return
 	}
-
-	ctx := r.Context()
-
-	track, err := h.trackRepo.FindByID(ctx, id)
-	if err == nil && track.CoverImageID != nil {
-		imagePath := coverPath(track.LibraryID, "track", track.ID)
-		if _, err := os.Stat(imagePath); err == nil {
-			http.ServeFile(w, r, imagePath)
-			return
+	if err != nil {
+		log.Printf("[subsonic] cover art lookup error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// getCoverArt accepts an optional size; honor it via the variant picker
+	// (default 256, then the original for small sources).
+	size := 256
+	if s := q.Get("size"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			size = v
 		}
 	}
-
-	var album *domain.Album
-	if track != nil && len(track.Albums) > 0 {
-		album, _ = h.albumRepo.FindByID(ctx, track.Albums[0].AlbumID)
-	} else {
-		album, _ = h.albumRepo.FindByID(ctx, id)
+	p := metadata.ImageVariantPath(img, size)
+	if !fileExists(p) {
+		p = img.Path
 	}
-	if album != nil && album.CoverImageID != nil {
-		imagePath := coverPath("album", "album", album.ID)
-		if _, err := os.Stat(imagePath); err == nil {
-			http.ServeFile(w, r, imagePath)
-			return
-		}
-		if albumTracks, err := h.trackRepo.FindByAlbumID(ctx, album.ID); err == nil {
-			for i := range albumTracks {
-				if albumTracks[i].CoverImageID != nil {
-					if p := coverPath("album", "track", albumTracks[i].ID); fileExists(p) {
-						http.ServeFile(w, r, p)
-						return
-					}
-				}
-			}
-		}
+	if !fileExists(p) {
+		http.Error(w, "cover art not found", http.StatusNotFound)
+		return
 	}
-
-	artist, err := h.artistRepo.FindByID(ctx, id)
-	if err == nil && artist.CoverImageID != nil {
-		imagePath := coverPath("artist", "artist", artist.ID)
-		if _, err := os.Stat(imagePath); err == nil {
-			http.ServeFile(w, r, imagePath)
-			return
-		}
-	}
-
-	http.Error(w, "cover art not found", http.StatusNotFound)
+	http.ServeFile(w, r, p)
 }
 
 func fileExists(path string) bool {

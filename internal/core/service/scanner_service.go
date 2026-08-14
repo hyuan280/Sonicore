@@ -35,21 +35,29 @@ type ScannerService struct {
 	imagesDir  string
 	lyricsDir  string
 	mbCfg      metadata.MBConfig
+	covers     *metadata.CoverManager
 
 	mu         sync.RWMutex
 	activeScan map[string]*ScanProgress
 }
 
-func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.MBConfig) *ScannerService {
+// NewScannerService builds the scanner service. covers is the shared cover
+// manager (may be nil; a private one is created then — note that sharing is
+// required to serialize extraction across scanner and HTTP paths).
+func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.MBConfig, covers *metadata.CoverManager) *ScannerService {
+	if covers == nil {
+		covers = metadata.NewCoverManager(imagesDir, db)
+	}
 	return &ScannerService{
 		db:           db,
-		engine:       scanner.NewEngine(db, imagesDir, mbCfg, lyricsDir),
+		engine:       scanner.NewEngine(db, imagesDir, mbCfg, lyricsDir, covers),
 		scanRepo:     repository.NewScanJobRepo(db),
 		libRepo:      repository.NewLibraryRepo(db),
 		settingsRepo: repository.NewSettingsRepo(db),
 		imagesDir:    imagesDir,
 		lyricsDir:    lyricsDir,
 		mbCfg:       mbCfg,
+		covers:      covers,
 		activeScan:   make(map[string]*ScanProgress),
 	}
 }
@@ -66,7 +74,7 @@ func (s *ScannerService) rebuildEngine(ctx context.Context) {
 	if rl, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
 		fmt.Sscanf(rl, "%d", &cfg.RateLimit)
 	}
-	s.engine = scanner.NewEngine(s.db, s.imagesDir, cfg, s.lyricsDir)
+	s.engine = scanner.NewEngine(s.db, s.imagesDir, cfg, s.lyricsDir, s.covers)
 }
 
 func (s *ScannerService) GetProgress(libraryID string) *ScanProgress {

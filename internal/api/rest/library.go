@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/lib/pq"
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
@@ -25,10 +26,17 @@ type LibraryHandler struct {
 	perm        *middleware.PermissionChecker
 	imagesDir   string
 	lyricsDir   string
+	covers      *metadata.CoverManager
 	manager     *player.EngineManager
 }
 
-func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, manager *player.EngineManager) *LibraryHandler {
+// NewLibraryHandler builds the library handler. covers is the shared cover
+// manager (may be nil; a private one is created then — sharing serializes
+// cover mutations against the scanner and cover-handler paths).
+func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, covers *metadata.CoverManager, manager *player.EngineManager) *LibraryHandler {
+	if covers == nil {
+		covers = metadata.NewCoverManager(imagesDir, db)
+	}
 	return &LibraryHandler{
 		db:          db,
 		libraryRepo: repository.NewLibraryRepo(db),
@@ -36,6 +44,7 @@ func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, manager *player.
 		perm:        middleware.NewPermissionChecker(db),
 		imagesDir:   imagesDir,
 		lyricsDir:   lyricsDir,
+		covers:      covers,
 		manager:     manager,
 	}
 }
@@ -211,15 +220,27 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove covers of albums that no longer have any track.
+	// Remove covers of albums that no longer have any track. Only prune the
+	// album row when its cover cleanup succeeded; otherwise the images row
+	// and files would be orphaned forever (mirrors the scanner path).
+	// Favorites are only removed for albums that were actually pruned.
 	orphanAlbums := h.orphanAlbumIDs(r.Context())
+	var prunedAlbumIDs []string
 	for _, id := range orphanAlbums {
-		metadata.RemoveAlbumCover(h.imagesDir, id)
+		if err := h.covers.DeleteAlbumCovers(r.Context(), id); err != nil {
+			log.Printf("[library] delete album covers for %s: %v (album row kept)", id, err)
+			continue
+		}
+		if _, err := h.db.ExecContext(r.Context(), `DELETE FROM albums WHERE id = $1`, id); err != nil {
+			log.Printf("[library] delete album row %s: %v (cover already removed)", id, err)
+			continue
+		}
+		prunedAlbumIDs = append(prunedAlbumIDs, id)
 	}
-	h.db.ExecContext(r.Context(),
-		`DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
-	h.db.ExecContext(r.Context(),
-		`DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
+	if len(prunedAlbumIDs) > 0 {
+		h.db.ExecContext(r.Context(),
+			`DELETE FROM favorites WHERE item_type = 'album' AND item_id = ANY($1)`, pq.Array(prunedAlbumIDs))
+	}
 	h.db.ExecContext(r.Context(),
 		`DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
 	h.db.ExecContext(r.Context(),

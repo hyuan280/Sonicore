@@ -28,18 +28,25 @@ type Engine struct {
 	artistRepo     *repository.ArtistRepo
 	umRepo         *repository.UserMetadataRepo
 	coverExtractor *metadata.CoverExtractor
+	covers         *metadata.CoverManager
 	resolver       *metadata.Resolver
 	entities       *metadata.EntityResolver
 	lyricsStore    *lyrics.Store
 }
 
-func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig, lyricsDir string) *Engine {
+// NewEngine builds the scanner engine. covers is the shared cover manager
+// (nil creates a private one; pass the server-wide instance to serialize
+// extraction across scanner and HTTP cover requests).
+func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig, lyricsDir string, covers *metadata.CoverManager) *Engine {
 	var resolver *metadata.Resolver
 	if mbCfg.Enabled {
 		resolver = metadata.NewResolver(mbCfg)
 		log.Printf("[scanner] MusicBrainz resolver enabled: %s (rate: %d/s)", mbCfg.APIURL, mbCfg.RateLimit)
 	} else {
 		log.Printf("[scanner] MusicBrainz resolver disabled")
+	}
+	if covers == nil {
+		covers = metadata.NewCoverManager(imagesDir, db)
 	}
 	return &Engine{
 		db:             db,
@@ -48,6 +55,7 @@ func NewEngine(db *sql.DB, imagesDir string, mbCfg metadata.MBConfig, lyricsDir 
 		artistRepo:     repository.NewArtistRepo(db),
 		umRepo:         repository.NewUserMetadataRepo(db),
 		coverExtractor: metadata.NewCoverExtractor(imagesDir),
+		covers:         covers,
 		resolver:       resolver,
 		entities:       metadata.NewEntityResolver(db),
 		lyricsStore:    lyrics.NewStore(lyricsDir),
@@ -196,21 +204,44 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 				changed = true
 			}
 
-			// Backfill cover art when it is missing (e.g. after a database
-			// rebuild, existing tracks are re-scanned without re-creating).
+			// Backfill cover art when the DB pointer or (in overwrite mode)
+			// the underlying file is missing. Only load the album row when a
+			// track-side re-extraction is needed; an album-only gap reuses
+			// the track's existing cover.
 			if meta.HasCoverArt {
 				albumID := ""
 				if len(existing.Albums) > 0 {
 					albumID = existing.Albums[0].AlbumID
 				}
-				if !mainCoverExists(e.coverExtractor, lib.ID, existing.ID) ||
-					(albumID != "" && !mainAlbumCoverExists(e.coverExtractor, albumID)) {
+				if !e.covers.TrackCoverComplete(ctx, existing, overwrite) {
 					var album *domain.Album
 					if albumID != "" {
 						album, _ = e.albumRepo.FindByID(ctx, albumID)
 					}
-					if e.extractCover(ctx, lib.ID, existing, album, path, stats) {
+					if err := e.covers.ExtractTrackCover(ctx, lib.ID, existing, album, true); err != nil {
+						log.Printf("[scan] cover extract error for %s: %v", path, err)
+					} else {
+						stats.CoversExtracted++
 						changed = true
+						// The track file may have been restored while the
+						// album cover file is still missing (overwrite mode):
+						// backfill it in the same pass.
+						if album != nil && !e.covers.AlbumCoverComplete(ctx, album, overwrite) {
+							if err := e.covers.BackfillAlbumCover(ctx, album, true); err != nil {
+								log.Printf("[scan] album cover backfill error for %s: %v", path, err)
+							} else {
+								changed = true
+							}
+						}
+					}
+				} else if albumID != "" {
+					album, err := e.albumRepo.FindByID(ctx, albumID)
+					if err == nil && !e.covers.AlbumCoverComplete(ctx, album, overwrite) {
+						if err := e.covers.BackfillAlbumCover(ctx, album, true); err != nil {
+							log.Printf("[scan] album cover backfill error for %s: %v", path, err)
+						} else {
+							changed = true
+						}
 					}
 				}
 			}
@@ -380,8 +411,19 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 
 		if meta.HasCoverArt {
-			if e.extractCover(ctx, lib.ID, track, album, path, stats) {
-				// nothing to flag: the track record is written below anyway
+			overwrite := opts.Mode == "overwrite"
+			if err := e.covers.ExtractTrackCover(ctx, lib.ID, track, album, true); err != nil {
+				log.Printf("[scan] cover extract error for %s: %v", path, err)
+			} else {
+				stats.CoversExtracted++
+				// Overwrite mode may have a missing album cover file while
+				// the pointer exists; ExtractTrackCover only backfills when
+				// the pointer is empty, so repair it here.
+				if album != nil && !e.covers.AlbumCoverComplete(ctx, album, overwrite) {
+					if err := e.covers.BackfillAlbumCover(ctx, album, true); err != nil {
+						log.Printf("[scan] album cover backfill error for %s: %v", path, err)
+					}
+				}
 			}
 		}
 
@@ -422,13 +464,27 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 	var deletedIDs []string
 	for path := range existingByPath {
 		if !seenPaths[path] {
-			trackID, err := e.trackRepo.DeleteByFilePath(ctx, path, lib.ID)
+			trackID, err := e.trackRepo.FindIDByFilePath(ctx, path, lib.ID)
 			if err != nil {
-				stats.Errors = append(stats.Errors, fmt.Sprintf("delete error %s: %v", path, err))
-			} else if trackID != "" {
-				deletedIDs = append(deletedIDs, trackID)
-				stats.DeletedTracks++
+				stats.Errors = append(stats.Errors, fmt.Sprintf("delete lookup error %s: %v", path, err))
+				continue
 			}
+			if trackID == "" {
+				continue
+			}
+			// Clean the cover first; only delete the track row when that
+			// succeeded, so a transient failure cannot orphan the images
+			// rows and files (owner_id has no FK to tracks).
+			if err := e.covers.DeleteTrackCovers(ctx, lib.ID, trackID); err != nil {
+				stats.Errors = append(stats.Errors, fmt.Sprintf("cover cleanup error %s: %v (track row kept)", trackID, err))
+				continue
+			}
+			if err := e.trackRepo.DeleteByID(ctx, trackID); err != nil {
+				stats.Errors = append(stats.Errors, fmt.Sprintf("delete error %s: %v", trackID, err))
+				continue
+			}
+			deletedIDs = append(deletedIDs, trackID)
+			stats.DeletedTracks++
 		}
 	}
 
@@ -470,15 +526,47 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		}
 		rows.Close()
 		for _, id := range orphanIDs {
-			metadata.RemoveAlbumCover(e.coverExtractor.ImagesDir(), id)
+			// Only prune the album row when its cover cleanup succeeded;
+			// otherwise the images row and files would be orphaned forever.
+			if err := e.covers.DeleteAlbumCovers(ctx, id); err != nil {
+				log.Printf("[scan] delete album covers for %s: %v (album row kept)", id, err)
+				continue
+			}
+			if _, err := e.db.ExecContext(ctx, `DELETE FROM albums WHERE id = $1`, id); err != nil {
+				log.Printf("[scan] delete album row %s: %v (cover already removed)", id, err)
+			}
 		}
 	} else {
 		log.Printf("[scan] orphan album query error: %v", err)
 	}
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
-	e.db.ExecContext(ctx, `DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
-	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'artist' AND item_id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
-	e.db.ExecContext(ctx, `DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`)
+
+	// Prune orphaned artists: cover rows first so a failure keeps the
+	// artist row for a later retry instead of orphaning its images.
+	if rows, err := e.db.QueryContext(ctx,
+		`SELECT id FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`); err == nil {
+		var orphanArtistIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				log.Printf("[scan] orphan artist scan error: %v", err)
+				continue
+			}
+			orphanArtistIDs = append(orphanArtistIDs, id)
+		}
+		rows.Close()
+		for _, id := range orphanArtistIDs {
+			if err := e.covers.DeleteArtistCovers(ctx, id); err != nil {
+				log.Printf("[scan] delete artist covers for %s: %v (artist row kept)", id, err)
+				continue
+			}
+			if _, err := e.db.ExecContext(ctx, `DELETE FROM artists WHERE id = $1`, id); err != nil {
+				log.Printf("[scan] delete artist row %s: %v", id, err)
+			}
+		}
+	} else {
+		log.Printf("[scan] orphan artist query error: %v", err)
+	}
 
 	if err := e.resolveVersions(ctx, lib.ID); err != nil {
 		log.Printf("[scan] version resolution error for %s: %v", lib.Name, err)
@@ -507,96 +595,19 @@ func (e *Engine) ExtractCovers(ctx context.Context, lib *domain.Library, onProgr
 		default:
 		}
 
-		if mainCoverExists(e.coverExtractor, lib.ID, t.ID) {
+		if e.covers.TrackCoverComplete(ctx, &t, true) {
 			continue
 		}
 
-		data, _, err := e.coverExtractor.ExtractFromFile(t.FilePath)
-		if err != nil {
+		if err := e.covers.ExtractTrackCover(ctx, lib.ID, &t, nil, true); err != nil {
 			continue
 		}
-		thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), lib.ID)
-		if err := os.MkdirAll(thumbDir, 0755); err != nil {
-			continue
-		}
-		mainPath := metadata.CoverPath(e.coverExtractor.ImagesDir(), lib.ID, "track", t.ID, "jpg")
-		if err := os.WriteFile(mainPath, data, 0644); err != nil {
-			continue
-		}
-		thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", t.ID))
-		metadata.ResizeToThumbnail(data, thumbPath, 64)
 
 		if onProgress != nil {
 			onProgress(i+1, total)
 		}
 	}
 	return nil
-}
-
-// extractCover extracts embedded cover art for a track and its primary album
-// when either is missing on disk. The track gate is the main cover file
-// (always written at original size); the 64px thumbnail is only produced for
-// sources larger than 64px, so it cannot serve as the existence check. Track
-// and album state are judged by file existence, so deleted image files are
-// restored on the next scan even when the DB pointers still reference them.
-// It returns true when the track's cover state changed (CoverImageID set).
-func (e *Engine) extractCover(ctx context.Context, libraryID string, track *domain.Track, album *domain.Album, audioPath string, stats *ScanStats) bool {
-	trackMissing := !mainCoverExists(e.coverExtractor, libraryID, track.ID)
-	albumMissing := album != nil && !mainAlbumCoverExists(e.coverExtractor, album.ID)
-	if !trackMissing && !albumMissing {
-		return false
-	}
-
-	data, _, err := e.coverExtractor.ExtractFromFile(audioPath)
-	if err != nil {
-		return false
-	}
-
-	changed := false
-	if trackMissing {
-		thumbDir := filepath.Join(e.coverExtractor.ImagesDir(), libraryID)
-		if err := os.MkdirAll(thumbDir, 0755); err != nil {
-			log.Printf("[scan] cover mkdir error for %s: %v", audioPath, err)
-			return false
-		}
-		mainPath := metadata.CoverPath(e.coverExtractor.ImagesDir(), libraryID, "track", track.ID, "jpg")
-		if err := os.WriteFile(mainPath, data, 0644); err != nil {
-			log.Printf("[scan] cover write error for %s: %v", audioPath, err)
-			return false
-		}
-		thumbPath := filepath.Join(thumbDir, fmt.Sprintf("track_%s_64.jpg", track.ID))
-		metadata.ResizeToThumbnail(data, thumbPath, 64)
-		track.CoverImageID = &track.ID
-		stats.CoversExtracted++
-		changed = true
-	}
-	if albumMissing {
-		if _, err := e.coverExtractor.Save("album", "album", album.ID, data, "jpg", 256); err != nil {
-			log.Printf("[scan] album cover save error for %s: %v", audioPath, err)
-			return changed
-		}
-		album.CoverImageID = &album.ID
-		e.albumRepo.Update(ctx, album)
-	}
-	return changed
-}
-
-func mainCoverExists(ce *metadata.CoverExtractor, libraryID, trackID string) bool {
-	p := filepath.Join(ce.ImagesDir(), libraryID, fmt.Sprintf("track_%s.jpg", trackID))
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-func mainAlbumCoverExists(ce *metadata.CoverExtractor, albumID string) bool {
-	p := filepath.Join(ce.ImagesDir(), "album", fmt.Sprintf("album_%s.jpg", albumID))
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-func thumbnailExists(ce *metadata.CoverExtractor, libraryID, trackID string, size int) bool {
-	p := filepath.Join(ce.ImagesDir(), libraryID, fmt.Sprintf("track_%s_%d.jpg", trackID, size))
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 func (e *Engine) findSidecarLyrics(audioPath string) (content string, format string) {
@@ -628,7 +639,9 @@ func (e *Engine) ensureThumbnail(libraryID, trackID string) error {
 		if _, err := os.Stat(thumbPath); err == nil {
 			continue
 		}
-		metadata.ResizeToThumbnail(data, thumbPath, size)
+		if err := metadata.ResizeToThumbnail(data, thumbPath, size); err != nil {
+			log.Printf("[scan] thumbnail resize error %s: %v", thumbPath, err)
+		}
 	}
 	return nil
 }

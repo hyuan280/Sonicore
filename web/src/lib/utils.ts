@@ -16,9 +16,11 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function coverUrl(type: "track" | "album" | "artist", id: string, size?: number): string {
+// coverImageUrl builds the cover URL directly from a cover_image_id (an
+// images-table row id). Callers must only pass a non-empty id.
+export function coverImageUrl(imageID: string, size?: number): string {
   const session = localStorage.getItem("session_token") || ""
-  let url = `/api/c/${session}/${type}/${id}`
+  let url = `/api/c/${session}/${imageID}`
   if (size) url += `?size=${size}`
   return url
 }

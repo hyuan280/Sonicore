@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Button } from "../components/ui/button"
 import { SkipForward, Music, Play } from "lucide-react"
 import { Link } from "react-router-dom"
-import { formatDuration, performerNames, coverUrl } from "../lib/utils"
+import { formatDuration, performerNames, coverImageUrl } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 
 export default function PlayerPage() {
@@ -36,7 +36,7 @@ export default function PlayerPage() {
               <Play className={`w-4 h-4 hidden group-hover:block mr-4 ${i === ps.queueIdx ? "text-green-500" : "text-green-500"}`} />
               <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 overflow-hidden mr-3">
                 {t.cover_image_id ? (
-                  <img src={coverUrl("track", t.id, 64)} alt="" className="w-full h-full object-cover" />
+                  <img src={coverImageUrl(t.cover_image_id, 64)} alt="" className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
                     <Music className="w-4 h-4 text-zinc-600" />

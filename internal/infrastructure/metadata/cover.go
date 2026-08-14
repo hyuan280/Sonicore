@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/image/draw"
 )
@@ -23,8 +25,21 @@ func NewCoverExtractor(imagesDir string) *CoverExtractor {
 	return &CoverExtractor{imagesDir: imagesDir}
 }
 
-func (ce *CoverExtractor) ExtractFromFile(audioPath string) ([]byte, string, error) {
-	cmd := exec.Command("ffmpeg",
+// extractCoverTimeout bounds a single ffmpeg extraction so a hung process
+// cannot block the shared extraction lock indefinitely.
+const extractCoverTimeout = 30 * time.Second
+
+// ExtractFromFile pulls the embedded cover bytes from an audio file. The
+// caller's context is honored (with a hard timeout) so a disconnected
+// client aborts the ffmpeg subprocess instead of holding the extraction
+// lock for the full duration.
+func (ce *CoverExtractor) ExtractFromFile(ctx context.Context, audioPath string) ([]byte, string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, extractCoverTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-y",
 		"-i", audioPath,
 		"-an",
@@ -67,7 +82,9 @@ func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte
 	}
 	for _, size := range sizes {
 		thumbPath := filepath.Join(dir, fmt.Sprintf("%s_%s_%d.jpg", ownerType, ownerID, size))
-		ResizeToThumbnail(data, thumbPath, size)
+		if err := ResizeToThumbnail(data, thumbPath, size); err != nil {
+			log.Printf("[cover] thumbnail error %s: %v", thumbPath, err)
+		}
 	}
 	return path, nil
 }
@@ -82,11 +99,15 @@ func detectImageType(data []byte) string {
 	return "jpg"
 }
 
-func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
+// ResizeToThumbnail scales data to fit maxSize and writes it as JPEG.
+// A source already at or below the target size produces no file and returns
+// nil (the serving chain falls back to larger sizes / the original). Any
+// failure (decode, create, encode) returns an error and removes a partial
+// output file so callers never treat partial bytes as a valid thumbnail.
+func ResizeToThumbnail(data []byte, outputPath string, maxSize int) error {
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		log.Printf("[cover] image.Decode error: %v", err)
-		return
+		return fmt.Errorf("image.Decode: %w", err)
 	}
 
 	bounds := src.Bounds()
@@ -97,7 +118,7 @@ func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
 	// is produced. Cover requests fall back to larger sizes / the original
 	// via the serving chain, so the missing file is not an error state.
 	if w <= maxSize && h <= maxSize {
-		return
+		return nil
 	}
 
 	scale := float64(maxSize) / float64(w)
@@ -113,11 +134,19 @@ func ResizeToThumbnail(data []byte, outputPath string, maxSize int) {
 
 	out, err := os.Create(outputPath)
 	if err != nil {
-		log.Printf("[cover] create thumbnail error: %v", err)
-		return
+		return fmt.Errorf("create thumbnail: %w", err)
 	}
 	defer out.Close()
-	jpeg.Encode(out, dst, &jpeg.Options{Quality: 85})
+	if err := jpeg.Encode(out, dst, &jpeg.Options{Quality: 85}); err != nil {
+		// Close before removing so the partial file can be unlinked even on
+		// platforms that refuse to delete open files.
+		out.Close()
+		if rerr := os.Remove(outputPath); rerr != nil && !os.IsNotExist(rerr) {
+			log.Printf("[cover] remove partial thumbnail %s: %v", outputPath, rerr)
+		}
+		return fmt.Errorf("encode thumbnail: %w", err)
+	}
+	return nil
 }
 
 func (ce *CoverExtractor) ImagesDir() string {
@@ -145,4 +174,21 @@ func RemoveAlbumCover(imagesDir, albumID string) {
 			log.Printf("[cover] remove album cover error: %v", err)
 		}
 	}
+}
+
+// CoverFileExists reports whether a cover file is present on disk.
+// CoverFileExists reports whether a cover file is present on disk. Only a
+// missing file counts as absent; genuine filesystem errors (permissions,
+// I/O) are logged and treated as present (fail-safe), so they are not
+// mistaken for a deleted cover and do not trigger needless re-extraction.
+func CoverFileExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	log.Printf("[cover] stat error %s: %v", path, err)
+	return true
 }

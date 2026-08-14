@@ -445,6 +445,16 @@ func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 	return tx.Commit()
 }
 
+// SetCoverImage points a track at its images row without touching related
+// tables. Safe to call before the track row exists (no-op, the create path
+// persists the in-memory value) and from the on-demand cover restore path.
+func (r *TrackRepo) SetCoverImage(ctx context.Context, trackID, imageID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tracks SET cover_image_id=$1, updated_at=NOW() WHERE id=$2`,
+		imageID, trackID)
+	return err
+}
+
 func (r *TrackRepo) UpdateLyricsOffset(ctx context.Context, trackID string, offset float64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE tracks SET lyrics_offset=$1, updated_at=NOW() WHERE id=$2`,
@@ -460,6 +470,24 @@ func (r *TrackRepo) DeleteByFilePath(ctx context.Context, path, libraryID string
 		return "", nil
 	}
 	return id, err
+}
+
+// FindIDByFilePath resolves the track id for a path without deleting the
+// row (used to gate cover cleanup before the track row is removed).
+func (r *TrackRepo) FindIDByFilePath(ctx context.Context, path, libraryID string) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM tracks WHERE file_path = $1 AND library_id = $2`, path, libraryID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+
+// DeleteByID removes a track row by id.
+func (r *TrackRepo) DeleteByID(ctx context.Context, trackID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM tracks WHERE id = $1`, trackID)
+	return err
 }
 
 func (r *TrackRepo) ReplaceTrackArtists(ctx context.Context, trackID string, artists []*domain.TrackArtist) error {

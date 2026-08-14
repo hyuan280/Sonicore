@@ -89,7 +89,10 @@ func New(cfg *config.Config) (*Server, error) {
 		AppName:   cfg.Metadata.MusicBrainzAppName,
 		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
 	}
-	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg)
+	// One cover manager shared by the scanner and the HTTP cover handlers so
+	// extraction is serialized across both paths.
+	covers := metadata.NewCoverManager(cfg.Data.ImagesDir, db)
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, covers)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
@@ -97,7 +100,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, covers)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -117,7 +120,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, covers *metadata.CoverManager) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -125,7 +128,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		w.Write([]byte("pong"))
 	}).Methods("GET")
 
-	subsonicHandler := subsonic.NewHandler(db, jwtService, scannerService, engineManager, cfg.Data.ImagesDir)
+	subsonicHandler := subsonic.NewHandler(db, jwtService, scannerService, engineManager)
 	r.PathPrefix("/rest").Handler(subsonicHandler)
 
 	api := r.PathPrefix("/api").Subrouter()
@@ -158,7 +161,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 
 	protected.HandleFunc("/auth/logout", authHandler.Logout).Methods("POST")
 
-	libHandler := rest.NewLibraryHandler(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, engineManager)
+	libHandler := rest.NewLibraryHandler(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, covers, engineManager)
 	protected.HandleFunc("/libraries", libHandler.Create).Methods("POST")
 	protected.HandleFunc("/libraries", libHandler.List).Methods("GET")
 	protected.HandleFunc("/libraries/{id}", libHandler.Get).Methods("GET")
@@ -209,8 +212,8 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	api.HandleFunc("/s/{session}/{id}", streamHandler.ServeStream).Methods("GET")
 	api.HandleFunc("/s/{session}/{id}/transcode-status", streamHandler.ServeTranscodeStatus).Methods("GET")
 
-	coverHandler := rest.NewCoverHandler(db, cfg.Data.ImagesDir, sessionStore)
-	api.HandleFunc("/c/{session}/{ownerType}/{ownerId}", coverHandler.Serve).Methods("GET")
+	coverHandler := rest.NewCoverHandler(db, cfg.Data.ImagesDir, sessionStore, covers)
+	api.HandleFunc("/c/{session}/{imageId}", coverHandler.Serve).Methods("GET")
 
 	userData := rest.NewUserDataHandler(db)
 	protected.HandleFunc("/user/favorites/list", userData.ListFavorites).Methods("GET")

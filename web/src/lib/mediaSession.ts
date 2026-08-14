@@ -1,5 +1,5 @@
 import type { PlayerTrack } from "../stores/player"
-import { coverUrl, performerNames } from "./utils"
+import { coverImageUrl, performerNames } from "./utils"
 
 export function mediaSessionSupported(): boolean {
   return typeof navigator !== "undefined" && "mediaSession" in navigator
@@ -14,7 +14,7 @@ export function setMediaSessionMetadata(track: PlayerTrack | null) {
   const artwork = track.cover_image_id
     ? [
         {
-          src: new URL(coverUrl("track", track.id, 512), window.location.href).href,
+          src: new URL(coverImageUrl(track.cover_image_id, 512), window.location.href).href,
           sizes: "512x512",
           type: "image/jpeg",
         },

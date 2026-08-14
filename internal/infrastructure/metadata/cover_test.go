@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -72,7 +73,7 @@ func TestResizeToThumbnailSmallImageNoFile(t *testing.T) {
 
 	// 50x50 smaller than max 64 → no thumbnail written; the serving chain
 	// falls back to the original file.
-	ResizeToThumbnail(makePNG(t, 50), path, 64)
+	require.NoError(t, ResizeToThumbnail(makePNG(t, 50), path, 64))
 	_, err := os.Stat(path)
 	assert.ErrorIs(t, err, os.ErrNotExist, "small image should not produce a thumbnail")
 }
@@ -81,7 +82,7 @@ func TestResizeToThumbnailLargeImage(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "thumb.jpg")
 
-	ResizeToThumbnail(makePNG(t, 800), path, 64)
+	require.NoError(t, ResizeToThumbnail(makePNG(t, 800), path, 64))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -100,7 +101,7 @@ func TestResizeToThumbnailTallImage(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, png.Encode(&buf, img))
 
-	ResizeToThumbnail(buf.Bytes(), path, 64)
+	require.NoError(t, ResizeToThumbnail(buf.Bytes(), path, 64))
 
 	decoded, _, err := image.Decode(bytes.NewReader(mustRead(t, path)))
 	require.NoError(t, err)
@@ -111,7 +112,7 @@ func TestResizeToThumbnailTallImage(t *testing.T) {
 func TestResizeToThumbnailInvalidData(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "thumb.jpg")
-	ResizeToThumbnail([]byte("not-an-image"), path, 64)
+	require.Error(t, ResizeToThumbnail([]byte("not-an-image"), path, 64))
 	_, err := os.Stat(path)
 	assert.ErrorIs(t, err, os.ErrNotExist, "invalid data must not create a file")
 }
@@ -151,7 +152,7 @@ func TestCoverExtractorSaveCustomSizes(t *testing.T) {
 
 func TestCoverExtractorExtractFromFileNoFFmpeg(t *testing.T) {
 	ce := NewCoverExtractor(t.TempDir())
-	_, _, err := ce.ExtractFromFile("/nonexistent/audio.mp3")
+	_, _, err := ce.ExtractFromFile(context.Background(), "/nonexistent/audio.mp3")
 	require.Error(t, err)
 }
 

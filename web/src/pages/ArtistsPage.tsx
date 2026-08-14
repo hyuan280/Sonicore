@@ -4,7 +4,7 @@ import { Link } from "react-router-dom"
 import { api } from "../api/client"
 import { Card, CardGrid } from "../components/ui/card"
 import { Mic2, LayoutGrid, List, Music, X, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react"
-import { coverUrl } from "../lib/utils"
+import { coverImageUrl } from "../lib/utils"
 import { usePerPage } from "../hooks/usePerPage"
 
 export default function ArtistsPage() {
@@ -163,7 +163,7 @@ export default function ArtistsPage() {
                 <Card className="flex flex-col hover:bg-zinc-800/50 transition-colors">
                   <div className="aspect-square rounded-full bg-zinc-800 mb-3 flex items-center justify-center overflow-hidden">
                     {a.cover_image_id ? (
-                      <img src={coverUrl("artist", a.id, 256)} alt={a.name}
+                      <img src={coverImageUrl(a.cover_image_id, 256)} alt={a.name}
                         className="w-full h-full object-cover"
                         onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                     ) : null}
@@ -185,7 +185,7 @@ export default function ArtistsPage() {
                 className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors">
                 <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">
                   {a.cover_image_id ? (
-                    <img src={coverUrl("artist", a.id, 256)} alt={a.name}
+                    <img src={coverImageUrl(a.cover_image_id, 256)} alt={a.name}
                       className="w-full h-full object-cover"
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                   ) : null}

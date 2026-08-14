@@ -65,7 +65,7 @@ describe("mediaSession", () => {
       expect(data.artist).toBe("Artist")
       expect(data.album).toBe("Album")
       expect(data.artwork).toEqual([
-        { src: expect.stringContaining("/api/c/sess/track/t1?size=512"), sizes: "512x512", type: "image/jpeg" },
+        { src: expect.stringContaining("/api/c/sess/img1?size=512"), sizes: "512x512", type: "image/jpeg" },
       ])
     })
 

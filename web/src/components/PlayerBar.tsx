@@ -5,7 +5,7 @@ import { useAuth } from "../stores/auth"
 import { api } from "../api/client"
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, Repeat, Shuffle, Trash2, Repeat1, Heart, Music, FileText, PictureInPicture2, FileMusic, Music2, Music3 } from "lucide-react"
 import { Link } from "react-router-dom"
-import { formatDuration, coverUrl, performerNames } from "../lib/utils"
+import { formatDuration, coverImageUrl, performerNames } from "../lib/utils"
 import ArtistLink from "../components/ArtistLink"
 import LyricsPanel from "../components/LyricsPanel"
 import { isDesktopLyricsSupported, isDesktopLyricsOpen, openDesktopLyrics, closeDesktopLyrics, subscribeDesktopLyrics } from "../lib/desktopLyrics"
@@ -479,7 +479,7 @@ export default function PlayerBar() {
               <>
                 <div className="w-10 h-10 rounded bg-zinc-800 flex-shrink-0 flex items-center justify-center text-xs text-zinc-500 overflow-hidden">
                   {track.cover_image_id ? (
-                    <img src={coverUrl("track", track.id, 64)} alt={track.title}
+                    <img src={coverImageUrl(track.cover_image_id, 64)} alt={track.title}
                       className="w-full h-full object-cover"
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
                   ) : null}

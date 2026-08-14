@@ -3,7 +3,7 @@ import {
   cn,
   formatDuration,
   formatFileSize,
-  coverUrl,
+  coverImageUrl,
   performerNames,
   parseLRC,
   findCurrentLine,
@@ -47,23 +47,23 @@ describe("formatFileSize", () => {
   })
 })
 
-describe("coverUrl", () => {
+describe("coverImageUrl", () => {
   beforeEach(() => {
     localStorage.clear()
   })
 
-  it("includes session token and type/id", () => {
+  it("includes session token and image id", () => {
     localStorage.setItem("session_token", "sess123")
-    expect(coverUrl("track", "t1")).toBe("/api/c/sess123/track/t1")
+    expect(coverImageUrl("img-1")).toBe("/api/c/sess123/img-1")
   })
 
   it("appends size param when given", () => {
     localStorage.setItem("session_token", "s")
-    expect(coverUrl("album", "a1", 256)).toBe("/api/c/s/album/a1?size=256")
+    expect(coverImageUrl("img-1", 256)).toBe("/api/c/s/img-1?size=256")
   })
 
   it("leaves session empty when not stored", () => {
-    expect(coverUrl("artist", "ar1")).toBe("/api/c//artist/ar1")
+    expect(coverImageUrl("img-1")).toBe("/api/c//img-1")
   })
 })
 

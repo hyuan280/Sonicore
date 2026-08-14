@@ -61,6 +61,34 @@ func RunMigrations(db *sql.DB) error {
 		PRIMARY KEY (library_id, user_id)
 	);
 
+	CREATE TABLE IF NOT EXISTS images (
+		id         VARCHAR(26) PRIMARY KEY,
+		-- Only track covers belong to a library; album/artist covers are
+		-- shared and reference no library.
+		library_id VARCHAR(26) REFERENCES libraries(id) ON DELETE CASCADE,
+		owner_type VARCHAR(20) NOT NULL,
+		owner_id   VARCHAR(26) NOT NULL,
+		source     VARCHAR(20) NOT NULL,
+		path       TEXT NOT NULL,
+		format     VARCHAR(10) NOT NULL DEFAULT '',
+		width      INTEGER NOT NULL DEFAULT 0,
+		height     INTEGER NOT NULL DEFAULT 0,
+		size       BIGINT NOT NULL DEFAULT 0,
+		hash       VARCHAR(64) NOT NULL DEFAULT '',
+		variants   JSONB,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		CONSTRAINT chk_images_track_library CHECK (
+			owner_type IN ('track', 'album', 'artist') AND (
+				(owner_type = 'track' AND library_id IS NOT NULL) OR
+				(owner_type <> 'track' AND library_id IS NULL)
+			)
+		)
+	);
+	CREATE INDEX IF NOT EXISTS idx_images_owner ON images(owner_type, owner_id);
+	CREATE INDEX IF NOT EXISTS idx_images_owner_path ON images(owner_type, path);
+	CREATE INDEX IF NOT EXISTS idx_images_hash ON images(hash);
+
 	CREATE TABLE IF NOT EXISTS artists (
 		id         VARCHAR(26) PRIMARY KEY,
 		name       VARCHAR(255) NOT NULL,
@@ -71,7 +99,7 @@ func RunMigrations(db *sql.DB) error {
 		name_normalized VARCHAR(255) NOT NULL DEFAULT '',
 		country    VARCHAR(4) NOT NULL DEFAULT '',
 		biography  TEXT NOT NULL DEFAULT '',
-		cover_image_id VARCHAR(26),
+		cover_image_id VARCHAR(26) REFERENCES images(id) ON DELETE SET NULL,
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
@@ -92,7 +120,7 @@ func RunMigrations(db *sql.DB) error {
 		country      VARCHAR(4) NOT NULL DEFAULT '',
 		year         INTEGER NOT NULL DEFAULT 0,
 		genre        VARCHAR(128) NOT NULL DEFAULT '',
-		cover_image_id VARCHAR(26),
+		cover_image_id VARCHAR(26) REFERENCES images(id) ON DELETE SET NULL,
 		song_count   INTEGER NOT NULL DEFAULT 0,
 		duration     DOUBLE PRECISION NOT NULL DEFAULT 0,
 		created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -109,7 +137,7 @@ func RunMigrations(db *sql.DB) error {
 		id            VARCHAR(26) PRIMARY KEY,
 		library_id    VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
 		title         VARCHAR(255) NOT NULL,
-		cover_image_id VARCHAR(26),
+		cover_image_id VARCHAR(26) REFERENCES images(id) ON DELETE SET NULL,
 		duration      DOUBLE PRECISION NOT NULL DEFAULT 0,
 		bit_rate      INTEGER NOT NULL DEFAULT 0,
 		sample_rate   INTEGER NOT NULL DEFAULT 0,
@@ -166,25 +194,6 @@ func RunMigrations(db *sql.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_tvg_mbid ON track_version_groups(metadata_source, mbid);
 	CREATE INDEX IF NOT EXISTS idx_tvg_library ON track_version_groups(library_id);
-
-	CREATE TABLE IF NOT EXISTS images (
-		id         VARCHAR(26) PRIMARY KEY,
-		library_id VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
-		owner_type VARCHAR(20) NOT NULL,
-		owner_id   VARCHAR(26) NOT NULL,
-		source     VARCHAR(20) NOT NULL,
-		path       TEXT NOT NULL,
-		format     VARCHAR(10) NOT NULL DEFAULT '',
-		width      INTEGER NOT NULL DEFAULT 0,
-		height     INTEGER NOT NULL DEFAULT 0,
-		size       BIGINT NOT NULL DEFAULT 0,
-		hash       VARCHAR(64) NOT NULL DEFAULT '',
-		variants   JSONB,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-	);
-	CREATE INDEX IF NOT EXISTS idx_images_owner ON images(owner_type, owner_id);
-	CREATE INDEX IF NOT EXISTS idx_images_hash ON images(hash);
 
 	CREATE TABLE IF NOT EXISTS playlists (
 		id         VARCHAR(26) PRIMARY KEY,

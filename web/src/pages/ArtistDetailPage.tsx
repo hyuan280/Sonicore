@@ -4,7 +4,7 @@ import { useParams, Link } from "react-router-dom"
 import { api } from "../api/client"
 import { usePlayer, type PlayerTrack } from "../stores/player"
 import { Play, Mic2, Music } from "lucide-react"
-import { coverUrl } from "../lib/utils"
+import { coverImageUrl } from "../lib/utils"
 import TrackTable, { type TrackRow } from "../components/TrackTable"
 import { usePerPage } from "../hooks/usePerPage"
 
@@ -78,7 +78,7 @@ export default function ArtistDetailPage() {
           <div className="flex gap-6 pb-2">
             <div className="w-48 h-48 rounded-full bg-zinc-800 flex-shrink-0 flex items-center justify-center overflow-hidden">
               {artist.cover_image_id ? (
-                <img src={coverUrl("artist", artist.id)} alt={artist.name}
+                <img src={coverImageUrl(artist.cover_image_id)} alt={artist.name}
                   className="w-full h-full object-cover"
                   onError={e => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden") }} />
               ) : null}
