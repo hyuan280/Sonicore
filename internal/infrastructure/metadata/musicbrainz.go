@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,9 +35,17 @@ type MBConfig struct {
 	RateLimit int
 	AppName   string
 	AppVer    string
+	// Client, when set, is the shared MBClient all request paths reuse (one
+	// rate limiter, one HTTP client). NewMBClient applies this config to it
+	// and returns it instead of building a new instance.
+	Client *MBClient
 }
 
 func NewMBClient(cfg MBConfig) *MBClient {
+	if cfg.Client != nil {
+		cfg.Client.applyConfig(cfg)
+		return cfg.Client
+	}
 	if cfg.APIURL == "" {
 		cfg.APIURL = "https://musicbrainz.org/ws/2"
 	}
@@ -50,32 +59,102 @@ func NewMBClient(cfg MBConfig) *MBClient {
 		cfg.AppVer = "0.1.0"
 	}
 	return &MBClient{
-		http:           &http.Client{Timeout: 10 * time.Second},
-		base:           cfg.APIURL,
-		appName:        cfg.AppName,
-		appVer:         cfg.AppVer,
+		http:            &http.Client{Timeout: 10 * time.Second},
+		base:            cfg.APIURL,
+		appName:         cfg.AppName,
+		appVer:          cfg.AppVer,
 		rateLimitPerSec: cfg.RateLimit,
 	}
 }
 
-func (c *MBClient) rateLimit() {
+// applyConfig applies runtime config changes (API URL, rate limit, UA) to a
+// shared client without recreating it, so a single MBClient keeps one rate
+// limiter and one HTTP client across registry rebuilds and request paths.
+// Only non-empty values override, so the initial defaults survive later
+// configs that omit a field. Caller must not hold c.mu.
+func (c *MBClient) applyConfig(cfg MBConfig) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.rateLimitPerSec <= 0 {
-		return
+	if cfg.APIURL != "" {
+		c.base = cfg.APIURL
 	}
-	interval := time.Second / time.Duration(c.rateLimitPerSec)
-	elapsed := time.Since(c.lastReq)
-	if elapsed < interval {
-		time.Sleep(interval - elapsed)
+	if cfg.RateLimit > 0 {
+		c.rateLimitPerSec = cfg.RateLimit
 	}
-	c.lastReq = time.Now()
+	if cfg.AppName != "" {
+		c.appName = cfg.AppName
+	}
+	if cfg.AppVer != "" {
+		c.appVer = cfg.AppVer
+	}
 }
 
-func (c *MBClient) get(path string, params url.Values, out interface{}) error {
-	c.rateLimit()
+// snapshot returns the config fields used by a request under the lock, so an
+// applyConfig on a shared client never races a read.
+func (c *MBClient) snapshot() (base, appName, appVer string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.base, c.appName, c.appVer
+}
 
-	u := c.base + path
+// rateLimit paces requests against the shared client's rate limit using
+// ticket-based pacing: each request claims the next slot (lastReq +
+// interval), so concurrent callers get distinct slots and the limit holds
+// without serializing on a lock during the wait. The wait is cancellable via
+// ctx; a cancelled wait releases its claimed slot.
+func (c *MBClient) rateLimit(ctx context.Context) error {
+	c.mu.Lock()
+	perSec := c.rateLimitPerSec
+	if perSec <= 0 {
+		c.mu.Unlock()
+		return nil
+	}
+	interval := time.Second / time.Duration(perSec)
+	now := time.Now()
+	if c.lastReq.IsZero() {
+		// First ever request is not delayed.
+		c.lastReq = now.Add(-interval)
+	}
+	next := c.lastReq.Add(interval)
+	if next.Before(now) {
+		// The limiter has been idle longer than one interval (or an upstream
+		// request already took longer than the interval): claim the current
+		// slot instead of forcing a full interval of artificial delay on every
+		// sequential request, which would degrade throughput from
+		// min(1/T, rate) to 1/(T+interval).
+		next = now
+	}
+	c.lastReq = next
+	c.mu.Unlock()
+
+	wait := next.Sub(now)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		// Release the claimed slot only when it is still ours (a later
+		// caller may have claimed past it).
+		c.mu.Lock()
+		if c.lastReq.Equal(next) {
+			c.lastReq = next.Add(-interval)
+		}
+		c.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func (c *MBClient) get(ctx context.Context, path string, params url.Values, out interface{}) error {
+	if err := c.rateLimit(ctx); err != nil {
+		return err
+	}
+
+	base, appName, appVer := c.snapshot()
+	u := base + path
 	if params == nil {
 		params = url.Values{}
 	}
@@ -84,11 +163,11 @@ func (c *MBClient) get(path string, params url.Values, out interface{}) error {
 
 	log.Printf("[mb] GET %s", u)
 
-	req, err := http.NewRequest("GET", u, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", fmt.Sprintf("%s/%s ( sonicore@localhost )", c.appName, c.appVer))
+	req.Header.Set("User-Agent", fmt.Sprintf("%s/%s ( sonicore@localhost )", appName, appVer))
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -178,7 +257,7 @@ type MBRecording struct {
 	Tags []MBTag `json:"tags,omitempty"`
 }
 
-func (c *MBClient) SearchRecordings(title string, artists []string, album string) ([]MBRecording, error) {
+func (c *MBClient) SearchRecordings(ctx context.Context, title string, artists []string, album string) ([]MBRecording, error) {
 	var result MBRecordingSearch
 	q := url.Values{}
 	query := "recording:" + title
@@ -194,20 +273,20 @@ func (c *MBClient) SearchRecordings(title string, artists []string, album string
 	q.Set("limit", "10")
 	q.Set("inc", "artists+releases+tags")
 
-	if err := c.get("/recording", q, &result); err != nil {
+	if err := c.get(ctx, "/recording", q, &result); err != nil {
 		return nil, err
 	}
 
 	return result.Recordings, nil
 }
 
-func (c *MBClient) SearchArtist(name string) (*MBArtistBrief, error) {
+func (c *MBClient) SearchArtist(ctx context.Context, name string) (*MBArtistBrief, error) {
 	var result MBArtistSearch
 	q := url.Values{}
 	q.Set("query", fmt.Sprintf("artist:%s", name))
 	q.Set("limit", "5")
 
-	if err := c.get("/artist", q, &result); err != nil {
+	if err := c.get(ctx, "/artist", q, &result); err != nil {
 		return nil, err
 	}
 
@@ -218,26 +297,26 @@ func (c *MBClient) SearchArtist(name string) (*MBArtistBrief, error) {
 	return &result.Artists[0], nil
 }
 
-func (c *MBClient) SearchArtists(name string) ([]MBArtistBrief, error) {
+func (c *MBClient) SearchArtists(ctx context.Context, name string) ([]MBArtistBrief, error) {
 	var result MBArtistSearch
 	q := url.Values{}
 	q.Set("query", fmt.Sprintf("artist:%s", name))
 	q.Set("limit", "10")
 
-	if err := c.get("/artist", q, &result); err != nil {
+	if err := c.get(ctx, "/artist", q, &result); err != nil {
 		return nil, err
 	}
 	return result.Artists, nil
 }
 
-func (c *MBClient) SearchReleases(name string) ([]MBRelease, error) {
+func (c *MBClient) SearchReleases(ctx context.Context, name string) ([]MBRelease, error) {
 	var result MBReleaseSearch
 	q := url.Values{}
 	q.Set("query", fmt.Sprintf("release:%s", name))
 	q.Set("limit", "10")
 	q.Set("inc", "artists")
 
-	if err := c.get("/release", q, &result); err != nil {
+	if err := c.get(ctx, "/release", q, &result); err != nil {
 		return nil, err
 	}
 	return result.Releases, nil
@@ -260,15 +339,15 @@ type MBArtistFull struct {
 	Tags []MBTag `json:"tags"`
 }
 
-func (c *MBClient) LookupArtist(mbid string) (*MBArtistFull, error) {
+func (c *MBClient) LookupArtist(ctx context.Context, mbid string) (*MBArtistFull, error) {
 	var result MBArtistFull
-	if err := c.get("/artist/"+mbid, nil, &result); err != nil {
+	if err := c.get(ctx, "/artist/"+mbid, nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *MBClient) SearchRelease(title, artist string) (*MBRelease, error) {
+func (c *MBClient) SearchRelease(ctx context.Context, title, artist string) (*MBRelease, error) {
 	var result MBReleaseSearch
 	q := url.Values{}
 	query := fmt.Sprintf("release:%s", title)
@@ -278,7 +357,7 @@ func (c *MBClient) SearchRelease(title, artist string) (*MBRelease, error) {
 	q.Set("query", query)
 	q.Set("limit", "5")
 
-	if err := c.get("/release", q, &result); err != nil {
+	if err := c.get(ctx, "/release", q, &result); err != nil {
 		return nil, err
 	}
 
@@ -300,25 +379,28 @@ type MBReleaseFull struct {
 	Tags     []MBTag `json:"tags"`
 }
 
-func (c *MBClient) LookupRelease(mbid string) (*MBReleaseFull, error) {
+func (c *MBClient) LookupRelease(ctx context.Context, mbid string) (*MBReleaseFull, error) {
 	var result MBReleaseFull
 	q := url.Values{}
 	q.Set("inc", "artists+recordings+tags")
-	if err := c.get("/release/"+mbid, q, &result); err != nil {
+	if err := c.get(ctx, "/release/"+mbid, q, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *MBClient) FetchCoverArt(releaseMBID string) ([]byte, string, error) {
-	c.rateLimit()
+func (c *MBClient) FetchCoverArt(ctx context.Context, releaseMBID string) ([]byte, string, error) {
+	if err := c.rateLimit(ctx); err != nil {
+		return nil, "", err
+	}
 
+	_, appName, appVer := c.snapshot()
 	url := fmt.Sprintf("https://coverartarchive.org/release/%s/front", releaseMBID)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("User-Agent", fmt.Sprintf("%s/%s ( sonicore@localhost )", c.appName, c.appVer))
+	req.Header.Set("User-Agent", fmt.Sprintf("%s/%s ( sonicore@localhost )", appName, appVer))
 
 	resp, err := c.http.Do(req)
 	if err != nil {

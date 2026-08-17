@@ -115,6 +115,23 @@ func (h *PlatformHandler) Search(w http.ResponseWriter, r *http.Request) {
 			h.upstreamError(w, name, "search tracks "+q, err)
 			return
 		}
+		// NetEase search responses carry no cover URL; enrich hits so the
+		// UI still shows covers. Enrichment is best-effort: on failure the
+		// original hits are returned, but the degradation is logged so a
+		// "covers missing" symptom is distinguishable from a platform fault.
+		// It gets its own small timeout so time already spent on the search
+		// does not starve the follow-up detail request into a spurious
+		// context-deadline failure.
+		if enr, ok := p.(port.TrackEnricher); ok {
+			enrichCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			enriched, err := enr.EnrichTracks(enrichCtx, tracks)
+			cancel()
+			if err != nil {
+				log.Printf("[platform] %s enrich tracks failed: %v", name, err)
+			} else {
+				tracks = enriched
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"tracks": tracks, "total": total, "page": page, "limit": limit,
 		})

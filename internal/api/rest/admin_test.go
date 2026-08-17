@@ -15,6 +15,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/secrets"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,9 @@ func newAdminHandler(t *testing.T) (*AdminHandler, sqlmock.Sqlmock) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
-	return NewAdminHandler(db), mock
+	enc, err := secrets.New([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	return NewAdminHandler(db, enc), mock
 }
 
 func adminUserRow(id, username, role string) *sqlmock.Rows {
@@ -159,7 +162,7 @@ func TestAdminUpdateUserRoleActorNotFound(t *testing.T) {
 func TestAdminGetSettings(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "subsonic_jukebox_id"} {
+	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "subsonic_jukebox_id"} {
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
 			WithArgs(k).
 			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
@@ -171,6 +174,9 @@ func TestAdminGetSettings(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"allow_registration":true`)
 	assert.Contains(t, rec.Body.String(), `"metadata_musicbrainz_enabled":true`)
+	assert.Contains(t, rec.Body.String(), `"metadata_netease_enabled":true`)
+	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":true`)
+	assert.NotContains(t, rec.Body.String(), "MUSIC_U", "raw cookie never returned")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -181,8 +187,8 @@ func TestAdminUpdateSettingsPartial(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
 		WithArgs("allow_registration", "false").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	// then 5 reads for the response
-	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "allow_registration", "subsonic_jukebox_id"} {
+	// then 7 reads for the response
+	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id"} {
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
 			WithArgs(k).
 			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(""))
@@ -195,6 +201,52 @@ func TestAdminUpdateSettingsPartial(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"allow_registration":false`)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// prefixArg matches a driver.Value string that starts with prefix (sqlmock
+// accepts custom sqlmock.Argument implementations).
+type prefixArg struct{ prefix string }
+
+func (p prefixArg) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	return ok && strings.HasPrefix(s, p.prefix)
+}
+
+func TestAdminUpdateSettingsEncryptsCookie(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
+		WithArgs("platforms_netease_cookie", prefixArg{prefix: "enc:v1:"}).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// response reads: cookie comes back encrypted → cookie_set true
+	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id"} {
+		val := ""
+		if k == "platforms_netease_cookie" {
+			val = "enc:v1:stub"
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
+			WithArgs(k).
+			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(val))
+	}
+
+	rec := httptest.NewRecorder()
+	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
+		strings.NewReader(`{"platforms_netease_cookie":"MUSIC_U=session-token"}`)))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":true`)
+	assert.NotContains(t, rec.Body.String(), "MUSIC_U=session-token", "plaintext never echoed")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAdminUpdateSettingsCookieClearConflict(t *testing.T) {
+	h, _ := newAdminHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
+		strings.NewReader(`{"platforms_netease_cookie":"MUSIC_U=abc","platforms_netease_cookie_clear":true}`)))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestAdminListDirs(t *testing.T) {

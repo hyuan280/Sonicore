@@ -47,8 +47,11 @@ func TestMapTrackSearchShape(t *testing.T) {
 	assert.Equal(t, "777", track.TrackID)
 	assert.Equal(t, "Song", track.Title)
 	assert.Equal(t, float64(200), track.Duration, "ms converted to seconds")
-	assert.Equal(t, "Artist One", track.Artist)
-	assert.Equal(t, "1", track.ArtistID)
+	assert.Equal(t, "Artist One,Artist Two", track.Artist, "all credited artists joined")
+	assert.Equal(t, "1", track.ArtistID, "first artist id")
+	require.Len(t, track.Artists, 2)
+	assert.Equal(t, "Artist One", track.Artists[0].Name)
+	assert.Equal(t, "2", track.Artists[1].ExternalID)
 	assert.Equal(t, "Album", track.Album)
 	assert.Equal(t, "3", track.AlbumID)
 	assert.Equal(t, "album-pic", track.CoverURL, "album pic takes precedence")
@@ -178,6 +181,33 @@ func TestGetChartEmptyPlaylist(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, total)
 	assert.Empty(t, tracks)
+}
+
+func TestEnrichTracks(t *testing.T) {
+	searchTracks := []port.PlatformTrack{
+		{TrackID: "1", Title: "缘生意转", Artist: "司夏", Artists: []port.ArtistInfo{{Name: "司夏", ExternalID: "10089"}}, Album: "漱愿记·漱", AlbumID: "3083012", CoverURL: "placeholder.jpg"},
+		{TrackID: "2", Title: "别的", Artist: "别人"},
+	}
+	p := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/weapi/v3/song/detail", r.URL.Path)
+		// detail responses carry the real cover and the full artist list
+		fmt.Fprint(w, `{"code":200,"songs":[
+			{"id":1,"name":"缘生意转","dt":311000,
+			 "ar":[{"id":10089,"name":"司夏"},{"id":3249,"name":"河图"}],
+			 "al":{"id":3083012,"name":"漱愿记·漱","picUrl":"https://real-cover.jpg"}}
+		]}`)
+	})
+
+	out, err := p.EnrichTracks(context.Background(), searchTracks)
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+
+	assert.Equal(t, "https://real-cover.jpg", out[0].CoverURL, "placeholder replaced by real cover")
+	assert.Equal(t, "司夏,河图", out[0].Artist, "full artist list")
+	require.Len(t, out[0].Artists, 2)
+	assert.Equal(t, "河图", out[0].Artists[1].Name)
+	assert.Equal(t, float64(311), out[0].Duration)
+	assert.Equal(t, "", out[1].CoverURL, "tracks missing from detail response untouched")
 }
 
 func TestSearchTracks(t *testing.T) {

@@ -21,10 +21,10 @@ func NewArtistRepo(db *sql.DB) *ArtistRepo {
 
 // artistCols is the canonical column list for scanArtist. Keep in sync with
 // the scan order in scanArtist.
-const artistCols = `id, name, sort_name, mbid, metadata_source, external_ids, country, biography, cover_image_id, created_at, updated_at`
+const artistCols = `id, name, sort_name, external_id, metadata_source, external_ids, country, biography, cover_image_id, created_at, updated_at`
 
 // artistColsPrefixed is artistCols qualified with the a. alias for JOIN queries.
-const artistColsPrefixed = `a.id, a.name, a.sort_name, a.mbid, a.metadata_source, a.external_ids, a.country, a.biography, a.cover_image_id, a.created_at, a.updated_at`
+const artistColsPrefixed = `a.id, a.name, a.sort_name, a.external_id, a.metadata_source, a.external_ids, a.country, a.biography, a.cover_image_id, a.created_at, a.updated_at`
 
 func scanArtist(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Artist, error) {
 	var a domain.Artist
@@ -32,7 +32,7 @@ func scanArtist(scanner interface{ Scan(dest ...interface{}) error }) (*domain.A
 	var ext []byte
 	var roles string
 	err := scanner.Scan(&a.ID, &a.Name, &a.SortName,
-		&a.MBID, &a.MetadataSource, &ext, &a.Country, &a.Biography, &coverID,
+		&a.ExternalID, &a.MetadataSource, &ext, &a.Country, &a.Biography, &coverID,
 		&a.CreatedAt, &a.UpdatedAt, &a.TrackCount, &roles)
 	if err != nil {
 		return nil, err
@@ -65,10 +65,10 @@ func (r *ArtistRepo) BatchCreate(ctx context.Context, artists []domain.Artist) e
 	// complete entities (scanner/entity-resolver), so a conflict refresh is
 	// the intended upsert contract; partial-object callers should use Update.
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO artists (id, name, sort_name, mbid, metadata_source, external_ids, name_normalized, country, biography, cover_image_id, created_at, updated_at)
+		`INSERT INTO artists (id, name, sort_name, external_id, metadata_source, external_ids, name_normalized, country, biography, cover_image_id, created_at, updated_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, name_normalized=EXCLUDED.name_normalized,
-		 metadata_source=EXCLUDED.metadata_source, external_ids=EXCLUDED.external_ids, updated_at=NOW()`)
+		 external_id=EXCLUDED.external_id, metadata_source=EXCLUDED.metadata_source, external_ids=EXCLUDED.external_ids, updated_at=NOW()`)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (r *ArtistRepo) BatchCreate(ctx context.Context, artists []domain.Artist) e
 			return err
 		}
 		_, err = stmt.ExecContext(ctx, a.ID, a.Name, a.SortName,
-			a.MBID, sourceOrDefault(a.MetadataSource), ext, utils.NormalizeName(a.Name),
+			a.ExternalID, sourceOrDefault(a.MetadataSource), ext, utils.NormalizeName(a.Name),
 			a.Country, a.Biography, a.CoverImageID, a.CreatedAt, a.UpdatedAt)
 		if err != nil {
 			return err
@@ -159,16 +159,16 @@ func (r *ArtistRepo) FindAccessible(ctx context.Context, userID string) ([]domai
 
 // FindByMBID looks up an artist by its primary external ID, restricted to
 // the given source (defaults to musicbrainz for backward compatibility).
-func (r *ArtistRepo) FindByMBID(ctx context.Context, mbid string) (*domain.Artist, error) {
-	return r.FindBySourceAndID(ctx, "musicbrainz", mbid)
+func (r *ArtistRepo) FindByMBID(ctx context.Context, externalID string) (*domain.Artist, error) {
+	return r.FindBySourceAndID(ctx, "musicbrainz", externalID)
 }
 
 // FindBySourceAndID looks up an artist by its primary external ID within a
-// source (metadata_source + mbid).
+// source (metadata_source + external_id).
 func (r *ArtistRepo) FindBySourceAndID(ctx context.Context, source, id string) (*domain.Artist, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT `+artistCols+`, 0 AS track_count, '' AS roles
-		 FROM artists WHERE metadata_source = $1 AND mbid = $2`, sourceOrDefault(source), id)
+		 FROM artists WHERE metadata_source = $1 AND external_id = $2`, sourceOrDefault(source), id)
 	return scanArtist(row)
 }
 
@@ -214,10 +214,10 @@ func (r *ArtistRepo) Update(ctx context.Context, artist *domain.Artist) error {
 		return err
 	}
 	_, err = r.db.ExecContext(ctx,
-		`UPDATE artists SET name=$1, sort_name=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+		`UPDATE artists SET name=$1, sort_name=$2, external_id=$3, metadata_source=$4, external_ids=$5,
 		 name_normalized=$6, country=$7, biography=$8, cover_image_id=$9, updated_at=NOW()
 		 WHERE id=$10`,
-		artist.Name, artist.SortName, artist.MBID, sourceOrDefault(artist.MetadataSource), ext,
+		artist.Name, artist.SortName, artist.ExternalID, sourceOrDefault(artist.MetadataSource), ext,
 		utils.NormalizeName(artist.Name), artist.Country, artist.Biography, artist.CoverImageID, artist.ID)
 	return err
 }

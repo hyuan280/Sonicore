@@ -60,13 +60,13 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 		var trackTotal int
 		if q != "" {
 			h.db.QueryRowContext(r.Context(),
-				`SELECT COUNT(DISTINCT CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				`SELECT COUNT(DISTINCT CASE WHEN t.external_id IS NULL OR t.external_id = '' THEN (f.item_id::text, ''::text) ELSE (t.metadata_source::text, t.external_id::text) END)
 				 FROM favorites f
 				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 				 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1 AND t.title ILIKE $2`, userID, "%"+q+"%").Scan(&trackTotal)
 		} else {
 			h.db.QueryRowContext(r.Context(),
-				`SELECT COUNT(DISTINCT CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				`SELECT COUNT(DISTINCT CASE WHEN t.external_id IS NULL OR t.external_id = '' THEN (f.item_id::text, ''::text) ELSE (t.metadata_source::text, t.external_id::text) END)
 				 FROM favorites f
 				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 				 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1`, userID).Scan(&trackTotal)
@@ -78,11 +78,11 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 		var err error
 		if q != "" {
 			rows, err = h.db.QueryContext(r.Context(),
-				`SELECT DISTINCT ON (CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				`SELECT DISTINCT ON (CASE WHEN t.external_id IS NULL OR t.external_id = '' THEN (f.item_id::text, ''::text) ELSE (t.metadata_source::text, t.external_id::text) END)
 				        f.item_type, f.item_id, f.created_at,
 				        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 				        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-				        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.mbid, '')
+				        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, '')
 				 FROM favorites f
 				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 				 LEFT JOIN LATERAL (
@@ -94,15 +94,15 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 				     LIMIT 1
 				 ) sub ON true
 				 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1 AND t.title ILIKE $2
-				 ORDER BY CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END, t.version ASC, f.created_at DESC
+				 ORDER BY CASE WHEN t.external_id IS NULL OR t.external_id = '' THEN (f.item_id::text, ''::text) ELSE (t.metadata_source::text, t.external_id::text) END, t.version ASC, f.created_at DESC
 				 LIMIT $3 OFFSET $4`, userID, "%"+q+"%", perPage, offset)
 		} else {
 			rows, err = h.db.QueryContext(r.Context(),
-				`SELECT DISTINCT ON (CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END)
+				`SELECT DISTINCT ON (CASE WHEN t.external_id IS NULL OR t.external_id = '' THEN (f.item_id::text, ''::text) ELSE (t.metadata_source::text, t.external_id::text) END)
 			        f.item_type, f.item_id, f.created_at,
 			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-			        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.mbid, '')
+			        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, '')
 			 FROM favorites f
 			 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 			 LEFT JOIN LATERAL (
@@ -114,7 +114,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			     LIMIT 1
 			 ) sub ON true
 			 WHERE f.user_id = $1 AND f.item_type = 'track' AND t.version <= 1
-			 ORDER BY CASE WHEN t.mbid IS NULL OR t.mbid = '' THEN f.item_id ELSE t.mbid END, t.version ASC, f.created_at DESC
+			 ORDER BY CASE WHEN t.external_id IS NULL OR t.external_id = '' THEN (f.item_id::text, ''::text) ELSE (t.metadata_source::text, t.external_id::text) END, t.version ASC, f.created_at DESC
 			 LIMIT $2 OFFSET $3`, userID, perPage, offset)
 		}
 		if err != nil {
@@ -123,7 +123,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 		}
 		defer rows.Close()
 		var trackIDs []string
-		var favMbids []string
+		favKeys := make(map[repository.VersionGroupKey]struct{})
 		for rows.Next() {
 			var t, id string
 			var ca time.Time
@@ -131,12 +131,13 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			var duration float64
 			var coverID sql.NullString
 			var version int
-			var versionLabel, mbid string
-			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &mbid)
+			var versionLabel, extID, metaSource string
+			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &extID, &metaSource)
 			item := map[string]interface{}{
 				"item_type": t, "item_id": id, "created_at": ca,
 				"title": title, "duration": duration, "suffix": fileFormat,
-				"version": version, "version_label": versionLabel, "mbid": mbid,
+				"version": version, "version_label": versionLabel, "external_id": extID,
+				"metadata_source": metaSource,
 			}
 			if albumID != "" {
 				item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
@@ -146,8 +147,8 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			}
 			items = append(items, item)
 			trackIDs = append(trackIDs, id)
-			if mbid != "" {
-				favMbids = append(favMbids, mbid)
+			if extID != "" {
+				favKeys[repository.VersionGroupKey{MetadataSource: metaSource, ExternalID: extID}] = struct{}{}
 			}
 		}
 		artistsByTrack := h.loadTrackArtistsBulk(r.Context(), trackIDs)
@@ -157,37 +158,23 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 				items[i]["artists"] = artists
 			}
 		}
-		if len(favMbids) > 0 {
+		if len(favKeys) > 0 {
 			accessibleLibs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
 			var libIDs []string
 			for _, l := range accessibleLibs {
 				libIDs = append(libIDs, l.ID)
 			}
-			versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(r.Context(), favMbids, libIDs)
-			if versionsByMbid != nil {
+			versionsByExtID, _ := h.trackRepo.FindVersionsByExternalIDBulk(r.Context(), versionKeySlice(favKeys), libIDs)
+			if versionsByExtID != nil {
 				for _, item := range items {
-					mbid, _ := item["mbid"].(string)
-					if mbid == "" {
+					extID, _ := item["external_id"].(string)
+					if extID == "" {
 						continue
 					}
-					if siblings, ok := versionsByMbid[mbid]; ok {
-						versionList := make([]map[string]interface{}, 0, len(siblings))
+					src, _ := item["metadata_source"].(string)
+					if siblings, ok := versionsByExtID[repository.VersionGroupKey{MetadataSource: src, ExternalID: extID}]; ok {
 						itemID, _ := item["item_id"].(string)
-						for _, s := range siblings {
-							if s.ID == itemID {
-								continue
-							}
-							versionList = append(versionList, map[string]interface{}{
-								"id":            s.ID,
-								"version":       s.Version,
-								"version_label": s.VersionLabel,
-								"suffix":        s.FileFormat,
-								"bit_rate":      s.BitRate,
-								"duration":      s.Duration,
-								"library_id":    s.LibraryID,
-							})
-						}
-						if len(versionList) > 0 {
+						if versionList := buildVersionListFor(siblings, src, itemID); len(versionList) > 0 {
 							item["versions"] = versionList
 						}
 					}
@@ -597,26 +584,27 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var tracks []map[string]interface{}
-	var mbids []string
+	versionKeys := make(map[repository.VersionGroupKey]struct{})
 	for _, tid := range pagedIDs {
 		track, err := h.trackRepo.FindByID(r.Context(), tid)
 		if err != nil {
 			continue
 		}
 		t := map[string]interface{}{
-			"id":             track.ID,
-			"title":          track.Title,
-			"cover_image_id": track.CoverImageID,
-			"duration":       track.Duration,
-			"bit_rate":       track.BitRate,
-			"suffix":         track.FileFormat,
-			"version":        track.Version,
-			"version_label":  track.VersionLabel,
-			"file_format":    track.FileFormat,
-			"mbid":           track.MBID,
+			"id":              track.ID,
+			"title":           track.Title,
+			"cover_image_id":  track.CoverImageID,
+			"duration":        track.Duration,
+			"bit_rate":        track.BitRate,
+			"suffix":          track.FileFormat,
+			"version":         track.Version,
+			"version_label":   track.VersionLabel,
+			"file_format":     track.FileFormat,
+			"external_id":     track.ExternalID,
+			"metadata_source": track.MetadataSource,
 		}
-		if track.MBID != "" {
-			mbids = append(mbids, track.MBID)
+		if track.ExternalID != "" {
+			versionKeys[repository.VersionGroupKey{MetadataSource: track.MetadataSource, ExternalID: track.ExternalID}] = struct{}{}
 		}
 		if len(track.Albums) > 0 {
 			albums := make([]map[string]interface{}, len(track.Albums))
@@ -647,37 +635,23 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 		tracks = append(tracks, t)
 	}
 
-	if len(mbids) > 0 {
+	if len(versionKeys) > 0 {
 		accessibleLibs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
 		var libIDs []string
 		for _, l := range accessibleLibs {
 			libIDs = append(libIDs, l.ID)
 		}
-		versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(r.Context(), mbids, libIDs)
-		if versionsByMbid != nil {
+		versionsByExtID, _ := h.trackRepo.FindVersionsByExternalIDBulk(r.Context(), versionKeySlice(versionKeys), libIDs)
+		if versionsByExtID != nil {
 			for _, t := range tracks {
-				trackMbid, _ := t["mbid"].(string)
-				if trackMbid == "" {
+				trackExtID, _ := t["external_id"].(string)
+				if trackExtID == "" {
 					continue
 				}
-				if siblings, ok := versionsByMbid[trackMbid]; ok {
-					versionList := make([]map[string]interface{}, 0, len(siblings))
+				src, _ := t["metadata_source"].(string)
+				if siblings, ok := versionsByExtID[repository.VersionGroupKey{MetadataSource: src, ExternalID: trackExtID}]; ok {
 					trackID, _ := t["id"].(string)
-					for _, s := range siblings {
-						if s.ID == trackID {
-							continue
-						}
-						versionList = append(versionList, map[string]interface{}{
-							"id":            s.ID,
-							"version":       s.Version,
-							"version_label": s.VersionLabel,
-							"suffix":        s.FileFormat,
-							"bit_rate":      s.BitRate,
-							"duration":      s.Duration,
-							"library_id":    s.LibraryID,
-						})
-					}
-					if len(versionList) > 0 {
+					if versionList := buildVersionListFor(siblings, src, trackID); len(versionList) > 0 {
 						t["versions"] = versionList
 					}
 				}
@@ -887,19 +861,19 @@ func (h *UserDataHandler) SaveQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 type trackSummary struct {
-	ID            string  `json:"id"`
-	Title         string  `json:"title"`
-	Artist        string  `json:"artist"`
-	Album         string  `json:"album"`
-	AlbumID       string  `json:"album_id"`
-	Duration      float64 `json:"duration"`
-	Suffix        string  `json:"suffix"`
-	CoverImageID  *string `json:"cover_image_id,omitempty"`
-	DiscNumber    int     `json:"disc_number,omitempty"`
-	TrackNumber   int     `json:"track,omitempty"`
-	Version       int     `json:"version"`
-	VersionLabel  string  `json:"version_label"`
-	MBID          string  `json:"mbid"`
+	ID           string  `json:"id"`
+	Title        string  `json:"title"`
+	Artist       string  `json:"artist"`
+	Album        string  `json:"album"`
+	AlbumID      string  `json:"album_id"`
+	Duration     float64 `json:"duration"`
+	Suffix       string  `json:"suffix"`
+	CoverImageID *string `json:"cover_image_id,omitempty"`
+	DiscNumber   int     `json:"disc_number,omitempty"`
+	TrackNumber  int     `json:"track,omitempty"`
+	Version      int     `json:"version"`
+	VersionLabel string  `json:"version_label"`
+	ExternalID   string  `json:"external_id"`
 }
 
 func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
@@ -927,7 +901,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	// Resolve track metadata (maintain order)
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT t.id, t.title, COALESCE(ar.name, ''), COALESCE(sub.album_title, ''), COALESCE(sub.album_id, ''), t.duration, t.file_format, t.cover_image_id,
-		 COALESCE(sub.track_number, 0), COALESCE(sub.disc_number, 0), COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.mbid, '')
+		 COALESCE(sub.track_number, 0), COALESCE(sub.disc_number, 0), COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, '')
 		 FROM tracks t
 		 LEFT JOIN track_artists ta ON ta.track_id = t.id AND ta.role = 'performer' AND ta.sort_order = 0
 		 LEFT JOIN artists ar ON ta.artist_id = ar.id
@@ -952,18 +926,20 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t trackSummary
 		var coverID sql.NullString
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber, &t.Version, &t.VersionLabel, &t.MBID); err != nil {
+		var metaSource string
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber, &t.Version, &t.VersionLabel, &t.ExternalID, &metaSource); err != nil {
 			continue
 		}
 		item := map[string]interface{}{
-			"id":       t.ID,
-			"title":    t.Title,
-			"artist":   t.Artist,
-			"duration": t.Duration,
-			"suffix":   t.Suffix,
-			"version":  t.Version,
-			"version_label": t.VersionLabel,
-			"mbid":     t.MBID,
+			"id":              t.ID,
+			"title":           t.Title,
+			"artist":          t.Artist,
+			"duration":        t.Duration,
+			"suffix":          t.Suffix,
+			"version":         t.Version,
+			"version_label":   t.VersionLabel,
+			"external_id":     t.ExternalID,
+			"metadata_source": metaSource,
 		}
 		if t.AlbumID != "" {
 			item["albums"] = []map[string]interface{}{{"id": t.AlbumID, "title": t.Album, "track": t.TrackNumber, "disc_number": t.DiscNumber}}
@@ -983,43 +959,30 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var queueMbids []string
+	queueKeys := make(map[repository.VersionGroupKey]struct{})
 	for _, t := range tracks {
-		if mbid, _ := t["mbid"].(string); mbid != "" {
-			queueMbids = append(queueMbids, mbid)
+		if extID, _ := t["external_id"].(string); extID != "" {
+			src, _ := t["metadata_source"].(string)
+			queueKeys[repository.VersionGroupKey{MetadataSource: src, ExternalID: extID}] = struct{}{}
 		}
 	}
-	if len(queueMbids) > 0 {
+	if len(queueKeys) > 0 {
 		accessibleLibs, _ := h.libraryRepo.FindByUserID(r.Context(), userID)
 		var libIDs []string
 		for _, l := range accessibleLibs {
 			libIDs = append(libIDs, l.ID)
 		}
-		versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(r.Context(), queueMbids, libIDs)
-		if versionsByMbid != nil {
+		versionsByExtID, _ := h.trackRepo.FindVersionsByExternalIDBulk(r.Context(), versionKeySlice(queueKeys), libIDs)
+		if versionsByExtID != nil {
 			for _, t := range tracks {
-				mbid, _ := t["mbid"].(string)
-				if mbid == "" {
+				extID, _ := t["external_id"].(string)
+				if extID == "" {
 					continue
 				}
-				if siblings, ok := versionsByMbid[mbid]; ok {
-					versionList := make([]map[string]interface{}, 0, len(siblings))
+				src, _ := t["metadata_source"].(string)
+				if siblings, ok := versionsByExtID[repository.VersionGroupKey{MetadataSource: src, ExternalID: extID}]; ok {
 					itemID, _ := t["id"].(string)
-					for _, s := range siblings {
-						if s.ID == itemID {
-							continue
-						}
-						versionList = append(versionList, map[string]interface{}{
-							"id":            s.ID,
-							"version":       s.Version,
-							"version_label": s.VersionLabel,
-							"suffix":        s.FileFormat,
-							"bit_rate":      s.BitRate,
-							"duration":      s.Duration,
-							"library_id":    s.LibraryID,
-						})
-					}
-					if len(versionList) > 0 {
+					if versionList := buildVersionListFor(siblings, src, itemID); len(versionList) > 0 {
 						t["versions"] = versionList
 					}
 				}
@@ -1057,7 +1020,7 @@ func (h *UserDataHandler) loadTrackArtistsBulk(ctx context.Context, trackIDs []s
 			}
 			if ta.Artist != nil {
 				entry["name"] = ta.Artist.Name
-				entry["mbid"] = ta.Artist.MBID
+				entry["external_id"] = ta.Artist.ExternalID
 			}
 			artists[i] = entry
 		}
@@ -1084,13 +1047,16 @@ func (h *UserDataHandler) expandTrackVersions(ctx context.Context, userID string
 		if seen[id] {
 			continue
 		}
-		var mbid string
-		if err := h.db.QueryRowContext(ctx, "SELECT mbid FROM tracks WHERE id = $1 AND mbid != '' AND library_id = ANY($2)", id, pq.Array(libIDs)).Scan(&mbid); err != nil || mbid == "" {
+		var extID, src string
+		if err := h.db.QueryRowContext(ctx, "SELECT external_id, metadata_source FROM tracks WHERE id = $1 AND external_id != '' AND library_id = ANY($2)", id, pq.Array(libIDs)).Scan(&extID, &src); err != nil || extID == "" {
 			expanded = append(expanded, id)
 			seen[id] = true
 			continue
 		}
-		rows, err := h.db.QueryContext(ctx, "SELECT id FROM tracks WHERE mbid = $1 AND library_id = ANY($2)", mbid, pq.Array(libIDs))
+		// Version expansion is scoped to the track's metadata source: the
+		// group key is (metadata_source, external_id) and a bare external_id
+		// could otherwise collide across sources.
+		rows, err := h.db.QueryContext(ctx, "SELECT id FROM tracks WHERE external_id = $1 AND metadata_source = $2 AND library_id = ANY($3)", extID, src, pq.Array(libIDs))
 		if err != nil {
 			expanded = append(expanded, id)
 			seen[id] = true

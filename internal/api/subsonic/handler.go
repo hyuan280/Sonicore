@@ -1252,8 +1252,17 @@ func (h *Handler) getArtistInfo(r *http.Request, ctx context.Context, q url.Valu
 	if artist.Biography != "" {
 		bio = map[string]interface{}{"#text": artist.Biography}
 	}
-	if artist.MBID != "" {
-		mbid = map[string]interface{}{"#text": artist.MBID}
+	// musicBrainzId is expected by clients to be an MBID; only emit it for
+	// MusicBrainz-sourced (or legacy source-less) artists. For other sources
+	// fall back to a MusicBrainz alias in external_ids when present.
+	musicBrainzID := ""
+	if artist.MetadataSource == "" || artist.MetadataSource == metadata.SourceMusicBrainz {
+		musicBrainzID = artist.ExternalID
+	} else if artist.ExternalIDs != nil {
+		musicBrainzID = artist.ExternalIDs[metadata.SourceMusicBrainz]
+	}
+	if musicBrainzID != "" {
+		mbid = map[string]interface{}{"#text": musicBrainzID}
 	}
 	if artist.CoverImageID != nil && *artist.CoverImageID != "" {
 		scheme := "http"

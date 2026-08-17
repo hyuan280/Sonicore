@@ -22,18 +22,18 @@ func newTestEntityResolver(t *testing.T) (*EntityResolver, sqlmock.Sqlmock) {
 }
 
 func artistRow(id, name, mbid, source, ext string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "name", "sort_name", "mbid", "metadata_source", "external_ids", "country", "biography", "cover_image_id", "created_at", "updated_at", "track_count", "roles"}).
+	return sqlmock.NewRows([]string{"id", "name", "sort_name", "external_id", "metadata_source", "external_ids", "country", "biography", "cover_image_id", "created_at", "updated_at", "track_count", "roles"}).
 		AddRow(id, name, name, mbid, source, ext, "", "", nil, time.Now(), time.Now(), 0, "")
 }
 
 func albumRow(id, title, artistID, mbid, source, ext string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
+	return sqlmock.NewRows([]string{"id", "title", "artist_id", "external_id", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
 		AddRow(id, title, artistID, mbid, source, ext, "", 0, "", nil, 0, 0.0, time.Now(), time.Now())
 }
 
 func TestFindArtistPrimaryID(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "6452").
 		WillReturnRows(artistRow("a-1", "周杰伦", "6452", "netease", `{}`))
 
@@ -47,7 +47,7 @@ func TestFindArtistPrimaryID(t *testing.T) {
 func TestFindArtistByAlias(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
 	// primary lookup misses, alias reverse lookup hits
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "6452").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE external_ids @> $1::jsonb`)).
@@ -57,13 +57,13 @@ func TestFindArtistByAlias(t *testing.T) {
 	a, err := er.FindArtist(context.Background(), "netease", "6452", "Jay Chou")
 	require.NoError(t, err)
 	require.NotNil(t, a)
-	assert.Equal(t, "mbid-1", a.MBID)
+	assert.Equal(t, "mbid-1", a.ExternalID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestFindArtistMergesAliasOnNormalizedNameHit(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "6452").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE external_ids @> $1::jsonb`)).
@@ -74,7 +74,7 @@ func TestFindArtistMergesAliasOnNormalizedNameHit(t *testing.T) {
 		WithArgs("周杰伦").
 		WillReturnRows(artistRow("a-1", "周杰伦", "mbid-1", "musicbrainz", `{}`))
 	// merge writes the netease alias
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE artists SET name=$1, sort_name=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE artists SET name=$1, sort_name=$2, external_id=$3, metadata_source=$4, external_ids=$5,
 		 name_normalized=$6, country=$7, biography=$8, cover_image_id=$9, updated_at=NOW()
 		 WHERE id=$10`)).
 		WithArgs("周杰伦", "周杰伦", "mbid-1", "musicbrainz", []byte(`{"netease":"6452"}`), "周杰伦", "", "", nil, "a-1").
@@ -90,7 +90,7 @@ func TestFindArtistMergesAliasOnNormalizedNameHit(t *testing.T) {
 
 func TestFindArtistNoMatch(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "999").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE external_ids @> $1::jsonb`)).
@@ -108,7 +108,7 @@ func TestFindArtistNoMatch(t *testing.T) {
 
 func TestFindOrCreateArtistCreates(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "6452").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE external_ids @> $1::jsonb`)).
@@ -127,13 +127,13 @@ func TestFindOrCreateArtistCreates(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	assert.Equal(t, "netease", a.MetadataSource)
-	assert.Equal(t, "6452", a.MBID)
+	assert.Equal(t, "6452", a.ExternalID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestFindAlbumMergesAliasOnNormalizedTitleHit(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "216297").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE external_ids @> $1::jsonb`)).
@@ -142,7 +142,7 @@ func TestFindAlbumMergesAliasOnNormalizedTitleHit(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE title_normalized = $1 AND artist_id = $2`)).
 		WithArgs("十一月的萧邦", "a-1").
 		WillReturnRows(albumRow("alb-1", "十一月的萧邦", "a-1", "mbid-alb", "musicbrainz", `{}`))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, external_id=$3, metadata_source=$4, external_ids=$5,
 		 title_normalized=$6, country=$7, year=$8, genre=$9,
 		 cover_image_id=$10, song_count=$11, duration=$12, updated_at=NOW()
 		 WHERE id=$13`)).
@@ -158,7 +158,7 @@ func TestFindAlbumMergesAliasOnNormalizedTitleHit(t *testing.T) {
 
 func TestFindOrCreateAlbumCreates(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "216297").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE external_ids @> $1::jsonb`)).
@@ -183,7 +183,7 @@ func TestFindOrCreateAlbumCreates(t *testing.T) {
 func TestFindArtistPropagatesRealErrors(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
 	// A real DB failure (not sql.ErrNoRows) must surface, not fall through.
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "6452").
 		WillReturnError(errors.New("connection reset"))
 
@@ -195,7 +195,7 @@ func TestFindArtistPropagatesRealErrors(t *testing.T) {
 
 func TestFindAlbumPropagatesRealErrors(t *testing.T) {
 	er, mock := newTestEntityResolver(t)
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "216297").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE external_ids @> $1::jsonb`)).

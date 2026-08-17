@@ -19,8 +19,8 @@ const SourceMusicBrainz = utils.SourceMusicBrainz
 // EntityResolver centralizes the cross-source lookup/merge chain for artists
 // and albums, shared by the scanner and the metadata handlers. It is the
 // single place that knows how external IDs and names map onto the entity
-// tables (metadata_source + mbid primary, external_ids aliases, normalized
-// name fallback).
+// tables (metadata_source + external_id primary, external_ids aliases,
+// normalized name fallback).
 type EntityResolver struct {
 	artists *repository.ArtistRepo
 	albums  *repository.AlbumRepo
@@ -34,7 +34,7 @@ func NewEntityResolver(db *sql.DB) *EntityResolver {
 }
 
 // FindArtist resolves an artist through the lookup chain:
-//  1. primary ID (metadata_source + mbid)
+//  1. primary ID (metadata_source + external_id)
 //  2. external_ids alias reverse lookup
 //  3. normalized name — on a hit the incoming (source, externalID) pair is
 //     merged into the existing record as an alias (or primary ID when the
@@ -94,7 +94,7 @@ func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externa
 		ID:             domain.NewID(),
 		Name:           name,
 		SortName:       name,
-		MBID:           externalID,
+		ExternalID:     externalID,
 		MetadataSource: source,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -106,7 +106,7 @@ func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externa
 }
 
 // FindAlbum resolves an album through the lookup chain:
-//  1. primary ID (metadata_source + mbid)
+//  1. primary ID (metadata_source + external_id)
 //  2. external_ids alias reverse lookup
 //  3. normalized title within the owning artist
 //
@@ -161,7 +161,7 @@ func (e *EntityResolver) FindOrCreateAlbum(ctx context.Context, source, external
 		ID:             domain.NewID(),
 		Title:          title,
 		ArtistID:       artistID,
-		MBID:           externalID,
+		ExternalID:     externalID,
 		MetadataSource: source,
 		Year:           year,
 		Genre:          genre,
@@ -186,8 +186,8 @@ func mergeArtistID(ctx context.Context, repo *repository.ArtistRepo, a *domain.A
 	}
 	changed := false
 	if a.MetadataSource == source {
-		if a.MBID == "" {
-			a.MBID = externalID
+		if a.ExternalID == "" {
+			a.ExternalID = externalID
 			changed = true
 		}
 	} else {
@@ -202,7 +202,7 @@ func mergeArtistID(ctx context.Context, repo *repository.ArtistRepo, a *domain.A
 	if changed {
 		if err := repo.Update(ctx, a); err != nil {
 			if a.MetadataSource == source {
-				a.MBID = ""
+				a.ExternalID = ""
 			} else if a.ExternalIDs != nil {
 				delete(a.ExternalIDs, source)
 			}
@@ -220,8 +220,8 @@ func mergeAlbumID(ctx context.Context, repo *repository.AlbumRepo, a *domain.Alb
 	}
 	changed := false
 	if a.MetadataSource == source {
-		if a.MBID == "" {
-			a.MBID = externalID
+		if a.ExternalID == "" {
+			a.ExternalID = externalID
 			changed = true
 		}
 	} else {
@@ -236,7 +236,7 @@ func mergeAlbumID(ctx context.Context, repo *repository.AlbumRepo, a *domain.Alb
 	if changed {
 		if err := repo.Update(ctx, a); err != nil {
 			if a.MetadataSource == source {
-				a.MBID = ""
+				a.ExternalID = ""
 			} else if a.ExternalIDs != nil {
 				delete(a.ExternalIDs, source)
 			}

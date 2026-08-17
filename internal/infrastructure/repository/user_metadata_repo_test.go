@@ -13,17 +13,18 @@ import (
 
 func testUserMetadata() *UserMetadata {
 	return &UserMetadata{
-		UserID:      "u-001",
-		FileHash:    "abc123",
-		TrackMBID:   "mbid-1",
-		Title:       "Song",
-		Artist:      "Artist",
-		Album:       "Album",
-		AlbumArtist: "Artist",
-		TrackNumber: 1,
-		DiscNumber:  1,
-		Year:        2024,
-		Genre:       "Rock",
+		UserID:         "u-001",
+		FileHash:       "abc123",
+		MetadataSource: "musicbrainz",
+		ExternalID:     "mbid-1",
+		Title:          "Song",
+		Artist:         "Artist",
+		Album:          "Album",
+		AlbumArtist:    "Artist",
+		TrackNumber:    1,
+		DiscNumber:     1,
+		Year:           2024,
+		Genre:          "Rock",
 	}
 }
 
@@ -32,9 +33,9 @@ func TestUserMetadataRepoFindByUserAndHash(t *testing.T) {
 	repo := NewUserMetadataRepo(db)
 	m := testUserMetadata()
 
-	rows := sqlmock.NewRows([]string{"user_id", "file_hash", "track_mbid", "title", "artist", "album", "album_artist",
+	rows := sqlmock.NewRows([]string{"user_id", "file_hash", "metadata_source", "external_id", "title", "artist", "album", "album_artist",
 		"track_number", "disc_number", "year", "genre"}).
-		AddRow(m.UserID, m.FileHash, m.TrackMBID, m.Title, m.Artist, m.Album, m.AlbumArtist,
+		AddRow(m.UserID, m.FileHash, m.MetadataSource, m.ExternalID, m.Title, m.Artist, m.Album, m.AlbumArtist,
 			m.TrackNumber, m.DiscNumber, m.Year, m.Genre)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM user_metadata WHERE user_id = $1 AND file_hash = $2`)).
@@ -64,12 +65,12 @@ func TestUserMetadataRepoUpsert(t *testing.T) {
 	repo := NewUserMetadataRepo(db)
 	m := testUserMetadata()
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO user_metadata (user_id, file_hash, track_mbid, title, artist, album, album_artist, track_number, disc_number, year, genre, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO user_metadata (user_id, file_hash, metadata_source, external_id, title, artist, album, album_artist, track_number, disc_number, year, genre, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
 		 ON CONFLICT (user_id, file_hash) DO UPDATE SET
-		 track_mbid=$3, title=$4, artist=$5, album=$6, album_artist=$7,
-		 track_number=$8, disc_number=$9, year=$10, genre=$11, updated_at=NOW()`)).
-		WithArgs(m.UserID, m.FileHash, m.TrackMBID, m.Title, m.Artist, m.Album, m.AlbumArtist,
+		 metadata_source=$3, external_id=$4, title=$5, artist=$6, album=$7, album_artist=$8,
+		 track_number=$9, disc_number=$10, year=$11, genre=$12, updated_at=NOW()`)).
+		WithArgs(m.UserID, m.FileHash, m.MetadataSource, m.ExternalID, m.Title, m.Artist, m.Album, m.AlbumArtist,
 			m.TrackNumber, m.DiscNumber, m.Year, m.Genre).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

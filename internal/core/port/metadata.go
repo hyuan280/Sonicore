@@ -1,21 +1,137 @@
 package port
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // MetadataQuery is a text-based identification query derived from audio file
 // tags or user input. Any field may be empty; sources decide how much of it
-// is needed to produce candidates.
+// is needed to produce candidates. UserID and FileHash are optional precise
+// locators used by the user-metadata source (and ignored by text sources).
 type MetadataQuery struct {
-	Title  string
-	Artist string
-	Album  string
+	Title    string
+	Artist   string
+	Album    string
+	UserID   string // owner of the saved metadata cache
+	FileHash string // file the saved metadata cache applies to
+
+	// TitleFromFilename reports that the title came from the file name (no
+	// reliable embedded title tag). It is carried uniformly for every source:
+	// sources may relax their matching (e.g. MusicBrainz uses the scored
+	// name-derived match instead of an exact tag match) when it is set.
+	TitleFromFilename bool
+
+	// FileFields reports which fields the song already gets from the file
+	// itself (embedded/sidecar lyrics, embedded cover art). The completion
+	// chain treats them as already present, so platform sources are not
+	// consulted for them. The dedicated FileFields type (with its own
+	// FileField* constants) prevents mixing these up with candidate field
+	// presence (FieldsPresent), whose bits carry the opposite meaning for
+	// FieldCoverURL.
+	FileFields FileFields
 }
+
+// FileFields is a bitmask of fields a song already gets from its own file.
+// It is a distinct type from MetadataFields so a candidate's FieldsPresent()
+// result can never be fed in as "file already provides" (or vice versa);
+// use the FileField* constants. The bit values coincide with FieldLyrics /
+// FieldCoverURL so file-provided fields can be folded into the completion
+// goals via Targets().
+type FileFields uint32
+
+const (
+	FileFieldLyrics FileFields = FileFields(FieldLyrics)
+	FileFieldCover  FileFields = FileFields(FieldCoverURL)
+)
+
+// Targets folds file-provided fields into the MetadataFields bit space, for
+// expressions like `TargetFields() &^ q.FileFields.Targets()`.
+func (f FileFields) Targets() MetadataFields { return MetadataFields(f) }
 
 // ArtistInfo describes one credited artist within a metadata candidate.
 type ArtistInfo struct {
-	Name       string
-	ExternalID string // MusicBrainz MBID, NetEase artist id, etc.
-	Country    string // may be empty for sources that do not expose it
+	Name       string `json:"name"`
+	ExternalID string `json:"external_id"` // MusicBrainz MBID, NetEase artist id, etc.
+	Country    string `json:"country,omitempty"`
+}
+
+// MetadataFields is a bitmask of the metadata fields a source can provide.
+// The registry drives its field-completion chain from these capabilities.
+type MetadataFields uint32
+
+const (
+	FieldTrackID MetadataFields = 1 << iota // track-level external ID
+	FieldTitle
+	FieldArtists
+	FieldAlbum // album title
+	FieldAlbumExternalID
+	FieldYear
+	FieldGenre
+	// FieldCoverURL on a candidate means the source provides a network cover
+	// URL. It shares its bit value with FileFieldCover (file-provided embedded
+	// cover) so the completion goal can exclude file-provided fields, but the
+	// two live in distinct types (MetadataFields vs FileFields) and must not
+	// be mixed: FieldsPresent(FieldCoverURL) is about a candidate URL, never
+	// about what the file already carries.
+	FieldCoverURL
+	FieldLyrics
+	FieldAlbumCountry
+)
+
+// TargetFields is the completion goal for the registry chain. Year, Genre and
+// AlbumCountry are excluded: their absence never triggers the next source,
+// but candidates that carry them still fill them (fields-present check
+// below). The album external ID is its own goal so a source that fills only
+// the album title (e.g. the user cache) still lets a later source complete
+// the platform/MB album id.
+func TargetFields() MetadataFields {
+	return FieldTrackID | FieldTitle | FieldArtists | FieldAlbum | FieldAlbumExternalID | FieldCoverURL | FieldLyrics
+}
+
+// FieldsPresent reports which fields the candidate actually carries values
+// for (empty/zero values are treated as absent).
+func FieldsPresent(c *MetadataCandidate) MetadataFields {
+	var f MetadataFields
+	if c == nil {
+		return 0
+	}
+	if c.ExternalID != "" {
+		f |= FieldTrackID
+	}
+	if c.Title != "" {
+		f |= FieldTitle
+	}
+	if len(c.Artists) > 0 {
+		for _, a := range c.Artists {
+			if strings.TrimSpace(a.Name) != "" {
+				f |= FieldArtists
+				break
+			}
+		}
+	}
+	if c.Album != "" {
+		f |= FieldAlbum
+	}
+	if c.AlbumExternalID != "" {
+		f |= FieldAlbumExternalID
+	}
+	if c.AlbumCountry != "" {
+		f |= FieldAlbumCountry
+	}
+	if c.Year != 0 {
+		f |= FieldYear
+	}
+	if c.Genre != "" {
+		f |= FieldGenre
+	}
+	if c.CoverArtURL != "" {
+		f |= FieldCoverURL
+	}
+	if c.Lyrics != "" {
+		f |= FieldLyrics
+	}
+	return f
 }
 
 // MetadataCandidate is a single identification hit from a metadata source.
@@ -26,6 +142,7 @@ type MetadataCandidate struct {
 	Artists         []ArtistInfo
 	Album           string
 	AlbumExternalID string
+	AlbumCountry    string
 	Year            int
 	Genre           string
 	CoverArtURL     string
@@ -34,7 +151,7 @@ type MetadataCandidate struct {
 }
 
 // MetadataSource is a pluggable source of track metadata identification
-// (MusicBrainz, NetEase Cloud Music, QQ Music, ...).
+// (user metadata cache, MusicBrainz, NetEase Cloud Music, ...).
 //
 // Implementations must be safe for concurrent use. Priority is ascending:
 // lower numbers are tried first by the registry. Enabled reports whether the
@@ -43,6 +160,11 @@ type MetadataSource interface {
 	Name() string
 	Enabled() bool
 	Priority() int
+
+	// Capabilities declares which fields the source can provide. The
+	// registry uses it to decide whether the source should be consulted for
+	// the still-missing fields.
+	Capabilities() MetadataFields
 
 	// SearchCandidates returns ranked candidates for a query, best first.
 	// A nil or empty result means the source found no plausible match.

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/image/draw"
@@ -53,7 +54,7 @@ func (ce *CoverExtractor) ExtractFromFile(ctx context.Context, audioPath string)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("ffmpeg extract cover: %w\n%s", err, stderr.String())
+		return nil, "", fmt.Errorf("ffmpeg extract cover: %w: %s", err, summarizeFFmpegError(stderr.String()))
 	}
 
 	data := stdout.Bytes()
@@ -63,6 +64,16 @@ func (ce *CoverExtractor) ExtractFromFile(ctx context.Context, audioPath string)
 
 	contentType := detectImageType(data)
 	return data, contentType, nil
+}
+
+// summarizeFFmpegError returns ffmpeg's stderr in full so no root-cause line
+// is lost (the log-level / file-rotation handling for these is tracked as a
+// known issue). A blank stderr yields a generic message.
+func summarizeFFmpegError(stderr string) string {
+	if trimmed := strings.TrimSpace(stderr); trimmed != "" {
+		return trimmed
+	}
+	return "ffmpeg failed"
 }
 
 func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte, ext string, sizes ...int) (string, error) {

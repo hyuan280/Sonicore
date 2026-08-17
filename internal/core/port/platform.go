@@ -4,45 +4,47 @@ import "context"
 
 // Chart describes a playable chart/ranking from an external music platform.
 type Chart struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	CoverURL     string `json:"cover_url,omitempty"`
-	TrackCount   int    `json:"track_count"`
-	UpdateFreq   string `json:"update_freq,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	CoverURL    string `json:"cover_url,omitempty"`
+	TrackCount  int    `json:"track_count"`
+	UpdateFreq  string `json:"update_freq,omitempty"`
 }
 
 // PlatformTrack is a lightweight track reference as surfaced by search or
 // chart browsing on an external platform. Duration is in seconds.
 type PlatformTrack struct {
-	Platform  string  `json:"platform"`
-	TrackID   string  `json:"track_id"`
-	Title     string  `json:"title"`
-	Artist    string  `json:"artist"`
-	ArtistID  string  `json:"artist_id"`
-	Album     string  `json:"album"`
-	AlbumID   string  `json:"album_id"`
-	Duration  float64 `json:"duration"`
-	CoverURL  string  `json:"cover_url,omitempty"`
+	Platform string       `json:"platform"`
+	TrackID  string       `json:"track_id"`
+	Title    string       `json:"title"`
+	Artist   string       `json:"artist"`
+	ArtistID string       `json:"artist_id"`
+	Artists  []ArtistInfo `json:"artists,omitempty"`
+	Album    string       `json:"album"`
+	AlbumID  string       `json:"album_id"`
+	Duration float64      `json:"duration"`
+	CoverURL string       `json:"cover_url,omitempty"`
 }
 
 // TrackDetail is the full detail view of a platform track.
 // Duration is in seconds.
 type TrackDetail struct {
-	Platform    string  `json:"platform"`
-	TrackID     string  `json:"track_id"`
-	Title       string  `json:"title"`
-	Artist      string  `json:"artist"`
-	ArtistID    string  `json:"artist_id"`
-	Album       string  `json:"album"`
-	AlbumID     string  `json:"album_id"`
-	Duration    float64 `json:"duration"`
-	CoverURL    string  `json:"cover_url,omitempty"`
-	Year        int     `json:"year,omitempty"`
-	Genre       string  `json:"genre,omitempty"`
-	Lyrics      string  `json:"lyrics,omitempty"`
-	LyricsTrans  string  `json:"lyrics_translation,omitempty"`
-	PublishTime string  `json:"publish_time,omitempty"`
+	Platform    string       `json:"platform"`
+	TrackID     string       `json:"track_id"`
+	Title       string       `json:"title"`
+	Artist      string       `json:"artist"`
+	ArtistID    string       `json:"artist_id"`
+	Artists     []ArtistInfo `json:"artists,omitempty"`
+	Album       string       `json:"album"`
+	AlbumID     string       `json:"album_id"`
+	Duration    float64      `json:"duration"`
+	CoverURL    string       `json:"cover_url,omitempty"`
+	Year        int          `json:"year,omitempty"`
+	Genre       string       `json:"genre,omitempty"`
+	Lyrics      string       `json:"lyrics,omitempty"`
+	LyricsTrans string       `json:"lyrics_translation,omitempty"`
+	PublishTime string       `json:"publish_time,omitempty"`
 }
 
 // ArtistDetail is the detail view of a platform artist.
@@ -80,4 +82,19 @@ type PlatformProvider interface {
 	GetTrack(ctx context.Context, trackID string) (*TrackDetail, error)
 	GetArtist(ctx context.Context, artistID string) (*ArtistDetail, error)
 	GetArtistTracks(ctx context.Context, artistID string, page, limit int) ([]PlatformTrack, int, error)
+}
+
+// TrackEnricher is optionally implemented by providers whose search results
+// lack the full cover/artist profile (e.g. NetEase search responses expose
+// no cover URL). The REST search handler enriches hits before returning them
+// so the UI still shows covers.
+//
+// Contract: on success the returned slice has the same length and order as
+// the input, with unresolved tracks left as-is — callers replace their input
+// wholesale with the result, so a truncated or reordered slice would silently
+// drop or reorder search hits. Implementations may mutate and return the
+// input slice itself, or return a new one. On error the returned slice's
+// content is not meaningful.
+type TrackEnricher interface {
+	EnrichTracks(ctx context.Context, tracks []PlatformTrack) ([]PlatformTrack, error)
 }

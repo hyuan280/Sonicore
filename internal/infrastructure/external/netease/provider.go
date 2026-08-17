@@ -14,6 +14,11 @@ import (
 // anonymous access to the private API (weapi/eapi schemes).
 const platformName = "netease"
 
+// ErrTrackNotFound is the sentinel returned when a track detail lookup finds
+// no matching track. Sources classify this as a clean "no match" instead of
+// an upstream failure.
+var ErrTrackNotFound = fmt.Errorf("track not found")
+
 type Provider struct {
 	client *Client
 }
@@ -25,6 +30,18 @@ func NewProvider(client *Client) *Provider {
 func (p *Provider) Name() string { return platformName }
 
 func (p *Provider) Label() string { return "网易云音乐" }
+
+// SetCookieProvider forwards the runtime cookie source to the underlying
+// client.
+func (p *Provider) SetCookieProvider(f func() string) {
+	p.client.SetCookieProvider(f)
+}
+
+// SetRateLimitProvider forwards the runtime requests-per-second source to the
+// underlying client (admin setting with a config fallback).
+func (p *Provider) SetRateLimitProvider(f func() int) {
+	p.client.SetRateLimitProvider(f)
+}
 
 func (p *Provider) request(ctx context.Context, uri string, data map[string]any, mode string) (map[string]any, error) {
 	resp, err := p.client.request(ctx, uri, data, mode, true)
@@ -208,7 +225,7 @@ func (p *Provider) GetTrack(ctx context.Context, trackID string) (*port.TrackDet
 		return nil, err
 	}
 	if len(tracks) == 0 {
-		return nil, fmt.Errorf("track not found: %s", trackID)
+		return nil, fmt.Errorf("%w: %s", ErrTrackNotFound, trackID)
 	}
 
 	body, err := p.request(ctx, "/api/song/lyric", map[string]any{
@@ -219,18 +236,18 @@ func (p *Provider) GetTrack(ctx context.Context, trackID string) (*port.TrackDet
 	}
 
 	detail := &port.TrackDetail{
-		Platform: p.Name(),
-		TrackID:  tracks[0].TrackID,
-		Title:    tracks[0].Title,
-		Artist:   tracks[0].Artist,
-		ArtistID: tracks[0].ArtistID,
-		Album:    tracks[0].Album,
-		AlbumID:  tracks[0].AlbumID,
-		Duration: tracks[0].Duration,
-		CoverURL: tracks[0].CoverURL,
+		Platform:  p.Name(),
+		TrackID:   tracks[0].TrackID,
+		Title:     tracks[0].Title,
+		Artist:    tracks[0].Artist,
+		ArtistID:  tracks[0].ArtistID,
+		Artists:   tracks[0].Artists,
+		Album:     tracks[0].Album,
+		AlbumID:   tracks[0].AlbumID,
+		Duration:  tracks[0].Duration,
+		CoverURL:  tracks[0].CoverURL,
 	}
 
-	// Enrich with publish time / album year when available.
 	if obj, ok := body["lrc"].(map[string]any); ok {
 		detail.Lyrics = asString(obj["lyric"])
 	}
@@ -294,7 +311,10 @@ func (p *Provider) GetArtistTracks(ctx context.Context, artistID string, page, l
 }
 
 // mapTrack converts a NetEase song object to a PlatformTrack. Search
-// responses use "artists"/"album", detail responses use "ar"/"al".
+// responses use "artists"/"album", detail responses use "ar"/"al". All
+// credited artists are collected (Artist is their comma-joined names,
+// ArtistID the first) so multi-artist tracks survive identification and
+// scoring.
 func mapTrack(s map[string]any) port.PlatformTrack {
 	t := port.PlatformTrack{
 		Platform: platformName,
@@ -311,14 +331,26 @@ func mapTrack(s map[string]any) port.PlatformTrack {
 	if len(ars) == 0 {
 		ars, _ = s["artists"].([]any)
 	}
-	if len(ars) > 0 {
-		if ar, ok := ars[0].(map[string]any); ok {
-			t.Artist = asString(ar["name"])
-			t.ArtistID = idString(ar["id"])
-			if t.CoverURL == "" {
-				t.CoverURL = asString(ar["img1v1Url"])
-			}
+	names := make([]string, 0, len(ars))
+	for _, item := range ars {
+		ar, ok := item.(map[string]any)
+		if !ok {
+			continue
 		}
+		name := asString(ar["name"])
+		if name == "" {
+			continue
+		}
+		ai := port.ArtistInfo{Name: name, ExternalID: idString(ar["id"])}
+		if t.Artists == nil {
+			t.Artists = []port.ArtistInfo{}
+		}
+		t.Artists = append(t.Artists, ai)
+		names = append(names, name)
+	}
+	if len(t.Artists) > 0 {
+		t.Artist = strings.Join(names, ",")
+		t.ArtistID = t.Artists[0].ExternalID
 	}
 
 	al, ok := s["al"].(map[string]any)
@@ -328,11 +360,64 @@ func mapTrack(s map[string]any) port.PlatformTrack {
 	if len(al) > 0 {
 		t.Album = asString(al["name"])
 		t.AlbumID = idString(al["id"])
+		// Detail responses carry the real cover URL; search responses only
+		// expose picId, so the cover stays empty there and is filled in by
+		// EnrichTracks' batch detail lookup.
 		if pic := asString(al["picUrl"]); pic != "" {
 			t.CoverURL = pic
 		}
 	}
 	return t
+}
+
+// EnrichTracks fills in the fields search responses omit — the real album
+// cover URL and the full artist list — via one batch song-detail request.
+// Tracks whose id is not returned by the API are left untouched.
+func (p *Provider) EnrichTracks(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error) {
+	if len(tracks) == 0 {
+		return tracks, nil
+	}
+	ids := make([]string, 0, len(tracks))
+	for _, t := range tracks {
+		if t.TrackID != "" {
+			ids = append(ids, t.TrackID)
+		}
+	}
+	if len(ids) == 0 {
+		return tracks, nil
+	}
+	details, err := p.songDetails(ctx, ids)
+	if err != nil {
+		return tracks, err
+	}
+	byID := make(map[string]port.PlatformTrack, len(details))
+	for _, d := range details {
+		byID[d.TrackID] = d
+	}
+	out := make([]port.PlatformTrack, len(tracks))
+	copy(out, tracks)
+	for i := range out {
+		d, ok := byID[out[i].TrackID]
+		if !ok {
+			continue
+		}
+		if d.CoverURL != "" {
+			out[i].CoverURL = d.CoverURL
+		}
+		if len(d.Artists) > 0 {
+			out[i].Artists = d.Artists
+			out[i].Artist = d.Artist
+			out[i].ArtistID = d.ArtistID
+		}
+		if d.Album != "" {
+			out[i].Album = d.Album
+			out[i].AlbumID = d.AlbumID
+		}
+		if d.Duration > 0 {
+			out[i].Duration = d.Duration
+		}
+	}
+	return out, nil
 }
 
 func mapArtistBrief(a map[string]any) port.ArtistDetail {

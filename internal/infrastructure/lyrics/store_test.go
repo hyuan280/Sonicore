@@ -34,6 +34,8 @@ func TestDetectFormat(t *testing.T) {
 		want    string
 	}{
 		{"lrc with timestamp", "[00:12.34]Line one\n[00:20.00]Line two", "lrc"},
+		{"lrc with millisecond timestamp", "[00:16.250]Line", "lrc"},
+		{"millisecond timestamp too long is txt", "[00:16.2500]Line", "txt"},
 		{"lrc with no leading zeros", "[1:02.00]Line", "lrc"},
 		{"lrc with metadata tags", "[ti:Some Song]\n[00:05.00]Hello", "lrc"},
 		{"lrc detected on any line", "Just a line\n[00:12.34]not lrc", "lrc"},

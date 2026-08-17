@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/sonicore/server/internal/core/port"
 )
 
 type ProbeResult struct {
@@ -50,6 +52,7 @@ type AudioMeta struct {
 	Lyricist    string
 	Arranger    string
 	Lyrics      string
+	HasLyrics   bool
 	FilePath    string
 	FileSize    int64
 	FileFormat  string
@@ -58,6 +61,40 @@ type AudioMeta struct {
 	AcoustID    string
 
 	TitleFromFilename bool
+}
+
+// QueryFromAudioMeta builds a metadata identification query from ffprobe
+// audio tags, mirroring the Resolver's artist fallback (album artist when
+// the performer tag is empty).
+func QueryFromAudioMeta(meta *AudioMeta) port.MetadataQuery {
+	artist := meta.Artist
+	if artist == "" {
+		artist = meta.AlbumArtist
+	}
+	return port.MetadataQuery{Title: meta.Title, Artist: artist, Album: meta.Album, TitleFromFilename: meta.TitleFromFilename}
+}
+
+// lyricsTag picks the lyrics value from lower-cased ffprobe tags. The ID3
+// USLT frame surfaces as "lyrics" or "lyrics-<lang>" (e.g. "lyrics-xxx");
+// the prefix match covers both, so files carrying embedded lyrics are not
+// sent through the platform lookup chain for them.
+func lyricsTag(tags map[string]string) string {
+	if v := tags["lyrics"]; v != "" {
+		return v
+	}
+	// ID3 USLT can carry multiple language frames ("lyrics-eng",
+	// "lyrics-zh", ...). Map iteration order is random, so pick the first
+	// non-empty language key deterministically to keep rescan results stable.
+	var lang string
+	for k, v := range tags {
+		if strings.HasPrefix(k, "lyrics-") && v != "" && (lang == "" || k < lang) {
+			lang = k
+		}
+	}
+	if lang != "" {
+		return tags[lang]
+	}
+	return ""
 }
 
 var audioExts = map[string]bool{
@@ -141,7 +178,7 @@ func buildAudioMeta(path string, result *ProbeResult) *AudioMeta {
 		meta.Comment = tags["comment"]
 	meta.Composer = tags["composer"]
 	meta.Lyricist = tags["lyricist"]
-	meta.Lyrics = tags["lyrics"]
+	meta.Lyrics = lyricsTag(tags)
 	meta.Arranger = tags["arranger"]
 	meta.MBID = tags["musicbrainz_trackid"]
 		if meta.MBID == "" {
@@ -168,6 +205,16 @@ func buildAudioMeta(path string, result *ProbeResult) *AudioMeta {
 	if !utf8.ValidString(meta.Album) || strings.ContainsRune(meta.Album, 0xFFFD) {
 		meta.Album = ""
 	}
+
+	// Lyrics go through the same garbling guard: a USLT frame whose declared
+	// encoding does not match its bytes can decode to U+FFFD noise. HasLyrics
+	// gates the registry (embedded lyrics skip platform lookup and persist as
+	// PriorityEmbedded), so a garbled value must not count as present.
+	if !utf8.ValidString(meta.Lyrics) || strings.ContainsRune(meta.Lyrics, 0xFFFD) {
+		meta.Lyrics = ""
+	}
+	meta.Lyrics = strings.TrimSpace(meta.Lyrics)
+	meta.HasLyrics = meta.Lyrics != ""
 
 	meta.Artists = splitArtistNames(meta.Artist)
 

@@ -109,3 +109,29 @@ func TestImageVariantsScanRoundTrip(t *testing.T) {
 	require.NoError(t, decoded.Scan(data))
 	assert.Equal(t, original, decoded)
 }
+
+func TestTrackSetExternalID(t *testing.T) {
+	// Empty alias table stays empty (single-version tracks).
+	track := &Track{MetadataSource: "musicbrainz"}
+	track.SetExternalID("mbid-new")
+	assert.Equal(t, "mbid-new", track.ExternalID)
+	assert.Nil(t, track.ExternalIDs, "empty alias table is not populated")
+
+	// A stale alias under the source is replaced.
+	track = &Track{
+		MetadataSource: "musicbrainz",
+		ExternalID:     "mbid-old",
+		ExternalIDs:    map[string]string{"musicbrainz": "mbid-old", "netease": "123"},
+	}
+	track.SetExternalID("mbid-new")
+	assert.Equal(t, "mbid-new", track.ExternalID)
+	assert.Equal(t, "mbid-new", track.ExternalIDs["musicbrainz"], "stale same-source alias replaced")
+	assert.Equal(t, "123", track.ExternalIDs["netease"], "other-source aliases kept")
+
+	// Clearing removes the alias under the source.
+	track.SetExternalID("")
+	assert.Equal(t, "", track.ExternalID)
+	_, has := track.ExternalIDs["musicbrainz"]
+	assert.False(t, has, "cleared source entry removed")
+	assert.Equal(t, "123", track.ExternalIDs["netease"])
+}

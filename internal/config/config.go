@@ -29,6 +29,9 @@ type PlatformsConfig struct {
 type NeteasePlatformConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Cookie  string `mapstructure:"cookie"`
+	// RateLimit paces outbound requests (requests/second; <= 0 disables) so
+	// scans do not trip NetEase's server-side throttle (code 405 操作频繁).
+	RateLimit int `mapstructure:"rate_limit"`
 }
 
 type MetadataConfig struct {
@@ -37,6 +40,7 @@ type MetadataConfig struct {
 	MusicBrainzRateLimit  int    `mapstructure:"musicbrainz_rate_limit"`
 	MusicBrainzAppName    string `mapstructure:"musicbrainz_app_name"`
 	MusicBrainzAppVersion string `mapstructure:"musicbrainz_app_version"`
+	NeteaseEnabled        bool   `mapstructure:"netease_enabled"`
 }
 
 type ServerConfig struct {
@@ -128,7 +132,7 @@ func Load() *Config {
 	v.SetDefault("data.images_dir", "/opt/sonicore/data/images")
 	v.SetDefault("data.cache_dir", "/opt/sonicore/data/cache")
 	v.SetDefault("data.lyrics_dir", "/opt/sonicore/data/lyrics")
-	v.SetDefault("jwt.secret", "change-me-in-production")
+	v.SetDefault("jwt.secret", "change-me-in-production-0123456789abcdef0123456789")
 	v.SetDefault("jwt.expiration", "24h")
 	v.SetDefault("jwt.refresh_expiration", "720h")
 	v.SetDefault("log.level", "info")
@@ -139,10 +143,12 @@ func Load() *Config {
 	v.SetDefault("metadata.musicbrainz_rate_limit", 1)
 	v.SetDefault("metadata.musicbrainz_app_name", "Sonicore")
 	v.SetDefault("metadata.musicbrainz_app_version", "0.1.0")
+	v.SetDefault("metadata.netease_enabled", false)
 
 	v.SetDefault("platforms.enabled", []string{})
 	v.SetDefault("platforms.netease.enabled", false)
 	v.SetDefault("platforms.netease.cookie", "")
+	v.SetDefault("platforms.netease.rate_limit", 1)
 
 	v.AutomaticEnv()
 	v.SetEnvPrefix("SONICORE")

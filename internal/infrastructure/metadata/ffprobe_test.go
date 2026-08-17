@@ -133,6 +133,26 @@ func sampleProbeResult() *ProbeResult {
 	}
 }
 
+func TestLyricsTag(t *testing.T) {
+	tests := []struct {
+		name string
+		tags map[string]string
+		want string
+	}{
+		{"exact lyrics key", map[string]string{"lyrics": "[00:01.00]line"}, "[00:01.00]line"},
+		{"uslt lang variant", map[string]string{"lyrics-xxx": "[00:01.00]line"}, "[00:01.00]line"},
+		{"uslt zh variant", map[string]string{"lyrics-zh": "[00:01.00]中文"}, "[00:01.00]中文"},
+		{"exact wins over variant", map[string]string{"lyrics": "exact", "lyrics-xxx": "variant"}, "exact"},
+		{"empty variant ignored", map[string]string{"lyrics-xxx": ""}, ""},
+		{"no lyrics", map[string]string{"title": "Song"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, lyricsTag(tt.tags))
+		})
+	}
+}
+
 func TestBuildAudioMetaFullMapping(t *testing.T) {
 	meta := buildAudioMeta("/music/Song.flac", sampleProbeResult())
 

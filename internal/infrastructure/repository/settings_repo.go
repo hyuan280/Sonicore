@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
 
 type SettingsRepo struct {
@@ -20,6 +22,30 @@ func (r *SettingsRepo) Get(ctx context.Context, key string) (string, error) {
 		return "", nil
 	}
 	return value, err
+}
+
+// GetMany reads several keys in one query (an absent key is simply missing
+// from the map). Used by the registry build so a cold cache does not pay one
+// round-trip per setting.
+func (r *SettingsRepo) GetMany(ctx context.Context, keys []string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT key, value FROM server_settings WHERE key = ANY($1)`, pq.Array(keys))
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return out, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 func (r *SettingsRepo) Set(ctx context.Context, key, value string) error {

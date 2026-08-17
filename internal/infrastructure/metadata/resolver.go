@@ -5,30 +5,36 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 )
 
+// andWordRe matches the word "and" (lowercased input) so only the standalone
+// conjunction is dropped, never the substring inside another word.
+var andWordRe = regexp.MustCompile(`\band\b`)
+
 type ArtistResult struct {
-	Name    string
-	MBID    string
-	Country string
+	Name       string
+	ExternalID string
+	Country    string
 }
 
 type EnrichmentResult struct {
-	ArtistMBID    string
-	AlbumMBID     string
-	TrackMBID     string
-	ArtistCountry string
-	AlbumCountry  string
-	Artists       []ArtistResult // all matched artists from MB recording
-	Genre         string
-	Year          int
-	Biography     string
-	CoverArtURL   string
-	Title         string  // MB-corrected title (if ffprobe was wrong)
-	Artist        string  // MB-corrected artist (first performer)
-	Album         string  // MB-corrected album
+	Source           string // metadata source that produced this result ("musicbrainz"/"netease")
+	ArtistExternalID string
+	AlbumExternalID  string
+	TrackExternalID  string
+	ArtistCountry    string
+	AlbumCountry     string
+	Artists          []ArtistResult // all matched artists from MB recording
+	Genre            string
+	Year             int
+	Biography        string
+	Lyrics           string // network lyrics (NetEase), stored at network priority
+	Title            string  // MB-corrected title (if ffprobe was wrong)
+	Artist           string  // MB-corrected artist (first performer)
+	Album            string  // MB-corrected album
 }
 
 type Resolver struct {
@@ -63,7 +69,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		return nil, nil
 	}
 
-	recordings := r.searchRecordings(title, artists, album)
+	recordings := r.searchRecordings(ctx, title, artists, album)
 	if len(recordings) == 0 {
 		return nil, nil
 	}
@@ -82,14 +88,15 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	}
 
 	if recording == nil {
-		log.Printf("[mb] no match found")
+		log.Printf("[mb] no match found for %q", title)
 		return nil, nil
 	}
 
 	log.Printf("[mb] recording matched: %q (MBID=%s)", recording.Title, recording.ID)
 
 	result := &EnrichmentResult{
-		TrackMBID: recording.ID,
+		TrackExternalID: recording.ID,
+		Source:          SourceMusicBrainz,
 	}
 
 	result.Title = TrimParenSuffix(recording.Title)
@@ -99,7 +106,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		for _, ref := range recording.Artists {
 			ar := ArtistResult{Name: TrimParenSuffix(ref.Name)}
 			if ref.Artist != nil {
-				ar.MBID = ref.Artist.ID
+				ar.ExternalID = ref.Artist.ID
 				ar.Country = ref.Artist.Country
 			}
 			if ref.Name != "" {
@@ -107,7 +114,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 			}
 		}
 		if recording.Artists[0].Artist != nil {
-			result.ArtistMBID = recording.Artists[0].Artist.ID
+			result.ArtistExternalID = recording.Artists[0].Artist.ID
 			result.ArtistCountry = recording.Artists[0].Artist.Country
 		}
 		if meta.Artist == "" {
@@ -121,7 +128,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 			continue
 		}
 		relIdx = i
-		result.AlbumMBID = rel.ID
+		result.AlbumExternalID = rel.ID
 		result.Album = rel.Title
 		if len(rel.Date) >= 4 {
 			fmt.Sscanf(rel.Date[:4], "%d", &result.Year)
@@ -140,44 +147,131 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	// Pick genre from first official release
 	if relIdx >= 0 {
 		rel := recording.Releases[relIdx]
-		full, err := r.mb.LookupRelease(rel.ID)
+		full, err := r.mb.LookupRelease(ctx, rel.ID)
 		if err == nil {
 			if g := GenreFromTags(full.Tags); g != "" {
 				result.Genre = g
 			}
 			result.AlbumCountry = full.Country
 		}
-		result.CoverArtURL = fmt.Sprintf("https://coverartarchive.org/release/%s/front", rel.ID)
 	}
 
-	if result.ArtistMBID != "" {
-		full, err := r.mb.LookupArtist(result.ArtistMBID)
-		if err == nil {
-			if result.ArtistCountry == "" && full.Country != "" {
-				result.ArtistCountry = full.Country
-			}
-			if len(full.Tags) > 0 {
-				if result.Genre == "" {
-					if g := GenreFromTags(full.Tags); g != "" {
-						result.Genre = g
-					}
-				}
-			}
-		}
-	}
+	// Enrich the main artist (country + genre fallback) and its country
+	// entry; fillArtistCountries below then handles only the secondary
+	// artists.
+	r.enrichMainArtist(ctx, result)
+
+	// Country for the remaining (secondary) artists: recording responses only
+	// carry the artist id, and only the main artist is enriched above. A
+	// secondary artist left without a country makes the scanner's metaComplete
+	// (every MB artist needs one) fail, so missing scans keep re-identifying.
+	r.fillArtistCountries(ctx, result)
 
 	return result, nil
+}
+
+// lookupArtist resolves an artist detail by MBID, serving repeat lookups from
+// the scan-scoped ArtistDetailCache when present (a nil cache in the context
+// means no caching). Failures are not cached so a transient error is retried
+// on the next occurrence.
+func (r *Resolver) lookupArtist(ctx context.Context, mbid string) (*MBArtistFull, error) {
+	if cache := artistDetailCacheFrom(ctx); cache != nil {
+		if full := cache.Get(mbid); full != nil {
+			return full, nil
+		}
+	}
+	full, err := r.mb.LookupArtist(ctx, mbid)
+	if err != nil {
+		return nil, err
+	}
+	if cache := artistDetailCacheFrom(ctx); cache != nil {
+		cache.Set(mbid, full)
+	}
+	return full, nil
+}
+
+// enrichMainArtist fills the main artist's country, the result-level
+// ArtistCountry and the genre fallback with a single artist lookup. Shared by
+// Enrich and IdentifyTrack so the two main-artist blocks cannot drift. The
+// artist is identified by its external id, not by index — result.Artists only
+// collects credits with a non-empty name. A lookup failure is logged (and not
+// cached, so it is retried on the next occurrence) rather than silently
+// skipped.
+func (r *Resolver) enrichMainArtist(ctx context.Context, result *EnrichmentResult) {
+	if result.ArtistExternalID == "" {
+		return
+	}
+	full, err := r.lookupArtist(ctx, result.ArtistExternalID)
+	if err != nil {
+		log.Printf("[mb] artist lookup failed for %s: %v", result.ArtistExternalID, err)
+		return
+	}
+	if full == nil {
+		return
+	}
+	if result.ArtistCountry == "" && full.Country != "" {
+		result.ArtistCountry = full.Country
+	}
+	for i := range result.Artists {
+		ar := &result.Artists[i]
+		if ar.ExternalID == result.ArtistExternalID && ar.Country == "" && full.Country != "" {
+			ar.Country = full.Country
+		}
+	}
+	if result.Genre == "" {
+		if g := GenreFromTags(full.Tags); g != "" {
+			result.Genre = g
+		}
+	}
+}
+
+// fillArtistCountries looks up country for every secondary artist in
+// result.Artists still missing one, via per-artist MusicBrainz lookups
+// (rate-limited by the client, memoized per scan via the context cache). The
+// main artist is enriched separately by enrichMainArtist (called before this
+// in Enrich/IdentifyTrack); skipping it here avoids a second lookup.
+func (r *Resolver) fillArtistCountries(ctx context.Context, result *EnrichmentResult) {
+	for i := range result.Artists {
+		ar := &result.Artists[i]
+		if ar.Country != "" || ar.ExternalID == "" || ar.ExternalID == result.ArtistExternalID {
+			continue
+		}
+		full, err := r.lookupArtist(ctx, ar.ExternalID)
+		if err != nil {
+			// A failure is not cached, so it is retried on the next
+			// occurrence; log it so a flaky upstream is distinguishable from
+			// an artist that genuinely has no country.
+			log.Printf("[mb] artist lookup failed for %s: %v", ar.ExternalID, err)
+			continue
+		}
+		if full == nil || full.Country == "" {
+			continue
+		}
+		ar.Country = full.Country
+	}
 }
 
 func normalizeForMatch(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ToLower(s)
-	repl := []string{"&", "and", ",", ".", "!", "?", "-", "\u2013", "  "}
-	for _, r := range repl {
+	s = strings.ReplaceAll(s, "&", " ")
+	// "and" only as a whole word: replacing the substring inside "Command"
+	// or "England" would silently mangle titles into false-equality.
+	s = andWordRe.ReplaceAllString(s, " ")
+	for _, r := range []string{",", ".", "!", "?", "-", "\u2013"} {
 		s = strings.ReplaceAll(s, r, " ")
 	}
-	return strings.TrimSpace(s)
+	// Collapse every whitespace run left by the replacements.
+	return strings.Join(strings.Fields(s), " ")
 }
+
+// NormalizeForMatch is the exported form of normalizeForMatch for the
+// scanner's duplicate-merge pass.
+func NormalizeForMatch(s string) string { return normalizeForMatch(s) }
+
+// SplitArtists is the exported form of splitRawArtists for the scanner's
+// duplicate-merge pass.
+func SplitArtists(s string) []string { return splitRawArtists(s) }
 
 func splitByDash(title string) []string {
 	parts := strings.FieldsFunc(title, func(r rune) bool {
@@ -380,8 +474,8 @@ func (r *Resolver) bestArtistMatch(queryTitle string, artists []string, recordin
 	return best
 }
 
-func (r *Resolver) searchRecordings(title string, artists []string, album string) []MBRecording {
-	recs, err := r.mb.SearchRecordings(title, artists, album)
+func (r *Resolver) searchRecordings(ctx context.Context, title string, artists []string, album string) []MBRecording {
+	recs, err := r.mb.SearchRecordings(ctx, title, artists, album)
 	if err != nil {
 		return nil
 	}
@@ -393,20 +487,21 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 	var rec MBRecording
 	q := url.Values{}
 	q.Set("inc", "artists+releases+tags")
-	if err := r.mb.get("/recording/"+mbid, q, &rec); err != nil {
+	if err := r.mb.get(ctx, "/recording/"+mbid, q, &rec); err != nil {
 		return nil, err
 	}
 
 	result := &EnrichmentResult{
-		TrackMBID: rec.ID,
-		Title:     TrimParenSuffix(rec.Title),
+		TrackExternalID: rec.ID,
+		Source:          SourceMusicBrainz,
+		Title:           TrimParenSuffix(rec.Title),
 	}
 
 	if len(rec.Artists) > 0 {
 		for _, ref := range rec.Artists {
 			ar := ArtistResult{Name: TrimParenSuffix(ref.Name)}
 			if ref.Artist != nil {
-				ar.MBID = ref.Artist.ID
+				ar.ExternalID = ref.Artist.ID
 				ar.Country = ref.Artist.Country
 			}
 			if ref.Name != "" {
@@ -414,7 +509,7 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 			}
 		}
 		if rec.Artists[0].Artist != nil {
-			result.ArtistMBID = rec.Artists[0].Artist.ID
+			result.ArtistExternalID = rec.Artists[0].Artist.ID
 			result.ArtistCountry = rec.Artists[0].Artist.Country
 		}
 		result.Artist = rec.Artists[0].Name
@@ -424,13 +519,13 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 		if rel.Status != "" && !strings.EqualFold(rel.Status, "official") {
 			continue
 		}
-		result.AlbumMBID = rel.ID
+		result.AlbumExternalID = rel.ID
 		result.Album = TrimParenSuffix(rel.Title)
 		if len(rel.Date) >= 4 {
 			fmt.Sscanf(rel.Date[:4], "%d", &result.Year)
 		}
 
-		full, err := r.mb.LookupRelease(rel.ID)
+		full, err := r.mb.LookupRelease(ctx, rel.ID)
 		if err == nil {
 			if g := GenreFromTags(full.Tags); g != "" {
 				result.Genre = g
@@ -438,31 +533,18 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 			result.AlbumCountry = full.Country
 		}
 
-		result.CoverArtURL = fmt.Sprintf("https://coverartarchive.org/release/%s/front", rel.ID)
 		break
 	}
 
-	if result.ArtistMBID != "" {
-		full, err := r.mb.LookupArtist(result.ArtistMBID)
-		if err == nil {
-			if result.ArtistCountry == "" && full.Country != "" {
-				result.ArtistCountry = full.Country
-			}
-			if len(full.Tags) > 0 {
-				if result.Genre == "" {
-					if g := GenreFromTags(full.Tags); g != "" {
-						result.Genre = g
-					}
-				}
-			}
-		}
-	}
+	r.enrichMainArtist(ctx, result)
+
+	r.fillArtistCountries(ctx, result)
 
 	return result, nil
 }
 
 func (r *Resolver) FetchCoverArt(ctx context.Context, mbid string) ([]byte, string, error) {
-	return r.mb.FetchCoverArt(mbid)
+	return r.mb.FetchCoverArt(ctx, mbid)
 }
 
 // looksGarbled detects if a string contains replacement characters

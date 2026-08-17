@@ -120,7 +120,8 @@ func detectFormat(content string) string {
 		}
 		if len(line) > 1 && line[0] == '[' {
 			closeBracket := strings.IndexByte(line, ']')
-			if closeBracket > 1 && closeBracket < 10 {
+			// mm:ss or mm:ss.xxx — up to "[00:16.250]" (11 chars, ']' at 10).
+			if closeBracket > 1 && closeBracket <= 10 {
 				timePart := line[1:closeBracket]
 				if strings.Contains(timePart, ":") {
 					return "lrc"

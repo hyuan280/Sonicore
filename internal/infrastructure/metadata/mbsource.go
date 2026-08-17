@@ -38,13 +38,25 @@ func (s *mbSource) Name() string         { return s.name }
 func (s *mbSource) Enabled() bool        { return s.enabled }
 func (s *mbSource) Priority() int        { return s.priority }
 
+// Capabilities: MusicBrainz has no network cover URL or lyrics. This is a
+// deliberate decision, not an omission: candidates never carry a
+// coverartarchive URL and FetchCoverArt is not wired into the cover chain.
+// A MusicBrainz track without an embedded cover therefore stays coverless in
+// MB-only deployments (accepted downgrade; NetEase covers, when enabled, fill
+// the gap via the registry's SearchCandidates).
+func (s *mbSource) Capabilities() port.MetadataFields {
+	return port.FieldTrackID | port.FieldTitle | port.FieldArtists | port.FieldAlbum | port.FieldAlbumExternalID |
+		port.FieldYear | port.FieldGenre
+}
+
 // Identify runs the existing recognition chain and reports the matched
 // recording with full confidence (the chain already decided it was the best).
 func (s *mbSource) Identify(ctx context.Context, q port.MetadataQuery) (*port.MetadataCandidate, error) {
 	result, err := s.resolver.Enrich(ctx, &AudioMeta{
-		Title:  q.Title,
-		Artist: q.Artist,
-		Album:  q.Album,
+		Title:             q.Title,
+		Artist:            q.Artist,
+		Album:             q.Album,
+		TitleFromFilename: q.TitleFromFilename,
 	})
 	if err != nil || result == nil {
 		return nil, err
@@ -68,7 +80,7 @@ func (s *mbSource) Lookup(ctx context.Context, externalID string) (*port.Metadat
 // SearchCandidates lists search results scored locally (best first) without
 // running the full enrichment chain.
 func (s *mbSource) SearchCandidates(ctx context.Context, q port.MetadataQuery) ([]port.MetadataCandidate, error) {
-	recordings, err := s.mb.SearchRecordings(q.Title, splitRawArtists(q.Artist), q.Album)
+	recordings, err := s.mb.SearchRecordings(ctx, q.Title, splitRawArtists(q.Artist), q.Album)
 	if err != nil {
 		return nil, err
 	}
@@ -144,19 +156,49 @@ func enrichmentToCandidate(source string, r *EnrichmentResult) *port.MetadataCan
 	}
 	c := &port.MetadataCandidate{
 		Source:          source,
-		ExternalID:      r.TrackMBID,
+		ExternalID:      r.TrackExternalID,
 		Title:           r.Title,
 		Album:           r.Album,
-		AlbumExternalID: r.AlbumMBID,
+		AlbumExternalID: r.AlbumExternalID,
+		AlbumCountry:    r.AlbumCountry,
 		Year:            r.Year,
 		Genre:           r.Genre,
-		CoverArtURL:     r.CoverArtURL,
 		Score:           1.0,
 	}
 	for _, ar := range r.Artists {
-		c.Artists = append(c.Artists, port.ArtistInfo{Name: ar.Name, ExternalID: ar.MBID, Country: ar.Country})
+		c.Artists = append(c.Artists, port.ArtistInfo{Name: ar.Name, ExternalID: ar.ExternalID, Country: ar.Country})
 	}
 	return c
+}
+
+// CandidateToEnrichment adapts a registry candidate back into the
+// enrichment shape the scanner consumes. The candidate's Source is
+// preserved so entity creation/update paths record the right metadata
+// source instead of assuming MusicBrainz.
+func CandidateToEnrichment(c *port.MetadataCandidate) *EnrichmentResult {
+	if c == nil {
+		return nil
+	}
+	r := &EnrichmentResult{
+		Source:          c.Source,
+		TrackExternalID: c.ExternalID,
+		AlbumExternalID: c.AlbumExternalID,
+		AlbumCountry:    c.AlbumCountry,
+		Title:           c.Title,
+		Album:           c.Album,
+		Year:            c.Year,
+		Genre:           c.Genre,
+		Lyrics:          c.Lyrics,
+	}
+	for _, a := range c.Artists {
+		r.Artists = append(r.Artists, ArtistResult{Name: a.Name, ExternalID: a.ExternalID, Country: a.Country})
+	}
+	if len(r.Artists) > 0 {
+		r.Artist = r.Artists[0].Name
+		r.ArtistExternalID = r.Artists[0].ExternalID
+		r.ArtistCountry = r.Artists[0].Country
+	}
+	return r
 }
 
 func recordingToCandidate(source string, rec MBRecording, score float64) port.MetadataCandidate {

@@ -18,7 +18,7 @@ func testAlbum() *domain.Album {
 		ID:             "alb-001",
 		Title:          "Abbey Road",
 		ArtistID:       "a-001",
-		MBID:           "f27ec8db-af05-4f36-916d-5e1c4c52b5e1",
+		ExternalID:           "f27ec8db-af05-4f36-916d-5e1c4c52b5e1",
 		MetadataSource: "musicbrainz",
 		ExternalIDs:    map[string]string{"netease": "216297"},
 		Year:           1969,
@@ -32,7 +32,7 @@ func testAlbum() *domain.Album {
 
 func albumRows(a *domain.Album) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
-		AddRow(a.ID, a.Title, a.ArtistID, a.MBID, a.MetadataSource, []byte(`{"netease":"216297"}`), a.Country, a.Year, a.Genre, nil, a.SongCount, a.Duration, a.CreatedAt, a.UpdatedAt)
+		AddRow(a.ID, a.Title, a.ArtistID, a.ExternalID, a.MetadataSource, []byte(`{"netease":"216297"}`), a.Country, a.Year, a.Genre, nil, a.SongCount, a.Duration, a.CreatedAt, a.UpdatedAt)
 }
 
 func TestAlbumRepoFindByID(t *testing.T) {
@@ -77,8 +77,8 @@ func TestAlbumRepoFindByLibraryID(t *testing.T) {
 	a2.ID, a2.Title = "alb-002", "Let It Be"
 
 	rows := sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
-		AddRow(a1.ID, a1.Title, a1.ArtistID, a1.MBID, a1.MetadataSource, []byte(`{}`), a1.Country, a1.Year, a1.Genre, nil, a1.SongCount, a1.Duration, a1.CreatedAt, a1.UpdatedAt).
-		AddRow(a2.ID, a2.Title, a2.ArtistID, a2.MBID, a2.MetadataSource, []byte(`{}`), a2.Country, a2.Year, a2.Genre, nil, a2.SongCount, a2.Duration, a2.CreatedAt, a2.UpdatedAt)
+		AddRow(a1.ID, a1.Title, a1.ArtistID, a1.ExternalID, a1.MetadataSource, []byte(`{}`), a1.Country, a1.Year, a1.Genre, nil, a1.SongCount, a1.Duration, a1.CreatedAt, a1.UpdatedAt).
+		AddRow(a2.ID, a2.Title, a2.ArtistID, a2.ExternalID, a2.MetadataSource, []byte(`{}`), a2.Country, a2.Year, a2.Genre, nil, a2.SongCount, a2.Duration, a2.CreatedAt, a2.UpdatedAt)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`WHERE t.library_id = $1`)).
 		WithArgs("lib-1").
@@ -112,13 +112,13 @@ func TestAlbumRepoBatchCreate(t *testing.T) {
 	a2.ExternalIDs = nil
 
 	mock.ExpectBegin()
-	mock.ExpectPrepare(regexp.QuoteMeta(`INSERT INTO albums (id, title, artist_id, mbid, metadata_source, external_ids, title_normalized, country, year, genre, cover_image_id, song_count, duration, created_at, updated_at)
+	mock.ExpectPrepare(regexp.QuoteMeta(`INSERT INTO albums (id, title, artist_id, external_id, metadata_source, external_ids, title_normalized, country, year, genre, cover_image_id, song_count, duration, created_at, updated_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO albums`)).
-		WithArgs(a1.ID, a1.Title, a1.ArtistID, a1.MBID, "musicbrainz", []byte(`{"netease":"216297"}`), "abbeyroad", a1.Country, a1.Year, a1.Genre, a1.CoverImageID, a1.SongCount, a1.Duration, a1.CreatedAt, a1.UpdatedAt).
+		WithArgs(a1.ID, a1.Title, a1.ArtistID, a1.ExternalID, "musicbrainz", []byte(`{"netease":"216297"}`), "abbeyroad", a1.Country, a1.Year, a1.Genre, a1.CoverImageID, a1.SongCount, a1.Duration, a1.CreatedAt, a1.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO albums`)).
-		WithArgs(a2.ID, a2.Title, a2.ArtistID, a2.MBID, "musicbrainz", []byte(`{}`), "abbeyroad", a2.Country, a2.Year, a2.Genre, a2.CoverImageID, a2.SongCount, a2.Duration, a2.CreatedAt, a2.UpdatedAt).
+		WithArgs(a2.ID, a2.Title, a2.ArtistID, a2.ExternalID, "musicbrainz", []byte(`{}`), "abbeyroad", a2.Country, a2.Year, a2.Genre, a2.CoverImageID, a2.SongCount, a2.Duration, a2.CreatedAt, a2.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -132,11 +132,11 @@ func TestAlbumRepoUpdate(t *testing.T) {
 	a := testAlbum()
 	a.Title = "Renamed"
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, external_id=$3, metadata_source=$4, external_ids=$5,
 		 title_normalized=$6, country=$7, year=$8, genre=$9,
 		 cover_image_id=$10, song_count=$11, duration=$12, updated_at=NOW()
 		 WHERE id=$13`)).
-		WithArgs(a.Title, a.ArtistID, a.MBID, "musicbrainz", []byte(`{"netease":"216297"}`), "renamed", a.Country, a.Year, a.Genre, a.CoverImageID, a.SongCount, a.Duration, a.ID).
+		WithArgs(a.Title, a.ArtistID, a.ExternalID, "musicbrainz", []byte(`{"netease":"216297"}`), "renamed", a.Country, a.Year, a.Genre, a.CoverImageID, a.SongCount, a.Duration, a.ID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.Update(context.Background(), a))
@@ -176,11 +176,11 @@ func TestAlbumRepoFindByMBID(t *testing.T) {
 	repo := NewAlbumRepo(db)
 	a := testAlbum()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND mbid = $2`)).
-		WithArgs("musicbrainz", a.MBID).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND external_id = $2`)).
+		WithArgs("musicbrainz", a.ExternalID).
 		WillReturnRows(albumRows(a))
 
-	got, err := repo.FindByMBID(context.Background(), a.MBID)
+	got, err := repo.FindByMBID(context.Background(), a.ExternalID)
 	require.NoError(t, err)
 	assert.Equal(t, a.ID, got.ID)
 }
@@ -190,7 +190,7 @@ func TestAlbumRepoFindBySourceAndID(t *testing.T) {
 	repo := NewAlbumRepo(db)
 	a := testAlbum()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND mbid = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE metadata_source = $1 AND external_id = $2`)).
 		WithArgs("netease", "216297").
 		WillReturnRows(albumRows(a))
 

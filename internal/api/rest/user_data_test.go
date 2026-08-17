@@ -81,12 +81,12 @@ func TestListFavoritesTrackType(t *testing.T) {
 	// main query
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT DISTINCT ON`)).
 		WithArgs("u-001", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"item_type", "item_id", "created_at", "title", "album_title", "album_id", "duration", "file_format", "cover_image_id", "version", "version_label", "mbid"}).
-			AddRow("track", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil, 1, "", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"item_type", "item_id", "created_at", "title", "album_title", "album_id", "duration", "file_format", "cover_image_id", "version", "version_label", "external_id", "metadata_source"}).
+			AddRow("track", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil, 1, "", "", "musicbrainz"))
 	// loadTrackArtistsBulk
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}).
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
 			AddRow("t-001", "art-1", "performer", 0, "Band", ""))
 
 	rec := httptest.NewRecorder()
@@ -107,8 +107,8 @@ func TestAddFavoritesSuccess(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
 			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
 			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
-	// track has no mbid → passes through
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT mbid FROM tracks WHERE id = $1 AND mbid != '' AND library_id = ANY($2)`)).
+	// track has no external id → passes through
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT external_id, metadata_source FROM tracks WHERE id = $1 AND external_id != '' AND library_id = ANY($2)`)).
 		WithArgs("t-001", sqlmock.AnyArg()).
 		WillReturnError(sql.ErrNoRows)
 	// library_id lookup
@@ -137,13 +137,13 @@ func TestAddFavoritesExpandsVersions(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
 			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
 			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
-	// track has mbid
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT mbid FROM tracks WHERE id = $1 AND mbid != '' AND library_id = ANY($2)`)).
+	// track has external id
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT external_id, metadata_source FROM tracks WHERE id = $1 AND external_id != '' AND library_id = ANY($2)`)).
 		WithArgs("t-001", sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"mbid"}).AddRow("mbid-1"))
-	// expand: SELECT ids with same mbid → t-001 + t-002
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM tracks WHERE mbid = $1 AND library_id = ANY($2)`)).
-		WithArgs("mbid-1", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"external_id", "metadata_source"}).AddRow("mbid-1", "musicbrainz"))
+	// expand: SELECT ids with same external id → t-001 + t-002
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM tracks WHERE external_id = $1 AND metadata_source = $2 AND library_id = ANY($3)`)).
+		WithArgs("mbid-1", "musicbrainz", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("t-001").AddRow("t-002"))
 
 	// two library lookups + two inserts
@@ -224,7 +224,7 @@ func TestListHistory(t *testing.T) {
 			AddRow("h-1", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
 
 	rec := httptest.NewRecorder()
 	h.ListHistory(rec, udRequest(http.MethodGet, "/api/user/history", "", "u-001"))
@@ -544,11 +544,11 @@ func TestGetQueueWithTracks(t *testing.T) {
 			AddRow(`{"track_ids":["t-001"],"queue_idx":0,"shuffle_order":[],"shuffle_idx":0,"mode":"normal"}`))
 	mock.ExpectQuery(regexp.QuoteMeta(`ORDER BY array_position($1::text[], t.id)`)).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist", "album_title", "album_id", "duration", "file_format", "cover_image_id", "track_number", "disc_number", "version", "version_label", "mbid"}).
-			AddRow("t-001", "Song", "Band", "Album", "alb-1", 200.0, "mp3", nil, 1, 1, 1, "", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist", "album_title", "album_id", "duration", "file_format", "cover_image_id", "track_number", "disc_number", "version", "version_label", "external_id", "metadata_source"}).
+			AddRow("t-001", "Song", "Band", "Album", "alb-1", 200.0, "mp3", nil, 1, 1, 1, "", "", "musicbrainz"))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
 
 	rec := httptest.NewRecorder()
 	h.GetQueue(rec, udRequest(http.MethodGet, "/api/user/queue", "", "u-001"))
@@ -588,7 +588,7 @@ func TestExpandTrackVersionsNoMBID(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
 			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
 			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT mbid FROM tracks WHERE id = $1 AND mbid != '' AND library_id = ANY($2)`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT external_id, metadata_source FROM tracks WHERE id = $1 AND external_id != '' AND library_id = ANY($2)`)).
 		WithArgs("t-001", sqlmock.AnyArg()).
 		WillReturnError(sql.ErrNoRows)
 

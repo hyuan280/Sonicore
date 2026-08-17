@@ -35,7 +35,7 @@ type LibraryHandler struct {
 // cover mutations against the scanner and cover-handler paths).
 func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, covers *metadata.CoverManager, manager *player.EngineManager) *LibraryHandler {
 	if covers == nil {
-		covers = metadata.NewCoverManager(imagesDir, db)
+		covers = metadata.NewCoverManager(imagesDir, db, nil)
 	}
 	return &LibraryHandler{
 		db:          db,

@@ -23,7 +23,7 @@ func newScanHandler(t *testing.T) (*ScanHandler, sqlmock.Sqlmock) {
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
-	svc := service.NewScannerService(db, t.TempDir(), t.TempDir(), metadata.MBConfig{}, nil)
+	svc := service.NewScannerService(db, t.TempDir(), t.TempDir(), metadata.MBConfig{}, nil, nil, false, nil)
 	return NewScanHandler(db, svc), mock
 }
 

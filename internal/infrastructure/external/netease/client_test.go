@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,11 +141,21 @@ func TestSetCookie(t *testing.T) {
 	assert.Equal(t, "aaa", c.getMusicA())
 	assert.Equal(t, "uuu", c.getMusicU())
 
-	c.SetCookie("") // no-op
-	assert.Equal(t, "aaa", c.getMusicA())
+	c.SetCookie("") // clears stored credentials so the client falls back to anonymous
+	assert.Equal(t, "", c.getMusicA())
+	assert.Equal(t, "", c.getMusicU())
 
-	c.SetCookie("garbage-without-equals")
-	assert.Equal(t, "aaa", c.getMusicA())
+	c.SetCookie("garbage-without-equals") // no credential pairs parsed
+	assert.Equal(t, "", c.getMusicA())
+
+	// A malformed non-empty cookie (parses to no MUSIC_U/MUSIC_A) must reset
+	// the anonymous-registration state too, or the client would run with empty
+	// credentials and never fall back to anonymous access.
+	c.anonDone = true
+	c.SetCookie("foo=bar")
+	assert.False(t, c.anonDone, "cookie with no MUSIC_U/MUSIC_A resets anonymous state")
+	assert.Equal(t, "", c.getMusicU())
+	assert.Equal(t, "", c.getMusicA())
 }
 
 func TestClientRequestAPIPlaintext(t *testing.T) {
@@ -305,4 +316,25 @@ func assertUppercaseHex(t *testing.T, s, msg string) {
 			t.Fatalf("%s: non-hex char %q", msg, c)
 		}
 	}
+}
+
+func TestRateLimitPacesAndDisables(t *testing.T) {
+	c := NewClient()
+
+	// Disabled (<= 0): no delay between requests.
+	c.SetRateLimit(0)
+	ctx := context.Background()
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		require.NoError(t, c.rateLimit(ctx))
+	}
+	assert.Less(t, time.Since(start), 200*time.Millisecond, "pacing disabled")
+
+	// Enabled: requests are spaced to the configured interval (20/s = 50ms).
+	c.SetRateLimit(20)
+	start = time.Now()
+	require.NoError(t, c.rateLimit(ctx))
+	require.NoError(t, c.rateLimit(ctx))
+	elapsed := time.Since(start)
+	assert.GreaterOrEqual(t, elapsed, 30*time.Millisecond, "second request waits for its slot")
 }

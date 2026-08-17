@@ -21,7 +21,7 @@ func newMetadataHandler(t *testing.T) (*MetadataHandler, sqlmock.Sqlmock) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
-	return NewMetadataHandler(db, metadata.MBConfig{RateLimit: 10000}), mock
+	return NewMetadataHandler(db, metadata.MBConfig{RateLimit: 10000, Enabled: true}, nil, nil, false, nil), mock
 }
 
 // expectMBSettings mocks the two settings reads done by mbConfig().
@@ -37,9 +37,9 @@ func expectMBSettings(mock sqlmock.Sqlmock) {
 func metadataTrackRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "external_id", "metadata_source", "external_ids", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-		AddRow("t-001", "lib-001", "Song", nil, 200, 320, 44100, 2, "/m/song.flac", 1000, "flac", "flac", "", "musicbrainz", "", "h",
+		AddRow("t-001", "lib-001", "Song", nil, 200, 320, 44100, 2, "/m/song.flac", 1000, "flac", "flac", "", "musicbrainz", "{}", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
 }
 
@@ -56,7 +56,7 @@ func TestMetadataIdentifyUnauthorized(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	h.Identify(rec, httptest.NewRequest(http.MethodPost, "/api/metadata/identify",
-		strings.NewReader(`{"track_id":"t-001","mbid":"mbid-1"}`)))
+		strings.NewReader(`{"track_id":"t-001","external_id":"mbid-1"}`)))
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
@@ -69,7 +69,7 @@ func TestMetadataIdentifyMissingParams(t *testing.T) {
 	h.Identify(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "need track_id and mbid")
+	assert.Contains(t, rec.Body.String(), "need track_id and external_id")
 }
 
 func TestMetadataIdentifyTrackNotFound(t *testing.T) {
@@ -80,7 +80,7 @@ func TestMetadataIdentifyTrackNotFound(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/metadata/identify",
-		strings.NewReader(`{"track_id":"missing","mbid":"mbid-1"}`))
+		strings.NewReader(`{"track_id":"missing","external_id":"mbid-1"}`))
 	rec := httptest.NewRecorder()
 	h.Identify(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
@@ -116,7 +116,7 @@ func TestMetadataIdentifySuccess(t *testing.T) {
 			AddRow("t-001", "alb-1", 1, 1, "Album", nil))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}).
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
 			AddRow("t-001", "art-1", "performer", 0, "Band", ""))
 
 	// mbConfig settings reads (when the resolver is created)
@@ -126,10 +126,10 @@ func TestMetadataIdentifySuccess(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tracks SET title=$1, cover_image_id=$2,
 		 duration=$3, bit_rate=$4, sample_rate=$5, channels=$6,
-		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, mbid=$11, metadata_source=$12, acoust_id=$13,
-		 hash=$14, lyrics_mask=$15, lyrics_offset=$16, heat=$17, play_count=$18,
-		 last_played_at=$19, metadata=$20, version=$21, version_label=$22, updated_at=NOW()
-		 WHERE id=$23`)).
+		 file_path=$7, file_size=$8, file_format=$9, audio_codec=$10, external_id=$11, metadata_source=$12, external_ids=$13, acoust_id=$14,
+		 hash=$15, lyrics_mask=$16, lyrics_offset=$17, heat=$18, play_count=$19,
+		 last_played_at=$20, metadata=$21, version=$22, version_label=$23, updated_at=NOW()
+		 WHERE id=$24`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM track_albums WHERE track_id = $1`)).
 		WithArgs("t-001").
@@ -140,18 +140,18 @@ func TestMetadataIdentifySuccess(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	// LoadTrackArtists for artist mbid update
+	// LoadTrackArtists for artist external id update
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}).
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
 			AddRow("t-001", "art-1", "performer", 0, "Band", ""))
 	// artistRepo.FindByID
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM artists WHERE id = $1`)).
 		WithArgs("art-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "sort_name", "mbid", "metadata_source", "external_ids", "country", "biography", "cover_image_id", "track_count", "created_at", "updated_at", "roles"}).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "sort_name", "external_id", "metadata_source", "external_ids", "country", "biography", "cover_image_id", "track_count", "created_at", "updated_at", "roles"}).
 			AddRow("art-1", "Band", "Band", "", "musicbrainz", `{}`, "", "", nil, time.Now(), time.Now(), 0, ""))
 	// artistRepo.Update
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE artists SET name=$1, sort_name=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE artists SET name=$1, sort_name=$2, external_id=$3, metadata_source=$4, external_ids=$5,
 		 name_normalized=$6, country=$7, biography=$8, cover_image_id=$9, updated_at=NOW()
 		 WHERE id=$10`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -159,22 +159,22 @@ func TestMetadataIdentifySuccess(t *testing.T) {
 	// albumRepo.FindByID
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM albums WHERE id = $1`)).
 		WithArgs("alb-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "mbid", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "artist_id", "external_id", "metadata_source", "external_ids", "country", "year", "genre", "cover_image_id", "song_count", "duration", "created_at", "updated_at"}).
 			AddRow("alb-1", "Album", "art-1", "", "musicbrainz", `{}`, "", 0, "", nil, 0, 0.0, time.Now(), time.Now()))
 	// albumRepo.Update
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, mbid=$3, metadata_source=$4, external_ids=$5,
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums SET title=$1, artist_id=$2, external_id=$3, metadata_source=$4, external_ids=$5,
 		 title_normalized=$6, country=$7, year=$8, genre=$9,
 		 cover_image_id=$10, song_count=$11, duration=$12, updated_at=NOW()
 		 WHERE id=$13`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/metadata/identify",
-		strings.NewReader(`{"track_id":"t-001","mbid":"mbid-9"}`))
+		strings.NewReader(`{"track_id":"t-001","external_id":"mbid-9"}`))
 	rec := httptest.NewRecorder()
 	h.Identify(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"mbid":"mbid-9"`)
+	assert.Contains(t, rec.Body.String(), `"external_id":"mbid-9"`)
 	assert.Contains(t, rec.Body.String(), `"title":"Song"`, "paren suffix trimmed")
 	assert.Contains(t, rec.Body.String(), `"artist":"Band"`)
 	assert.Contains(t, rec.Body.String(), `"year":2005`)
@@ -213,7 +213,7 @@ func TestMetadataReidentifyProbeFails(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
 
 	// file does not exist → metadata.Probe fails
 	req := httptest.NewRequest(http.MethodPost, "/api/metadata/reidentify",
@@ -250,7 +250,7 @@ func TestMetadataSearchArtistSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"name":"Band"`)
-	assert.Contains(t, rec.Body.String(), `"mbid":"a-1"`)
+	assert.Contains(t, rec.Body.String(), `"external_id":"a-1"`)
 }
 
 func TestMetadataSearchReleaseMissingName(t *testing.T) {
@@ -277,10 +277,10 @@ func TestMetadataSearchReleaseSuccess(t *testing.T) {
 		strings.NewReader(`{"name":"Album"}`)))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"mbid":"rel-1"`)
-	// query text prepended as unmatched entry (mbid empty) plus the matched one
+	assert.Contains(t, rec.Body.String(), `"external_id":"rel-1"`)
+	// query text prepended as unmatched entry (external id empty) plus the matched one
 	assert.Equal(t, 2, strings.Count(rec.Body.String(), `"title":"Album"`))
-	assert.Contains(t, rec.Body.String(), `"mbid":""`)
+	assert.Contains(t, rec.Body.String(), `"external_id":""`)
 }
 
 func TestMetadataSearchTrackInvalidBody(t *testing.T) {
@@ -296,7 +296,7 @@ func TestMetadataSearchTrackInvalidBody(t *testing.T) {
 func TestMetadataSearchTrackTitleRequired(t *testing.T) {
 	h, mock := newMetadataHandler(t)
 
-	// no track_id, no mbid → falls through to title check
+	// no track_id, no external_id → falls through to title check
 	rec := httptest.NewRecorder()
 	h.SearchTrack(rec, httptest.NewRequest(http.MethodPost, "/api/metadata/search-track",
 		strings.NewReader(`{}`)))

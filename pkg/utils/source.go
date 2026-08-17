@@ -7,6 +7,10 @@ import "strings"
 // metadata lives under it.
 const SourceMusicBrainz = "musicbrainz"
 
+// SourceNetease is the canonical name of the NetEase Cloud Music metadata
+// source.
+const SourceNetease = "netease"
+
 // SourceOrDefault maps an empty metadata source to the legacy default so
 // callers that predate multi-source metadata keep working.
 func SourceOrDefault(s string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -125,40 +126,45 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 
 	items := filtered[start:end]
 
-	var defaultMbids []string
+	// Version lookup keys are deduped (metadata_source, external_id) pairs:
+	// a bare external_id repeated across tracks or reused by another source
+	// would otherwise inflate the bulk query with rows destined to be thrown
+	// away (see buildVersionListFor's source filter).
+	versionKeys := make(map[repository.VersionGroupKey]struct{})
 	for _, t := range items {
-		if t.Version == 1 && t.MBID != "" {
-			defaultMbids = append(defaultMbids, t.MBID)
+		if t.Version == 1 && t.ExternalID != "" {
+			versionKeys[repository.VersionGroupKey{MetadataSource: t.MetadataSource, ExternalID: t.ExternalID}] = struct{}{}
 		}
 	}
 
-	var versionsByMbid map[string][]domain.Track
-	if len(defaultMbids) > 0 {
-		versionsByMbid = h.loadVersionMaps(r.Context(), defaultMbids, userID)
+	var versionsByExternalID map[repository.VersionGroupKey][]domain.Track
+	if len(versionKeys) > 0 {
+		versionsByExternalID = h.loadVersionMaps(r.Context(), versionKeySlice(versionKeys), userID)
 	}
 
 	result := make([]map[string]interface{}, len(items))
 	for i, t := range items {
 		entry := map[string]interface{}{
-			"id":             t.ID,
-			"title":          t.Title,
-			"cover_image_id": t.CoverImageID,
-			"duration":       t.Duration,
-			"bit_rate":       t.BitRate,
-			"suffix":         t.FileFormat,
-			"file_size":      t.FileSize,
-			"file_hash":      t.Hash,
-			"file_name":      filepath.Base(t.FilePath),
-			"mbid":           t.MBID,
-			"version":        t.Version,
-			"version_label":  t.VersionLabel,
+			"id":              t.ID,
+			"title":           t.Title,
+			"cover_image_id":  t.CoverImageID,
+			"duration":        t.Duration,
+			"bit_rate":        t.BitRate,
+			"suffix":          t.FileFormat,
+			"file_size":       t.FileSize,
+			"file_hash":       t.Hash,
+			"file_name":       filepath.Base(t.FilePath),
+			"external_id":     t.ExternalID,
+			"version":         t.Version,
+			"version_label":   t.VersionLabel,
+			"metadata_source": t.MetadataSource,
 		}
 		entry["albums"] = h.buildTrackAlbums(r.Context(), t.ID)
 		entry["artists"] = h.buildTrackArtists(r.Context(), t.ID)
 
-		if t.Version == 1 && t.MBID != "" && versionsByMbid != nil {
-			if siblings, ok := versionsByMbid[t.MBID]; ok {
-				if versionList := buildVersionList(siblings, t.ID); len(versionList) > 0 {
+		if t.Version == 1 && t.ExternalID != "" && versionsByExternalID != nil {
+			if siblings, ok := versionsByExternalID[repository.VersionGroupKey{MetadataSource: t.MetadataSource, ExternalID: t.ExternalID}]; ok {
+				if versionList := buildVersionListFor(siblings, t.MetadataSource, t.ID); len(versionList) > 0 {
 					entry["versions"] = versionList
 				}
 			}
@@ -243,41 +249,43 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 	tracks, _ := h.trackRepo.FindByArtistID(r.Context(), artistID)
 
 	var trackList []map[string]interface{}
-	var defaultMbids []string
+	versionKeys := make(map[repository.VersionGroupKey]struct{})
 	for _, t := range tracks {
 		if t.Version >= 2 {
 			continue
 		}
-		if t.Version == 1 && t.MBID != "" {
-			defaultMbids = append(defaultMbids, t.MBID)
+		if t.Version == 1 && t.ExternalID != "" {
+			versionKeys[repository.VersionGroupKey{MetadataSource: t.MetadataSource, ExternalID: t.ExternalID}] = struct{}{}
 		}
 		entry := map[string]interface{}{
-			"id":             t.ID,
-			"title":          t.Title,
-			"cover_image_id": t.CoverImageID,
-			"duration":       t.Duration,
-			"file_format":    t.FileFormat,
-			"version":        t.Version,
-			"version_label":  t.VersionLabel,
-			"mbid":           t.MBID,
-			"artists":        h.buildTrackArtists(r.Context(), t.ID),
-			"albums":         h.buildTrackAlbums(r.Context(), t.ID),
+			"id":              t.ID,
+			"title":           t.Title,
+			"cover_image_id":  t.CoverImageID,
+			"duration":        t.Duration,
+			"file_format":     t.FileFormat,
+			"version":         t.Version,
+			"version_label":   t.VersionLabel,
+			"metadata_source": t.MetadataSource,
+			"external_id":     t.ExternalID,
+			"artists":         h.buildTrackArtists(r.Context(), t.ID),
+			"albums":          h.buildTrackAlbums(r.Context(), t.ID),
 		}
 		trackList = append(trackList, entry)
 	}
 
-	if len(defaultMbids) > 0 {
-		versionsByMbid := h.loadVersionMaps(r.Context(), defaultMbids, userID)
+	if len(versionKeys) > 0 {
+		versionsByExternalID := h.loadVersionMaps(r.Context(), versionKeySlice(versionKeys), userID)
 		for _, entry := range trackList {
 			if v, _ := entry["version"].(int); v != 1 {
 				continue
 			}
-			mbid, _ := entry["mbid"].(string)
-			if mbid == "" {
+			extID, _ := entry["external_id"].(string)
+			if extID == "" {
 				continue
 			}
-			if siblings, ok := versionsByMbid[mbid]; ok {
-				versionList := buildVersionList(siblings, entry["id"].(string))
+			src, _ := entry["metadata_source"].(string)
+			if siblings, ok := versionsByExternalID[repository.VersionGroupKey{MetadataSource: src, ExternalID: extID}]; ok {
+				versionList := buildVersionListFor(siblings, src, entry["id"].(string))
 				if len(versionList) > 0 {
 					entry["versions"] = versionList
 				}
@@ -377,41 +385,43 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 
 	tracks, _ := h.trackRepo.FindByAlbumID(r.Context(), albumID)
 	var trackList []map[string]interface{}
-	var defaultMbids []string
+	versionKeys := make(map[repository.VersionGroupKey]struct{})
 	for _, t := range tracks {
 		if t.Version >= 2 {
 			continue
 		}
-		if t.Version == 1 && t.MBID != "" {
-			defaultMbids = append(defaultMbids, t.MBID)
+		if t.Version == 1 && t.ExternalID != "" {
+			versionKeys[repository.VersionGroupKey{MetadataSource: t.MetadataSource, ExternalID: t.ExternalID}] = struct{}{}
 		}
 		entry := map[string]interface{}{
-			"id":             t.ID,
-			"title":          t.Title,
-			"cover_image_id": t.CoverImageID,
-			"duration":       t.Duration,
-			"file_format":    t.FileFormat,
-			"version":        t.Version,
-			"version_label":  t.VersionLabel,
-			"mbid":           t.MBID,
-			"artists":        h.buildTrackArtists(r.Context(), t.ID),
-			"albums":         h.buildTrackAlbums(r.Context(), t.ID),
+			"id":              t.ID,
+			"title":           t.Title,
+			"cover_image_id":  t.CoverImageID,
+			"duration":        t.Duration,
+			"file_format":     t.FileFormat,
+			"version":         t.Version,
+			"version_label":   t.VersionLabel,
+			"metadata_source": t.MetadataSource,
+			"external_id":     t.ExternalID,
+			"artists":         h.buildTrackArtists(r.Context(), t.ID),
+			"albums":          h.buildTrackAlbums(r.Context(), t.ID),
 		}
 		trackList = append(trackList, entry)
 	}
 
-	if len(defaultMbids) > 0 {
-		versionsByMbid := h.loadVersionMaps(r.Context(), defaultMbids, userID)
+	if len(versionKeys) > 0 {
+		versionsByExternalID := h.loadVersionMaps(r.Context(), versionKeySlice(versionKeys), userID)
 		for _, entry := range trackList {
 			if v, _ := entry["version"].(int); v != 1 {
 				continue
 			}
-			mbid, _ := entry["mbid"].(string)
-			if mbid == "" {
+			extID, _ := entry["external_id"].(string)
+			if extID == "" {
 				continue
 			}
-			if siblings, ok := versionsByMbid[mbid]; ok {
-				versionList := buildVersionList(siblings, entry["id"].(string))
+			src, _ := entry["metadata_source"].(string)
+			if siblings, ok := versionsByExternalID[repository.VersionGroupKey{MetadataSource: src, ExternalID: extID}]; ok {
+				versionList := buildVersionListFor(siblings, src, entry["id"].(string))
 				if len(versionList) > 0 {
 					entry["versions"] = versionList
 				}
@@ -456,9 +466,9 @@ func (h *DataHandler) buildTrackAlbums(ctx context.Context, trackID string) []ma
 	result := make([]map[string]interface{}, len(tals))
 	for i, tal := range tals {
 		entry := map[string]interface{}{
-			"id":           tal.AlbumID,
-			"track":        tal.TrackNumber,
-			"disc_number":  tal.DiscNumber,
+			"id":          tal.AlbumID,
+			"track":       tal.TrackNumber,
+			"disc_number": tal.DiscNumber,
 		}
 		if tal.Album != nil {
 			entry["title"] = tal.Album.Title
@@ -482,7 +492,11 @@ func (h *DataHandler) buildTrackArtists(ctx context.Context, trackID string) []m
 		}
 		if ta.Artist != nil {
 			entry["name"] = ta.Artist.Name
-			entry["mbid"] = ta.Artist.MBID
+			entry["external_id"] = ta.Artist.ExternalID
+			// external_id alone is ambiguous across namespaces (MusicBrainz
+			// UUIDs vs NetEase numeric ids); consumers need the source to
+			// interpret it, matching how track entries pair the two.
+			entry["metadata_source"] = ta.Artist.MetadataSource
 		}
 		result[i] = entry
 	}
@@ -513,23 +527,47 @@ func (h *DataHandler) TracksByIDs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tracks": tracks})
 }
 
-func (h *DataHandler) loadVersionMaps(ctx context.Context, mbids []string, userID string) map[string][]domain.Track {
-	if len(mbids) == 0 || userID == "" {
+func (h *DataHandler) loadVersionMaps(ctx context.Context, keys []repository.VersionGroupKey, userID string) map[repository.VersionGroupKey][]domain.Track {
+	if len(keys) == 0 || userID == "" {
 		return nil
 	}
-	accessibleLibs, _ := h.libraryRepo.FindByUserID(ctx, userID)
+	accessibleLibs, err := h.libraryRepo.FindByUserID(ctx, userID)
+	if err != nil {
+		log.Printf("[browse] load accessible libraries for versions: %v", err)
+		return nil
+	}
 	var libIDs []string
 	for _, l := range accessibleLibs {
 		libIDs = append(libIDs, l.ID)
 	}
-	versionsByMbid, _ := h.trackRepo.FindVersionsByMbidBulk(ctx, mbids, libIDs)
-	return versionsByMbid
+	versionsByExternalID, err := h.trackRepo.FindVersionsByExternalIDBulk(ctx, keys, libIDs)
+	if err != nil {
+		// Degrade gracefully (versions silently disappear) but keep the
+		// failure observable.
+		log.Printf("[browse] load version groups: %v", err)
+		return nil
+	}
+	return versionsByExternalID
 }
 
-func buildVersionList(siblings []domain.Track, excludeID string) []map[string]interface{} {
+// versionKeySlice flattens a deduped (metadata_source, external_id) key set
+// into the slice form the bulk version lookup consumes.
+func versionKeySlice(m map[repository.VersionGroupKey]struct{}) []repository.VersionGroupKey {
+	keys := make([]repository.VersionGroupKey, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// buildVersionListFor renders a track's "other versions" from its version
+// group. Only siblings sharing the track's metadata source participate: the
+// version-group identity is (metadata_source, external_id), and two sources
+// can legitimately use the same external_id value for different works.
+func buildVersionListFor(siblings []domain.Track, source, excludeID string) []map[string]interface{} {
 	var list []map[string]interface{}
 	for _, s := range siblings {
-		if s.ID == excludeID {
+		if s.ID == excludeID || s.MetadataSource != source {
 			continue
 		}
 		list = append(list, map[string]interface{}{
@@ -589,12 +627,16 @@ func (h *DataHandler) Search(w http.ResponseWriter, r *http.Request) {
 			"id": id, "title": title, "duration": duration,
 			"file_format": fileFormat, "version": version, "version_label": versionLabel,
 		}
-		if coverID.Valid { entry["cover_image_id"] = coverID.String }
+		if coverID.Valid {
+			entry["cover_image_id"] = coverID.String
+		}
 		entry["artists"] = h.buildTrackArtists(r.Context(), id)
 		entry["albums"] = h.buildTrackAlbums(r.Context(), id)
 		trackList = append(trackList, entry)
 	}
-	if trackRows != nil { trackRows.Close() }
+	if trackRows != nil {
+		trackRows.Close()
+	}
 
 	// Search albums
 	albumRows, _ := h.db.QueryContext(r.Context(),
@@ -608,10 +650,14 @@ func (h *DataHandler) Search(w http.ResponseWriter, r *http.Request) {
 		var coverID sql.NullString
 		albumRows.Scan(&id, &title, &year, &coverID)
 		entry := map[string]interface{}{"id": id, "title": title, "year": year}
-		if coverID.Valid { entry["cover_image_id"] = coverID.String }
+		if coverID.Valid {
+			entry["cover_image_id"] = coverID.String
+		}
 		albumList = append(albumList, entry)
 	}
-	if albumRows != nil { albumRows.Close() }
+	if albumRows != nil {
+		albumRows.Close()
+	}
 
 	// Search artists
 	artistRows, _ := h.db.QueryContext(r.Context(),
@@ -624,10 +670,14 @@ func (h *DataHandler) Search(w http.ResponseWriter, r *http.Request) {
 		var coverID sql.NullString
 		artistRows.Scan(&id, &name, &coverID)
 		entry := map[string]interface{}{"id": id, "name": name}
-		if coverID.Valid { entry["cover_image_id"] = coverID.String }
+		if coverID.Valid {
+			entry["cover_image_id"] = coverID.String
+		}
 		artistList = append(artistList, entry)
 	}
-	if artistRows != nil { artistRows.Close() }
+	if artistRows != nil {
+		artistRows.Close()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"tracks":  trackList,

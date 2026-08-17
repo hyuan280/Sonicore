@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/internal/infrastructure/secrets"
 	"github.com/sonicore/server/internal/infrastructure/transcoder"
 )
 
@@ -89,18 +92,91 @@ func New(cfg *config.Config) (*Server, error) {
 		AppName:   cfg.Metadata.MusicBrainzAppName,
 		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
 	}
+	// One shared MusicBrainz client for every request path (cover restore,
+	// scans, manual identify): a single rate limiter and HTTP client instead
+	// of a fresh instance per registry build. Runtime settings propagate via
+	// ApplyConfig (MBConfig.Client).
+	mbClient := metadata.NewMBClient(mbCfg)
+	platformProviders, neteaseProvider := buildPlatformProviders(cfg)
+	// Runtime settings (netEase cookie, metadata switches) are read through a
+	// short-TTL cache so the per-request / per-cover lookups do not hit the
+	// database on every outbound API call; admin changes still apply within
+	// the TTL window.
+	settingsRepo := repository.NewSettingsRepo(db)
+	cachedSettings := newCachedSettings()
+	// At-rest encryption for platform credentials stored in the settings DB,
+	// keyed off the master (JWT) secret via HKDF. A weak (short) secret is a
+	// startup error, not a panic: the caller surfaces an actionable message
+	// and the process exits cleanly.
+	enc, err := secrets.New([]byte(cfg.JWT.Secret))
+	if err != nil {
+		return nil, err
+	}
+	// Wire the runtime NetEase cookie (admin settings) into the shared
+	// provider so changes apply without a restart. The stored value is
+	// encrypted at rest; decrypt it at the point of use.
+	neteaseProvider.SetCookieProvider(func() string {
+		raw := cachedSettings.get(settingsRepo, "platforms_netease_cookie")
+		if raw == "" {
+			return ""
+		}
+		dec, err := enc.Decrypt(raw)
+		if err != nil {
+			log.Printf("[server] decrypt netease cookie: %v", err)
+			return ""
+		}
+		return dec
+	})
+	// The NetEase request pacing follows the runtime admin setting
+	// (platforms_netease_rate_limit), falling back to the config value; an
+	// empty/invalid setting keeps the config default.
+	neteaseProvider.SetRateLimitProvider(func() int {
+		raw := cachedSettings.get(settingsRepo, "platforms_netease_rate_limit")
+		if n, err := strconv.Atoi(raw); err == nil {
+			return n
+		}
+		return cfg.Platforms.Netease.RateLimit
+	})
 	// One cover manager shared by the scanner and the HTTP cover handlers so
-	// extraction is serialized across both paths.
-	covers := metadata.NewCoverManager(cfg.Data.ImagesDir, db)
-	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, covers)
+	// extraction is serialized across both paths. Its platform lookup builds
+	// the registry from the same switches the scanner uses.
+	umRepo := repository.NewUserMetadataRepo(db)
+	buildRegistry := func() *metadata.Registry {
+		mbCfg := mbCfg
+		mbCfg.Client = mbClient
+		// Read every runtime switch in one batched, TTL-cached query so a cold
+		// cache (or a failing DB) does not serialize one timeout per key on
+		// the cover hot path.
+		vals := cachedSettings.getMany(settingsRepo,
+			"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url",
+			"metadata_musicbrainz_rate_limit", "metadata_netease_enabled")
+		if enabled := vals["metadata_musicbrainz_enabled"]; enabled != "" {
+			mbCfg.Enabled = enabled == "true"
+		}
+		if url := vals["metadata_musicbrainz_api_url"]; url != "" {
+			mbCfg.APIURL = url
+		}
+		if rl := vals["metadata_musicbrainz_rate_limit"]; rl != "" {
+			if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
+				log.Printf("[server] invalid musicbrainz rate limit %q", rl)
+			} else {
+				mbCfg.RateLimit = n
+			}
+		}
+		neEnabled := cfg.Metadata.NeteaseEnabled
+		if enabled := vals["metadata_netease_enabled"]; enabled != "" {
+			neEnabled = enabled == "true"
+		}
+		return metadata.BuildRegistry(mbCfg, neteaseProvider, neEnabled, umRepo)
+	}
+	covers := metadata.NewCoverManager(cfg.Data.ImagesDir, db, buildRegistry)
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
-	platformProviders := buildPlatformProviders(cfg)
-
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, covers)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -120,7 +196,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, covers *metadata.CoverManager) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -181,7 +257,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		RateLimit: cfg.Metadata.MusicBrainzRateLimit,
 		AppName:   cfg.Metadata.MusicBrainzAppName,
 		AppVer:    cfg.Metadata.MusicBrainzAppVersion,
-	})
+	}, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers)
 	protected.HandleFunc("/metadata/identify", metadataHandler.Identify).Methods("POST")
 	protected.HandleFunc("/metadata/reidentify", metadataHandler.Reidentify).Methods("POST")
 	protected.HandleFunc("/metadata/search/track", metadataHandler.SearchTrack).Methods("POST")
@@ -300,7 +376,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	})
 
 	// Admin
-	adminHandler := rest.NewAdminHandler(db)
+	adminHandler := rest.NewAdminHandler(db, enc)
 	admin := r.PathPrefix("/api/admin").Subrouter()
 	admin.Use(middleware.AuthMiddleware(jwtService))
 	admin.Use(rest.AdminOnly)
@@ -323,27 +399,44 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 }
 
 // buildPlatformProviders instantiates the enabled external music platforms.
-func buildPlatformProviders(cfg *config.Config) map[string]port.PlatformProvider {
+// The NetEase provider is always built: it powers both the platform
+// endpoints (when the platform is enabled) and the metadata recognition
+// chain (when the metadata source is enabled), and both share one client so
+// the cookie/anon session is common.
+//
+// The "netease platform enabled" state is the platform switch OR the
+// metadata switch: enabling NetEase metadata implies the platform is
+// available too. The returned provider is never nil.
+func buildPlatformProviders(cfg *config.Config) (map[string]port.PlatformProvider, *netease.Provider) {
 	providers := map[string]port.PlatformProvider{}
 
-	enabled := map[string]bool{}
+	platformEnabled := false
 	for _, name := range cfg.Platforms.Enabled {
-		enabled[name] = true
+		if name == "netease" {
+			platformEnabled = true
+		}
 	}
 	if cfg.Platforms.Netease.Enabled {
-		enabled["netease"] = true
+		platformEnabled = true
 	}
 
-	if enabled["netease"] {
-		client := netease.NewClient()
-		if cfg.Platforms.Netease.Cookie != "" {
-			client.SetCookie(cfg.Platforms.Netease.Cookie)
-		}
-		providers["netease"] = netease.NewProvider(client)
+	client := netease.NewClient()
+	// Pace outbound requests so sustained scans do not trip NetEase's
+	// server-side throttle (code 405 操作频繁); 0 disables pacing.
+	client.SetRateLimit(cfg.Platforms.Netease.RateLimit)
+	if cfg.Platforms.Netease.Cookie != "" {
+		client.SetCookie(cfg.Platforms.Netease.Cookie)
+	}
+	neteaseProvider := netease.NewProvider(client)
+
+	if platformEnabled || cfg.Metadata.NeteaseEnabled {
+		providers["netease"] = neteaseProvider
+	}
+	if platformEnabled {
 		log.Println("[platform] enabled: netease")
 	}
 
-	return providers
+	return providers, neteaseProvider
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -388,4 +481,153 @@ func (s *Server) Start() error {
 
 	s.vk.Close()
 	return s.http.Shutdown(ctx)
+}
+
+// settingsCacheTTL bounds how stale a cached server setting may be. Runtime
+// admin changes apply within this window while hot paths (every NetEase API
+// call, every cover registry build) avoid a synchronous DB read.
+const settingsCacheTTL = 5 * time.Second
+
+type settingsCacheEntry struct {
+	value string
+	at    time.Time
+}
+
+// cachedSettings is a per-key TTL cache for server_settings reads.
+type cachedSettings struct {
+	mu   sync.RWMutex
+	vals map[string]settingsCacheEntry
+	// refreshing marks keys with an in-flight DB refresh so concurrent
+	// readers of the same stale key share one query and serve the cached
+	// value meanwhile.
+	refreshing map[string]bool
+}
+
+func newCachedSettings() *cachedSettings {
+	return &cachedSettings{vals: make(map[string]settingsCacheEntry), refreshing: make(map[string]bool)}
+}
+
+// get returns the setting value for a key, refreshing from the repo at most
+// once per TTL window. The DB query runs outside the global lock so a slow
+// or failing database cannot serialize every key's read; concurrent readers
+// of the same stale key share the refresh and are served the cached value.
+func (c *cachedSettings) get(repo *repository.SettingsRepo, key string) string {
+	c.mu.RLock()
+	e, ok := c.vals[key]
+	c.mu.RUnlock()
+	if ok && time.Since(e.at) < settingsCacheTTL {
+		return e.value
+	}
+
+	c.mu.Lock()
+	if e, ok := c.vals[key]; ok && time.Since(e.at) < settingsCacheTTL {
+		c.mu.Unlock()
+		return e.value // another goroutine refreshed while we waited
+	}
+	if c.refreshing[key] {
+		stale := c.vals[key].value
+		c.mu.Unlock()
+		return stale // a refresh is in flight; serve the cached value
+	}
+	c.refreshing[key] = true
+	c.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	value, err := repo.Get(ctx, key)
+
+	c.mu.Lock()
+	delete(c.refreshing, key)
+	if err != nil {
+		if old, ok := c.vals[key]; ok {
+			// Treat the TTL as a failure backoff: refresh entry.at so a
+			// flaky DB does not force every hot-path read into the (up to
+			// 2s) synchronous query path on each call.
+			c.vals[key] = settingsCacheEntry{value: old.value, at: time.Now()}
+			log.Printf("[server] settings %q read failed: %v (using cached value)", key, err)
+			c.mu.Unlock()
+			return old.value
+		}
+		log.Printf("[server] settings %q read failed: %v", key, err)
+		// Back off on the empty value too (cold start / never-set keys): an
+		// empty string is a safe "no override, use defaults" semantic, and
+		// caching it prevents every hot-path read from paying the 2s query
+		// during a DB outage.
+		c.vals[key] = settingsCacheEntry{value: "", at: time.Now()}
+		c.mu.Unlock()
+		return ""
+	}
+	c.vals[key] = settingsCacheEntry{value: value, at: time.Now()}
+	c.mu.Unlock()
+	return value
+}
+
+// getMany returns the values for the given keys, refreshing every stale key
+// in ONE database query with a single timeout (instead of one query per key).
+// The registry build reads four keys, so a cold cache backed by a failing DB
+// would otherwise serialize up to four 2s timeouts (8s worst case) on a hot
+// path. Absent keys are absent from the returned map ("no override").
+func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) map[string]string {
+	out := make(map[string]string, len(keys))
+	c.mu.RLock()
+	var stale []string
+	for _, k := range keys {
+		if e, ok := c.vals[k]; ok && time.Since(e.at) < settingsCacheTTL {
+			out[k] = e.value
+		} else {
+			stale = append(stale, k)
+		}
+	}
+	c.mu.RUnlock()
+	if len(stale) == 0 {
+		return out
+	}
+
+	c.mu.Lock()
+	var toQuery []string
+	for _, k := range stale {
+		if e, ok := c.vals[k]; ok && time.Since(e.at) < settingsCacheTTL {
+			out[k] = e.value // another goroutine refreshed it while we waited
+			continue
+		}
+		if c.refreshing[k] {
+			out[k] = c.vals[k].value // a refresh is in flight; serve the cached value
+			continue
+		}
+		c.refreshing[k] = true
+		toQuery = append(toQuery, k)
+	}
+	c.mu.Unlock()
+	if len(toQuery) == 0 {
+		return out
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	values, err := repo.GetMany(ctx, toQuery)
+
+	c.mu.Lock()
+	for _, k := range toQuery {
+		delete(c.refreshing, k)
+		if err == nil {
+			if v, ok := values[k]; ok {
+				out[k] = v
+				c.vals[k] = settingsCacheEntry{value: v, at: time.Now()}
+			} else {
+				out[k] = ""
+				c.vals[k] = settingsCacheEntry{value: "", at: time.Now()}
+			}
+			continue
+		}
+		// On failure reuse the cached value (or empty) and back off so a flaky
+		// DB does not force every hot-path read into the query path.
+		old := c.vals[k]
+		out[k] = old.value
+		c.vals[k] = settingsCacheEntry{value: old.value, at: time.Now()}
+	}
+	c.mu.Unlock()
+	if err != nil {
+		log.Printf("[server] settings batch read failed for %d key(s): %v", len(toQuery), err)
+	}
+	return out
 }

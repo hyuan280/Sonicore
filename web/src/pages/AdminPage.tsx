@@ -6,7 +6,7 @@ import { api } from "../api/client"
 import { getRole } from "../stores/auth"
 import { Card } from "../components/ui/card"
 import { Input } from "../components/ui/input"
-import { Shield, Users } from "lucide-react"
+import { Shield, Users, Trash2, Eye, EyeOff } from "lucide-react"
 
 export default function AdminPage() {
   const { t } = useTranslation()
@@ -21,6 +21,14 @@ export default function AdminPage() {
   const [mbModified, setMbModified] = useState(false)
   const [mbInit, setMbInit] = useState({ enabled: false, apiUrl: "", rateLimit: "1" })
   const [mbError, setMbError] = useState("")
+  const [neEnabled, setNeEnabled] = useState(false)
+  const [neCookie, setNeCookie] = useState("")
+  const [neRateLimit, setNeRateLimit] = useState("1")
+  const [neSaving, setNeSaving] = useState(false)
+  const [neModified, setNeModified] = useState(false)
+  const [neInit, setNeInit] = useState({ enabled: false, cookieSet: false, rateLimit: "1" })
+  const [neError, setNeError] = useState("")
+  const [neShowCookie, setNeShowCookie] = useState(false)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -44,6 +52,14 @@ export default function AdminPage() {
         apiUrl: s.metadata_musicbrainz_api_url || "",
         rateLimit: s.metadata_musicbrainz_rate_limit || "1",
       })
+      setNeEnabled(s.metadata_netease_enabled)
+      setNeCookie("")
+      setNeRateLimit(s.platforms_netease_rate_limit || "1")
+      setNeInit({
+        enabled: s.metadata_netease_enabled,
+        cookieSet: !!s.platforms_netease_cookie_set,
+        rateLimit: s.platforms_netease_rate_limit || "1",
+      })
     } catch (err: any) { setError(translateApiError(t, err)) }
   }
 
@@ -59,6 +75,30 @@ export default function AdminPage() {
       await api.admin.updateSettings({ allow_registration: !allowRegistration })
       setAllowRegistration(!allowRegistration)
     } catch (err: any) { setError(translateApiError(t, err)) }
+  }
+
+  // NetEase card state is dirty when the toggle, a pending cookie, or the rate
+  // limit differs from the loaded initial values. The pending values are
+  // passed in because React state is async: checking the previous render's
+  // state right after an onChange would miss the just-typed change (e.g.
+  // clearing the rate limit would never show the save button).
+  const neDirty = (enabled: boolean, cookie: string, rateLimit: string) =>
+    enabled !== neInit.enabled || cookie !== "" || rateLimit !== neInit.rateLimit
+
+  // Discards the stored NetEase cookie immediately (not part of the save
+  // flow): confirmation first, then a direct clear request to the backend.
+  async function discardNeteaseCookie() {
+    if (!confirm(t("admin.neteaseCookieDiscardConfirm"))) return
+    setNeSaving(true)
+    setNeError("")
+    try {
+      await api.admin.updateSettings({ platforms_netease_cookie_clear: true })
+      setNeInit(prev => ({ ...prev, cookieSet: false }))
+      setNeCookie("")
+      setNeShowCookie(false)
+      setNeModified(neDirty(neEnabled, "", neRateLimit))
+    } catch (err) { setNeError(translateApiError(t, err)) }
+    setNeSaving(false)
   }
 
   const currentRole = getRole()
@@ -116,17 +156,108 @@ export default function AdminPage() {
               await api.admin.updateSettings({
                 metadata_musicbrainz_enabled: mbEnabled,
                 metadata_musicbrainz_api_url: mbApiUrl || undefined,
-                metadata_musicbrainz_rate_limit: mbRateLimit || undefined,
+                // An empty rate limit is sent verbatim so clearing the field
+                // resets the provider to the config default.
+                metadata_musicbrainz_rate_limit: mbRateLimit,
               })
               setMbModified(false)
-            } catch (err: any) { setMbError(translateApiError(t, err)) }
+              setMbInit({ enabled: mbEnabled, apiUrl: mbApiUrl || mbInit.apiUrl, rateLimit: mbRateLimit })
+            } catch (err) { setMbError(translateApiError(t, err)) }
             setMbSaving(false)
           }} disabled={mbSaving}
             className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
             {mbSaving ? t("admin.saving") : t("admin.save")}
           </button>
+          <button onClick={() => { setMbEnabled(mbInit.enabled); setMbApiUrl(mbInit.apiUrl); setMbRateLimit(mbInit.rateLimit); setMbModified(false); setMbError("") }} disabled={mbSaving}
+            className="px-3 py-1.5 rounded-lg text-sm bg-zinc-700 text-white hover:bg-zinc-600 disabled:opacity-50 cursor-pointer">
+            {t("admin.revert")}
+          </button>
           {mbError && <span className="text-xs text-red-400">{mbError}</span>}
           </div>
+          )}
+        </div>
+      </Card>
+
+      <Card className="space-y-3">
+        <h3 className="font-medium flex items-center gap-2"><img src="/netease-cloud-music.svg" alt="" className="w-4 h-4" /> {t("admin.netease")}</h3>
+        <div className="space-y-3 p-3 rounded-lg bg-zinc-800/50">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">{t("admin.enableNetease")}</p>
+              <p className="text-xs text-zinc-400">{t("admin.enableNeteaseDesc")}</p>
+            </div>
+            <button role="switch" aria-checked={neEnabled} aria-label={t("admin.enableNetease")}
+              onClick={() => { const next = !neEnabled; setNeEnabled(next); setNeModified(neDirty(next, neCookie, neRateLimit)); setNeError("") }}
+              disabled={neSaving}
+              className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${neEnabled ? "bg-green-600" : "bg-zinc-700"}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${neEnabled ? "translate-x-6" : ""}`} />
+            </button>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.neteaseCookie")}</p>
+            <div className="relative">
+              <input
+                type={neShowCookie ? "text" : "password"}
+                value={neCookie}
+                autoComplete="off"
+                onChange={e => { const next = e.target.value; setNeCookie(next); if (next === "") setNeShowCookie(false); setNeModified(neDirty(neEnabled, next, neRateLimit)); setNeError("") }}
+                placeholder={neInit.cookieSet ? t("admin.neteaseCookieConfigured") : "MUSIC_U=..."}
+                disabled={neSaving}
+                className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 pr-40 text-sm focus:outline-none focus:border-green-500 disabled:opacity-50"
+              />
+              {neCookie !== "" && (
+                <button
+                  onClick={() => setNeShowCookie(!neShowCookie)}
+                  aria-label={t("admin.neteaseCookieShow")}
+                  disabled={neSaving}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer disabled:opacity-50">
+                  {neShowCookie ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              )}
+              {neInit.cookieSet && neCookie === "" && (
+                <button
+                  onClick={discardNeteaseCookie}
+                  aria-label={t("admin.neteaseCookieDiscard")}
+                  disabled={neSaving}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-1 rounded text-xs text-red-400 hover:text-red-300 hover:bg-zinc-800 cursor-pointer disabled:opacity-50">
+                  <span className="whitespace-nowrap">{t("admin.neteaseCookieDiscard")}</span>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.rateLimit")}</p>
+            <Input value={neRateLimit} onChange={e => { const next = e.target.value; setNeRateLimit(next); setNeModified(neDirty(neEnabled, neCookie, next)); setNeError("") }}
+              placeholder="1" />
+          </div>
+          {neError && <span className="text-xs text-red-400">{neError}</span>}
+          {neModified && (
+            <div className="flex items-center gap-3">
+              <button onClick={async () => {
+                setNeSaving(true); setNeError("")
+                try {
+                  const payload: Record<string, unknown> = { metadata_netease_enabled: neEnabled }
+                  if (neCookie !== "") payload.platforms_netease_cookie = neCookie
+                  // An empty rate limit is sent verbatim so clearing the field
+                  // resets the provider to the config default.
+                  payload.platforms_netease_rate_limit = neRateLimit
+                  await api.admin.updateSettings(payload)
+                  setNeModified(false)
+                  setNeInit({ enabled: neEnabled, cookieSet: neCookie !== "" || neInit.cookieSet, rateLimit: neRateLimit })
+                  setNeCookie("")
+                  setNeShowCookie(false)
+                } catch (err) { setNeError(translateApiError(t, err)) }
+                setNeSaving(false)
+              }} disabled={neSaving}
+                className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
+                {neSaving ? t("admin.saving") : t("admin.save")}
+              </button>
+              <button onClick={() => { setNeEnabled(neInit.enabled); setNeCookie(""); setNeRateLimit(neInit.rateLimit); setNeShowCookie(false); setNeModified(false); setNeError("") }} disabled={neSaving}
+                className="px-3 py-1.5 rounded-lg text-sm bg-zinc-700 text-white hover:bg-zinc-600 disabled:opacity-50 cursor-pointer">
+                {t("admin.revert")}
+              </button>
+            </div>
           )}
         </div>
       </Card>

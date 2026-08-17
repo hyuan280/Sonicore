@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +46,7 @@ func TestMBClientGetSendsFormatAndQuery(t *testing.T) {
 		fmt.Fprint(w, `{"artists":[]}`)
 	})
 
-	_, err := c.SearchArtists("The Beatles")
+	_, err := c.SearchArtists(context.Background(), "The Beatles")
 	require.NoError(t, err)
 
 	assert.Equal(t, "/artist", gotPath)
@@ -74,7 +75,7 @@ func TestSearchRecordings(t *testing.T) {
 			]}`)
 	})
 
-	recordings, err := c.SearchRecordings("Song", []string{"Band One", "Unknown Artist", ""}, "Album")
+	recordings, err := c.SearchRecordings(context.Background(), "Song", []string{"Band One", "Unknown Artist", ""}, "Album")
 	require.NoError(t, err)
 	require.Len(t, recordings, 1)
 
@@ -101,7 +102,7 @@ func TestSearchRecordingsSkippedArtists(t *testing.T) {
 		fmt.Fprint(w, `{"recordings":[]}`)
 	})
 
-	_, err := c.SearchRecordings("Song", []string{"", "Unknown Artist"}, "Unknown Album")
+	_, err := c.SearchRecordings(context.Background(), "Song", []string{"", "Unknown Artist"}, "Unknown Album")
 	require.NoError(t, err)
 	assert.Equal(t, "recording:Song", gotQuery)
 }
@@ -114,7 +115,7 @@ func TestSearchArtist(t *testing.T) {
 		]}`)
 	})
 
-	artist, err := c.SearchArtist("Radiohead")
+	artist, err := c.SearchArtist(context.Background(), "Radiohead")
 	require.NoError(t, err)
 	assert.Equal(t, "a-1", artist.ID)
 	assert.Equal(t, "Radiohead", artist.Name)
@@ -127,7 +128,7 @@ func TestSearchArtistNoResults(t *testing.T) {
 		fmt.Fprint(w, `{"artists":[]}`)
 	})
 
-	_, err := c.SearchArtist("Nonexistent Band 000")
+	_, err := c.SearchArtist(context.Background(), "Nonexistent Band 000")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no artist found")
 }
@@ -138,7 +139,7 @@ func TestSearchArtistsReturnsList(t *testing.T) {
 		fmt.Fprint(w, `{"artists":[{"id":"a-1","name":"X"},{"id":"a-2","name":"Y"}]}`)
 	})
 
-	artists, err := c.SearchArtists("X")
+	artists, err := c.SearchArtists(context.Background(), "X")
 	require.NoError(t, err)
 	require.Len(t, artists, 2)
 	assert.Equal(t, "a-2", artists[1].ID)
@@ -155,7 +156,7 @@ func TestSearchReleases(t *testing.T) {
 		]}`)
 	})
 
-	releases, err := c.SearchReleases("Album")
+	releases, err := c.SearchReleases(context.Background(), "Album")
 	require.NoError(t, err)
 	require.Len(t, releases, 1)
 
@@ -176,7 +177,7 @@ func TestSearchReleaseWithArtist(t *testing.T) {
 		fmt.Fprint(w, `{"releases":[{"id":"rel-1","title":"Album"}]}`)
 	})
 
-	rel, err := c.SearchRelease("Album", "Band")
+	rel, err := c.SearchRelease(context.Background(), "Album", "Band")
 	require.NoError(t, err)
 	assert.Equal(t, "rel-1", rel.ID)
 	assert.Equal(t, "release:Album AND artist:Band", gotQuery)
@@ -187,7 +188,7 @@ func TestSearchReleaseNoResults(t *testing.T) {
 		fmt.Fprint(w, `{"releases":[]}`)
 	})
 
-	_, err := c.SearchRelease("Nope", "Band")
+	_, err := c.SearchRelease(context.Background(), "Nope", "Band")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no release found")
 }
@@ -201,7 +202,7 @@ func TestLookupArtist(t *testing.T) {
 			"tags":[{"name":"rock","count":5}]}`)
 	})
 
-	artist, err := c.LookupArtist("mbid-1")
+	artist, err := c.LookupArtist(context.Background(), "mbid-1")
 	require.NoError(t, err)
 	assert.Equal(t, "US", artist.Country)
 	require.NotNil(t, artist.Area)
@@ -223,7 +224,7 @@ func TestLookupRelease(t *testing.T) {
 			"tags":[{"name":"jazz","count":2}]}`)
 	})
 
-	release, err := c.LookupRelease("mbid-9")
+	release, err := c.LookupRelease(context.Background(), "mbid-9")
 	require.NoError(t, err)
 	require.Len(t, release.Media, 1)
 	require.Len(t, release.Media[0].Tracks, 1)
@@ -237,7 +238,7 @@ func TestMBGetNon200(t *testing.T) {
 		fmt.Fprint(w, "bad request body")
 	})
 
-	_, err := c.SearchArtist("X")
+	_, err := c.SearchArtist(context.Background(), "X")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "musicbrainz HTTP 400")
 	assert.Contains(t, err.Error(), "bad request body")
@@ -250,7 +251,7 @@ func TestMBGetTruncatesErrorBody(t *testing.T) {
 		fmt.Fprint(w, long)
 	})
 
-	_, err := c.SearchArtist("X")
+	_, err := c.SearchArtist(context.Background(), "X")
 	require.Error(t, err)
 	assert.True(t, len(err.Error()) < 400, "error body should be truncated")
 }
@@ -260,14 +261,14 @@ func TestMBGetInvalidJSON(t *testing.T) {
 		fmt.Fprint(w, `{"artists": not-json`)
 	})
 
-	_, err := c.SearchArtist("X")
+	_, err := c.SearchArtist(context.Background(), "X")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid character")
 }
 
 func TestMBGetMalformedURL(t *testing.T) {
 	c := NewMBClient(MBConfig{APIURL: "http://[::1:bad", RateLimit: 10000})
-	_, err := c.SearchArtist("X")
+	_, err := c.SearchArtist(context.Background(), "X")
 	require.Error(t, err)
 }
 
@@ -308,7 +309,7 @@ func TestFetchCoverArt(t *testing.T) {
 		w.Write([]byte("fake-image"))
 	})
 
-	data, ext, err := c.FetchCoverArt("mbid-1")
+	data, ext, err := c.FetchCoverArt(context.Background(), "mbid-1")
 	require.NoError(t, err)
 	assert.Equal(t, "fake-image", string(data))
 	assert.Equal(t, "png", ext)
@@ -320,7 +321,7 @@ func TestFetchCoverArtJpgDefault(t *testing.T) {
 		w.Write([]byte("jpeg"))
 	})
 
-	_, ext, err := c.FetchCoverArt("mbid-2")
+	_, ext, err := c.FetchCoverArt(context.Background(), "mbid-2")
 	require.NoError(t, err)
 	assert.Equal(t, "jpg", ext)
 }
@@ -330,7 +331,7 @@ func TestFetchCoverArtNotFound(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	_, _, err := c.FetchCoverArt("mbid-3")
+	_, _, err := c.FetchCoverArt(context.Background(), "mbid-3")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cover art HTTP 404")
 }
@@ -350,7 +351,7 @@ func TestZeroValueClientFetchCoverArtNoPanic(t *testing.T) {
 		}},
 	}
 
-	_, _, err := c.FetchCoverArt("mbid-zero")
+	_, _, err := c.FetchCoverArt(context.Background(), "mbid-zero")
 	require.NoError(t, err)
 }
 

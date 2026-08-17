@@ -27,7 +27,9 @@ type CoverHandler struct {
 
 func NewCoverHandler(db *sql.DB, imagesDir string, sessionStore *cache.SessionStore, covers *metadata.CoverManager) *CoverHandler {
 	if covers == nil {
-		covers = metadata.NewCoverManager(imagesDir, db)
+		// Standalone fallback (tests): no platform chain for network
+		// covers; the server always passes the shared manager.
+		covers = metadata.NewCoverManager(imagesDir, db, nil)
 	}
 	return &CoverHandler{
 		db:           db,
@@ -96,8 +98,10 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 	if !metadata.CoverFileExists(p) {
 		switch img.OwnerType {
 		case "track":
-			// Restore from the embedded cover on demand. The track's images
-			// row may be replaced, so re-resolve afterwards.
+			// Restore on demand through the unified flow: embedded cover
+			// first, then the platform chain (the track's metadata source)
+			// when the file carries none. The track's images row may be
+			// replaced, so re-resolve afterwards.
 			if track, terr := h.trackRepo.FindByID(ctx, img.OwnerID); terr == nil {
 				var album *domain.Album
 				if len(track.Albums) > 0 {
@@ -108,8 +112,8 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 						album = a
 					}
 				}
-				if err := h.covers.ExtractTrackCover(ctx, track.LibraryID, track, album, false); err != nil {
-					log.Printf("[cover] on-demand extraction for %s failed: %v", track.ID, err)
+				if err := h.covers.EnsureTrackCover(ctx, track.LibraryID, track, album, false, true); err != nil {
+					log.Printf("[cover] on-demand restoration for %s failed: %v", track.ID, err)
 				} else if track.CoverImageID != nil {
 					nimg, nerr := h.images.FindByID(ctx, *track.CoverImageID)
 					if nerr != nil {

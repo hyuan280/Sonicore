@@ -1,8 +1,10 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,18 +17,48 @@ import (
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/internal/infrastructure/secrets"
 )
 
 type AdminHandler struct {
 	userRepo     *repository.UserRepo
 	settingsRepo *repository.SettingsRepo
+	enc          *secrets.Encryptor
 }
 
-func NewAdminHandler(db *sql.DB) *AdminHandler {
+// NewAdminHandler builds the admin handler. enc encrypts at-rest secrets
+// (platform cookies) before they are written to the settings DB; a nil
+// Encryptor falls back to plaintext storage.
+func NewAdminHandler(db *sql.DB, enc *secrets.Encryptor) *AdminHandler {
 	return &AdminHandler{
 		userRepo:     repository.NewUserRepo(db),
 		settingsRepo: repository.NewSettingsRepo(db),
+		enc:          enc,
 	}
+}
+
+// setSetting persists a server setting, logging and answering 500 on failure
+// so a "saved" response never lies about a write that did not land.
+func (h *AdminHandler) setSetting(ctx context.Context, w http.ResponseWriter, key, value string) bool {
+	if err := h.settingsRepo.Set(ctx, key, value); err != nil {
+		log.Printf("[admin] set setting %q: %v", key, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+		return false
+	}
+	return true
+}
+
+// storeSecret persists a credential, encrypting it when an Encryptor is
+// configured so the value at rest in the settings DB is not plaintext.
+func (h *AdminHandler) storeSecret(ctx context.Context, key, plaintext string) error {
+	if plaintext == "" || h.enc == nil {
+		return h.settingsRepo.Set(ctx, key, plaintext)
+	}
+	enc, err := h.enc.Encrypt(plaintext)
+	if err != nil {
+		return err
+	}
+	return h.settingsRepo.Set(ctx, key, enc)
 }
 
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -110,22 +142,34 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
 	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
 	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
+	neEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_netease_enabled")
+	neCookie, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_cookie")
+	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"allow_registration":            allowReg == "true",
-		"metadata_musicbrainz_enabled":  mbEnabled == "true",
-		"metadata_musicbrainz_api_url":  mbURL,
+		"allow_registration":              allowReg == "true",
+		"metadata_musicbrainz_enabled":    mbEnabled == "true",
+		"metadata_musicbrainz_api_url":    mbURL,
 		"metadata_musicbrainz_rate_limit": mbRateLimit,
+		"metadata_netease_enabled":        neEnabled == "true",
+		"platforms_netease_rate_limit":    neRateLimit,
+		// The cookie itself never leaves the server; only its presence is
+		// reported so the credential does not sit in browser state/DOM.
+		"platforms_netease_cookie_set": neCookie != "",
 		"subsonic_jukebox_id":           subJukebox,
 	})
 }
 
 type updateSettingsRequest struct {
-	AllowRegistration           *bool   `json:"allow_registration,omitempty"`
-	MusicBrainzEnabled          *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
-	MusicBrainzAPIURL           *string `json:"metadata_musicbrainz_api_url,omitempty"`
-	MusicBrainzRateLimit        *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
-	SubsonicJukeboxID           *string `json:"subsonic_jukebox_id,omitempty"`
+	AllowRegistration     *bool   `json:"allow_registration,omitempty"`
+	MusicBrainzEnabled    *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
+	MusicBrainzAPIURL     *string `json:"metadata_musicbrainz_api_url,omitempty"`
+	MusicBrainzRateLimit  *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
+	NeteaseEnabled        *bool   `json:"metadata_netease_enabled,omitempty"`
+	NeteaseCookie         *string `json:"platforms_netease_cookie,omitempty"`
+	NeteaseCookieClear    *bool   `json:"platforms_netease_cookie_clear,omitempty"`
+	NeteaseRateLimit      *string `json:"platforms_netease_rate_limit,omitempty"`
+	SubsonicJukeboxID     *string `json:"subsonic_jukebox_id,omitempty"`
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -135,33 +179,87 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the whole request before any write, so a rejected batch never
+	// leaves a partial state behind (settings written, then a 400).
+	if req.NeteaseCookie != nil && req.NeteaseCookieClear != nil &&
+		*req.NeteaseCookieClear && *req.NeteaseCookie != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot set and clear the cookie in one request"})
+		return
+	}
+
 	if req.AllowRegistration != nil {
 		val := "false"
 		if *req.AllowRegistration {
 			val = "true"
 		}
-		h.settingsRepo.Set(r.Context(), "allow_registration", val)
+		if !h.setSetting(r.Context(), w, "allow_registration", val) {
+			return
+		}
 	}
 	if req.MusicBrainzEnabled != nil {
 		val := "false"
 		if *req.MusicBrainzEnabled {
 			val = "true"
 		}
-		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_enabled", val)
+		if !h.setSetting(r.Context(), w, "metadata_musicbrainz_enabled", val) {
+			return
+		}
 	}
 	if req.MusicBrainzAPIURL != nil {
-		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_api_url", *req.MusicBrainzAPIURL)
+		if !h.setSetting(r.Context(), w, "metadata_musicbrainz_api_url", *req.MusicBrainzAPIURL) {
+			return
+		}
 	}
 	if req.MusicBrainzRateLimit != nil {
-		h.settingsRepo.Set(r.Context(), "metadata_musicbrainz_rate_limit", *req.MusicBrainzRateLimit)
+		if !h.setSetting(r.Context(), w, "metadata_musicbrainz_rate_limit", *req.MusicBrainzRateLimit) {
+			return
+		}
+	}
+	if req.NeteaseEnabled != nil {
+		val := "false"
+		if *req.NeteaseEnabled {
+			val = "true"
+		}
+		if !h.setSetting(r.Context(), w, "metadata_netease_enabled", val) {
+			return
+		}
+	}
+	if req.NeteaseCookie != nil {
+		// An empty value keeps the existing cookie (the client never holds
+		// the raw credential, so it cannot resend it); only a non-empty
+		// value overwrites, and a clear is requested explicitly.
+		if *req.NeteaseCookie != "" {
+			if err := h.storeSecret(r.Context(), "platforms_netease_cookie", *req.NeteaseCookie); err != nil {
+				log.Printf("[admin] store platforms_netease_cookie: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store cookie"})
+				return
+			}
+		}
+	}
+	if req.NeteaseCookieClear != nil && *req.NeteaseCookieClear {
+		if err := h.settingsRepo.Set(r.Context(), "platforms_netease_cookie", ""); err != nil {
+			log.Printf("[admin] clear platforms_netease_cookie: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to clear cookie"})
+			return
+		}
+	}
+	if req.NeteaseRateLimit != nil {
+		if !h.setSetting(r.Context(), w, "platforms_netease_rate_limit", *req.NeteaseRateLimit) {
+			return
+		}
 	}
 	if req.SubsonicJukeboxID != nil {
-		h.settingsRepo.Set(r.Context(), "subsonic_jukebox_id", *req.SubsonicJukeboxID)
+		if !h.setSetting(r.Context(), w, "subsonic_jukebox_id", *req.SubsonicJukeboxID) {
+			return
+		}
 	}
 
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
 	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
 	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
+	neEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_netease_enabled")
+	neCookie, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_cookie")
+	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -169,6 +267,9 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
 		"metadata_musicbrainz_api_url":    mbURL,
 		"metadata_musicbrainz_rate_limit": mbRateLimit,
+		"metadata_netease_enabled":        neEnabled == "true",
+		"platforms_netease_rate_limit":    neRateLimit,
+		"platforms_netease_cookie_set":    neCookie != "",
 		"subsonic_jukebox_id":             subJukebox,
 	})
 }

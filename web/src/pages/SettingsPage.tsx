@@ -472,14 +472,14 @@ export default function SettingsPage() {
                               title: trk.title,
                               artist: performerNames(trk.artists),
                               album: trk.albums?.[0]?.title || "",
-                              mbid: trk.mbid || "",
+                              external_id: trk.external_id || "",
                             }),
                           })
                           setSearchModal({ track: trk, result: await res.json(), edit: {} })
                         } catch { setSearchModal({ track: trk, error: t("settings.searchFailed") }) }
                         setSearching("")
                       }}
-                        className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title="Identify with MusicBrainz">
+                        className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer" title={t("metadata.identifyMusicBrainz")}>
                         {searching === trk.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
                       </button>
                       <button className="p-1 rounded text-zinc-500 hover:text-blue-400 cursor-pointer" title="Edit lyrics">
@@ -512,12 +512,12 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
   const [saveError, setSaveError] = useState("")
   const [selectedArtists, setSelectedArtists] = useState<SelectedArtist[]>([])
   const [localResult, setLocalResult] = useState<any>(null)
-  const [mbidValue, setMbidValue] = useState("")
-  const [mbidEditing, setMbidEditing] = useState(false)
-  const [mbidSearching, setMbidSearching] = useState(false)
-  const [mbidError, setMbidError] = useState(false)
+  const [extIDValue, setExtIDValue] = useState("")
+  const [extIDEditing, setExtIDEditing] = useState(false)
+  const [extIDSearching, setExtIDSearching] = useState(false)
+  const [extIDError, setExtIDError] = useState(false)
   const [reidentifying, setReidentifying] = useState(false)
-  const [selectedAlbums, setSelectedAlbums] = useState<{id?: string; title: string; mbid?: string; artist?: string}[]>([])
+  const [selectedAlbums, setSelectedAlbums] = useState<{id?: string; title: string; external_id?: string; artist?: string}[]>([])
   const [albumQuery, setAlbumQuery] = useState("")
   const [albumResults, setAlbumResults] = useState<any[]>([])
   const [albumSearching, setAlbumSearching] = useState(false)
@@ -527,45 +527,50 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
     if (!result?.artists?.length) return
     setSelectedArtists(result.artists.map((a: any) => ({
       name: a.name || a.artist?.name,
-      mbid: a.mbid || "",
+      external_id: a.external_id || "",
     })))
   }, [data?.result?.artists])
 
   useEffect(() => {
-    setMbidValue(data?.result?.track_mbid ?? data?.track?.mbid ?? "")
+    setExtIDValue(data?.result?.track_external_id ?? data?.track?.external_id ?? "")
     setSaveError("")
-  }, [data?.result?.track_mbid, data?.track?.mbid])
+  }, [data?.result?.track_external_id, data?.track?.external_id])
 
   useEffect(() => {
     if (data?.result?.albums?.length > 0) {
-      setSelectedAlbums(data.result.albums.map((a: any) => ({ id: a.id, title: a.title, mbid: "" })))
+      setSelectedAlbums(data.result.albums.map((a: any) => ({ id: a.id, title: a.title, external_id: "" })))
     } else if (data?.result?.album) {
-      const initial = [{ title: data.result.album, mbid: data.result.album_mbid || "" }]
-      if (data.result.album_mbid) {
+      const initial = [{ title: data.result.album, external_id: data.result.album_external_id || "" }]
+      if (data.result.album_external_id) {
         setSelectedAlbums(initial)
       } else if (!data.edit?.album) {
         setSelectedAlbums(initial)
       }
     } else if (data?.edit?.album) {
-      setSelectedAlbums([{ title: data.edit.album, mbid: data.edit.album_mbid || "" }])
+      setSelectedAlbums([{ title: data.edit.album, external_id: data.edit.album_external_id || "" }])
     }
-  }, [data?.result?.album, data?.result?.album_mbid, data?.result?.albums])
+  }, [data?.result?.album, data?.result?.album_external_id, data?.result?.albums])
 
-  const handleMbidSearch = async () => {
-    if (!mbidValue) return
-    setMbidSearching(true)
-    setMbidError(false)
+  const handleExtIDSearch = async () => {
+    if (!extIDValue) return
+    setExtIDSearching(true)
+    setExtIDError(false)
     try {
       const res = await fetch("/api/metadata/search/track", {
         method: "POST",
         headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
-        body: JSON.stringify({ mbid: mbidValue }),
+        body: JSON.stringify({
+          track_id: data.track?.id || "",
+          external_id: extIDValue,
+          // TODO: 支持显式指定源，否则 legacy(空 source) 曲目无法用非 MusicBrainz 源重新匹配
+          source: data.track?.metadata_source || "",
+        }),
       })
       const result = await res.json()
-      if (result.matched && result.track_mbid) {
+      if (result.matched && result.track_external_id) {
         if (isMatched) {
           setLocalResult(result)
-          setMbidEditing(false)
+          setExtIDEditing(false)
         } else {
           onUpdate({
             ...data.edit,
@@ -573,25 +578,25 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
             album: result.album ?? "",
             year: result.year ?? 0,
             genre: result.genre ?? "",
-            track_mbid: result.track_mbid ?? "",
-            album_mbid: result.album_mbid ?? "",
+            track_external_id: result.track_external_id ?? "",
+            album_external_id: result.album_external_id ?? "",
           })
         }
         if (result.artists?.length) {
           setSelectedArtists(result.artists.map((a: any) => ({
             name: a.name || a.artist?.name,
-            mbid: a.mbid || "",
+            external_id: a.external_id || "",
           })))
         }
       } else {
-        setMbidError(true)
-        if (!isMatched) setMbidValue("")
+        setExtIDError(true)
+        if (!isMatched) setExtIDValue("")
       }
     } catch {
-      setMbidError(true)
-      if (!isMatched) setMbidValue("")
+      setExtIDError(true)
+      if (!isMatched) setExtIDValue("")
     }
-    setMbidSearching(false)
+    setExtIDSearching(false)
   }
 
   const doAlbumSearch = async () => {
@@ -611,10 +616,10 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
     setAlbumSearching(false)
   }
 
-  const addAlbum = (al: { title: string; mbid: string; artist?: string }) => {
-    const exists = al.mbid
-      ? selectedAlbums.some(a => a.mbid === al.mbid)
-      : selectedAlbums.some(a => a.title === al.title && !a.mbid)
+  const addAlbum = (al: { title: string; external_id: string; artist?: string }) => {
+    const exists = al.external_id
+      ? selectedAlbums.some(a => a.external_id === al.external_id)
+      : selectedAlbums.some(a => a.title === al.title && !a.external_id)
     if (!exists) {
       setSelectedAlbums([...selectedAlbums, al])
     }
@@ -627,20 +632,20 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
   }
 
   const display = localResult ?? data.result
-  const isMatched = display?.matched && display?.track_mbid
-  const locked = !!data?.result?.track_mbid
+  const isMatched = display?.matched && display?.track_external_id
+  const locked = !!data?.result?.track_external_id
 
   useEffect(() => {
-    if (data?.result && !(data.result.matched && data.result.track_mbid)) {
-      setMbidEditing(true)
+    if (data?.result && !(data.result.matched && data.result.track_external_id)) {
+      setExtIDEditing(true)
     }
-  }, [data?.result?.matched, data?.result?.track_mbid])
+  }, [data?.result?.matched, data?.result?.track_external_id])
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={onClose}>
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold">MusicBrainz Match</h3>
+          <h3 className="font-bold">{tModal("metadata.mbid")}</h3>
           <button onClick={onClose} className="p-1 rounded hover:bg-zinc-800 cursor-pointer"><X className="w-4 h-4" /></button>
         </div>
         <div className="flex items-center gap-2 mb-4">
@@ -699,7 +704,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                 {selectedAlbums.map((a, i) => (
                   <div key={i} className="flex items-center gap-1 text-sm w-full">
                     <span className="text-zinc-200 truncate flex-1 min-w-0">{a.title}</span>
-                    {a.mbid && <span className="text-xs text-zinc-500 font-mono shrink-0">{a.mbid.substring(0, 8)}</span>}
+                    {a.external_id && <span className="text-xs text-zinc-500 font-mono shrink-0">{a.external_id.substring(0, 8)}</span>}
                     {(!locked || i > 0) && (
                       <button onClick={() => removeAlbum(i)} className="p-0.5 text-zinc-500 hover:text-red-400 cursor-pointer shrink-0">
                         <X className="w-3 h-3" />
@@ -720,16 +725,16 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                   {albumResults.length > 0 && (
                     <div className="mt-1 border border-zinc-700 rounded-lg max-h-32 overflow-y-auto">
                       {albumResults.map((r, i) => {
-                        const added = r.mbid
-                          ? selectedAlbums.some(a => a.mbid === r.mbid)
-                          : selectedAlbums.some(a => a.title === r.title && !a.mbid)
+                        const added = r.external_id
+                          ? selectedAlbums.some(a => a.external_id === r.external_id)
+                          : selectedAlbums.some(a => a.title === r.title && !a.external_id)
                         return (
-                          <button key={i} onClick={() => { addAlbum({ title: r.title, mbid: r.mbid }) }}
+                          <button key={i} onClick={() => { addAlbum({ title: r.title, external_id: r.external_id }) }}
                             className="w-full flex items-center gap-1 px-2 py-1 text-left text-sm hover:bg-zinc-700 cursor-pointer">
                             <span className="text-zinc-200 truncate min-w-0">{r.title}</span>
-                            {!r.mbid && <X className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
+                            {!r.external_id && <X className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
                             {r.artist && <span className="text-xs text-zinc-500 shrink-0">({r.artist})</span>}
-                            {r.mbid ? <span className="text-xs text-zinc-500 font-mono shrink-0 ml-auto">{r.mbid.substring(0, 8)}</span> : <span className="text-xs text-green-400 shrink-0 ml-auto">click to select</span>}
+                            {r.external_id ? <span className="text-xs text-zinc-500 font-mono shrink-0 ml-auto">{r.external_id.substring(0, 8)}</span> : <span className="text-xs text-green-400 shrink-0 ml-auto">click to select</span>}
                           </button>
                         )
                       })}
@@ -758,25 +763,25 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">MBID</span>
-              {!mbidEditing && !mbidError ? (
+              <span className="text-zinc-400 w-14 shrink-0 text-right">{tModal("metadata.mbid")}</span>
+              {!extIDEditing && !extIDError ? (
                 <>
-                  <span className="text-xs font-mono text-zinc-500 flex-1">{mbidValue}</span>
-                  <button onClick={() => setMbidEditing(true)} className="p-1 rounded hover:bg-zinc-700 cursor-pointer">
+                  <span className="text-xs font-mono text-zinc-500 flex-1">{extIDValue}</span>
+                  <button onClick={() => setExtIDEditing(true)} className="p-1 rounded hover:bg-zinc-700 cursor-pointer">
                     <Pen className="w-3.5 h-3.5" />
                   </button>
                 </>
               ) : (
                 <>
                   <input
-                    value={mbidValue}
-                    onChange={e => { setMbidValue(e.target.value); setMbidError(false) }}
-                    className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${mbidError ? 'focus:ring-red-500 border border-red-500' : 'focus:ring-green-500'}`}
-                    placeholder="MusicBrainz Recording ID"
-                    onKeyDown={e => e.key === "Enter" && handleMbidSearch()}
+                    value={extIDValue}
+                    onChange={e => { setExtIDValue(e.target.value); setExtIDError(false) }}
+                    className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${extIDError ? 'focus:ring-red-500 border border-red-500' : 'focus:ring-green-500'}`}
+                    placeholder={tModal("metadata.mbidPlaceholder")}
+                    onKeyDown={e => e.key === "Enter" && handleExtIDSearch()}
                   />
-                  <button onClick={handleMbidSearch} disabled={mbidSearching || !mbidValue} className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50">
-                    {mbidSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  <button onClick={handleExtIDSearch} disabled={extIDSearching || !extIDValue} className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50">
+                    {extIDSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                   </button>
                 </>
               )}
@@ -806,7 +811,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                 {selectedAlbums.map((a, i) => (
                   <div key={i} className="flex items-center gap-1 text-sm w-full">
                     <span className="text-zinc-200 truncate flex-1 min-w-0">{a.title}</span>
-                    {a.mbid && <span className="text-xs text-zinc-500 font-mono shrink-0">{a.mbid.substring(0, 8)}</span>}
+                    {a.external_id && <span className="text-xs text-zinc-500 font-mono shrink-0">{a.external_id.substring(0, 8)}</span>}
                     <button onClick={() => removeAlbum(i)} className="p-0.5 text-zinc-500 hover:text-red-400 cursor-pointer shrink-0">
                       <X className="w-3 h-3" />
                     </button>
@@ -824,16 +829,16 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
                   {albumResults.length > 0 && (
                     <div className="mt-1 border border-zinc-700 rounded-lg max-h-32 overflow-y-auto">
                       {albumResults.map((r, i) => {
-                        const added = r.mbid
-                          ? selectedAlbums.some(a => a.mbid === r.mbid)
-                          : selectedAlbums.some(a => a.title === r.title && !a.mbid)
+                        const added = r.external_id
+                          ? selectedAlbums.some(a => a.external_id === r.external_id)
+                          : selectedAlbums.some(a => a.title === r.title && !a.external_id)
                         return (
-                          <button key={i} onClick={() => { addAlbum({ title: r.title, mbid: r.mbid }) }}
+                          <button key={i} onClick={() => { addAlbum({ title: r.title, external_id: r.external_id }) }}
                             className="w-full flex items-center gap-1 px-2 py-1 text-left text-sm hover:bg-zinc-700 cursor-pointer">
                             <span className="text-zinc-200 truncate min-w-0">{r.title}</span>
-                            {!r.mbid && <X className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
+                            {!r.external_id && <X className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
                             {r.artist && <span className="text-xs text-zinc-500 shrink-0">({r.artist})</span>}
-                            {r.mbid ? <span className="text-xs text-zinc-500 font-mono shrink-0 ml-auto">{r.mbid.substring(0, 8)}</span> : <span className="text-xs text-green-400 shrink-0 ml-auto">click to select</span>}
+                            {r.external_id ? <span className="text-xs text-zinc-500 font-mono shrink-0 ml-auto">{r.external_id.substring(0, 8)}</span> : <span className="text-xs text-green-400 shrink-0 ml-auto">click to select</span>}
                           </button>
                         )
                       })}
@@ -853,16 +858,16 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
               </div>
             ))}
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">MBID</span>
+              <span className="text-zinc-400 w-14 shrink-0 text-right">{tModal("metadata.mbid")}</span>
               <input
-                value={mbidValue}
-                onChange={e => { setMbidValue(e.target.value); setMbidError(false) }}
-                className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${mbidError ? 'focus:ring-red-500 border border-red-500' : 'focus:ring-green-500'}`}
-                placeholder="MusicBrainz Recording ID"
-                onKeyDown={e => e.key === "Enter" && handleMbidSearch()}
+                value={extIDValue}
+                onChange={e => { setExtIDValue(e.target.value); setExtIDError(false) }}
+                className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${extIDError ? 'focus:ring-red-500 border border-red-500' : 'focus:ring-green-500'}`}
+                placeholder={tModal("metadata.mbidPlaceholder")}
+                onKeyDown={e => e.key === "Enter" && handleExtIDSearch()}
               />
-              <button onClick={handleMbidSearch} disabled={mbidSearching || !mbidValue} className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50">
-                {mbidSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              <button onClick={handleExtIDSearch} disabled={extIDSearching || !extIDValue} className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50">
+                {extIDSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
               </button>
             </div>
           </div>
@@ -875,24 +880,26 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
             setSaving(true)
             setSaveError("")
             try {
+              const saveSource = display?.source || data.track?.metadata_source || ""
               const artists = isMatched
-                ? (display.artists?.map((a: any) => ({ name: a.name || a.artist?.name, mbid: a.mbid || "" })) ?? [])
-                : selectedArtists.map(a => ({ name: a.name, mbid: a.mbid || "" }))
+                ? (display.artists?.map((a: any) => ({ name: a.name || a.artist?.name, external_id: a.external_id || "", source: saveSource })) ?? [])
+                : selectedArtists.map(a => ({ name: a.name, external_id: a.external_id || "", source: saveSource }))
               const res = await fetch("/api/metadata/save", {
                 method: "POST",
                 headers: {"Content-Type":"application/json", "Authorization": "Bearer " + localStorage.getItem("token")},
                 body: JSON.stringify({
                   track_id: data.track?.id || "",
                   file_hash: data.result.file_hash || data.track?.file_hash || "",
-                  track_mbid: mbidValue || (data.edit.track_mbid ?? data.result?.track_mbid ?? data.track?.mbid ?? ""),
-                  album_mbid: data.edit.album_mbid ?? display?.album_mbid ?? data.result?.album_mbid ?? "",
+                  track_external_id: extIDValue || (data.edit.track_external_id ?? data.result?.track_external_id ?? data.track?.external_id ?? ""),
+                  source: saveSource,
+                  album_external_id: data.edit.album_external_id ?? display?.album_external_id ?? data.result?.album_external_id ?? "",
                   title: isMatched ? (display.title || "") : (data.edit.title ?? data.result?.title ?? data.track?.title ?? ""),
                   album: isMatched ? (display.album || "") : (data.edit.album ?? data.result?.album ?? data.track?.album ?? ""),
                   year: parseInt(data.edit.year) || display?.year || 0,
                   genre: data.edit.genre ?? display?.genre ?? "",
                   artists,
                   version_label: data.edit.version_label ?? data.track?.version_label ?? "",
-                  albums: selectedAlbums.map(a => ({ id: a.id || "", title: a.title, mbid: a.mbid || "", artist: a.artist || "" })),
+                  albums: selectedAlbums.map(a => ({ id: a.id || "", title: a.title, external_id: a.external_id || "", artist: a.artist || "", source: saveSource })),
                 }),
               })
               if (!res.ok) {
@@ -906,7 +913,7 @@ function SearchResultModal({ data, onClose, onUpdate, onSaved }: {
               setSaveError(tModal("settings.networkError"))
             }
             setSaving(false)
-          }} disabled={saving || (isMatched && mbidError)}
+          }} disabled={saving || (isMatched && extIDError)}
             className="mt-4 w-full py-2 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer">
             {saving ? "Saving..." : "Save"}
           </button>

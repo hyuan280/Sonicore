@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"regexp"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func testTrack() *domain.Track {
 		FileSize:    10_000_000,
 		FileFormat:  "mp3",
 		AudioCodec:  "mp3",
-		MBID:         "mbid-1",
+		ExternalID:         "mbid-1",
 		MetadataSource: "musicbrainz",
 		Hash:        "hash-1",
 		LyricsMask:  0,
@@ -45,15 +46,20 @@ func testTrack() *domain.Track {
 func trackColumns() []string {
 	return []string{"id", "library_id", "title", "cover_image_id",
 		"duration", "bit_rate", "sample_rate", "channels",
-		"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
+		"file_path", "file_size", "file_format", "audio_codec", "external_id", "metadata_source", "external_ids", "acoust_id", "hash",
 		"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}
 }
 
 func trackValues(t *domain.Track) []driver.Value {
+	extIDs := "{}"
+	if len(t.ExternalIDs) > 0 {
+		b, _ := json.Marshal(t.ExternalIDs)
+		extIDs = string(b)
+	}
 	vals := []driver.Value{
 		t.ID, t.LibraryID, t.Title, t.CoverImageID,
 		t.Duration, t.BitRate, t.SampleRate, t.Channels,
-		t.FilePath, t.FileSize, t.FileFormat, t.AudioCodec, t.MBID, "musicbrainz", t.AcoustID, t.Hash,
+		t.FilePath, t.FileSize, t.FileFormat, t.AudioCodec, t.ExternalID, "musicbrainz", extIDs, t.AcoustID, t.Hash,
 		t.LyricsMask, t.LyricsOffset, t.Heat, t.PlayCount, t.LastPlayedAt, t.Metadata, t.Version, t.VersionLabel, t.CreatedAt, t.UpdatedAt,
 	}
 	return vals
@@ -127,7 +133,7 @@ func TestTrackRepoFindByIDWithRelations(t *testing.T) {
 	// LoadTrackArtists
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}).
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
 			AddRow("t-001", "a-1", "main", 0, "Artist", ""))
 
 	got, err := repo.FindByID(context.Background(), "t-001")
@@ -182,7 +188,7 @@ func TestTrackRepoFindByIDs(t *testing.T) {
 
 	// Bulk artists: t-002 has one
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}).
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
 			AddRow("t-002", "a-2", "main", 0, "Artist2", ""))
 
 	got, err := repo.FindByIDs(context.Background(), []string{"t-001", "t-002"})
@@ -205,7 +211,7 @@ func TestTrackRepoFindByArtistID(t *testing.T) {
 
 	// bulk loads after rows
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 
@@ -327,25 +333,43 @@ func TestTrackRepoReplaceTrackAlbums(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestTrackRepoFindVersionsByMbid(t *testing.T) {
+func TestTrackRepoFindVersionsByExternalID(t *testing.T) {
 	db, mock := newMockDB(t)
 	repo := NewTrackRepo(db)
 	track := testTrack()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`INNER JOIN track_version_groups g ON g.track_id = t.id`)).
-		WithArgs("mbid-1", "t-001", sqlmock.AnyArg()).
+	mock.ExpectQuery(regexp.QuoteMeta(`WHERE t.metadata_source = $1 AND t.external_id = $2 AND t.id != $3 AND t.library_id = ANY($4) AND t.version >= 1`)).
+		WithArgs("musicbrainz", "mbid-1", "t-001", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows(trackColumns()).AddRow(trackValues(track)...))
 
-	got, err := repo.FindVersionsByMbid(context.Background(), "mbid-1", "t-001", []string{"lib-001"})
+	got, err := repo.FindVersionsByExternalID(context.Background(), "musicbrainz", "mbid-1", "t-001", []string{"lib-001"})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 }
 
-func TestTrackRepoFindVersionsByMbidBulkEmpty(t *testing.T) {
+func TestTrackRepoFindVersionsByExternalIDBulk(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewTrackRepo(db)
+	track := testTrack()
+
+	cols := append([]string{"external_id"}, trackColumns()...)
+	vals := append([]driver.Value{"mbid-1"}, trackValues(track)...)
+	mock.ExpectQuery(`WHERE EXISTS\s*\(\s*SELECT 1 FROM unnest\(\$1::text\[\], \$2::text\[\]\) AS u\(source, ext_id\)\s*WHERE u\.source = t\.metadata_source AND u\.ext_id = t\.external_id\s*\)\s*AND t\.library_id = ANY\(\$3\) AND t\.version >= 1`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(vals...))
+
+	got, err := repo.FindVersionsByExternalIDBulk(context.Background(), []VersionGroupKey{{MetadataSource: "musicbrainz", ExternalID: "mbid-1"}}, []string{"lib-001"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	key := VersionGroupKey{MetadataSource: "musicbrainz", ExternalID: "mbid-1"}
+	require.Len(t, got[key], 1)
+}
+
+func TestTrackRepoFindVersionsByExternalIDBulkEmpty(t *testing.T) {
 	db, _ := newMockDB(t)
 	repo := NewTrackRepo(db)
 
-	got, err := repo.FindVersionsByMbidBulk(context.Background(), nil, nil)
+	got, err := repo.FindVersionsByExternalIDBulk(context.Background(), nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
@@ -366,7 +390,7 @@ func TestTrackRepoBatchCreate(t *testing.T) {
 		WithArgs(
 			track.ID, track.LibraryID, track.Title, track.CoverImageID,
 			track.Duration, track.BitRate, track.SampleRate, track.Channels,
-			track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.MBID, "musicbrainz", track.AcoustID, track.Hash,
+			track.FilePath, track.FileSize, track.FileFormat, track.AudioCodec, track.ExternalID, "musicbrainz", []byte("{}"), track.AcoustID, track.Hash,
 			track.LyricsMask, track.LyricsOffset, track.Heat, track.PlayCount, track.Metadata, track.Version, track.VersionLabel, track.CreatedAt, track.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO track_artists`)).

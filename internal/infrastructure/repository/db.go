@@ -93,7 +93,7 @@ func RunMigrations(db *sql.DB) error {
 		id         VARCHAR(26) PRIMARY KEY,
 		name       VARCHAR(255) NOT NULL,
 		sort_name  VARCHAR(255) NOT NULL DEFAULT '',
-		mbid       VARCHAR(36) NOT NULL DEFAULT '',
+		external_id VARCHAR(36) NOT NULL DEFAULT '',
 		metadata_source VARCHAR(20) NOT NULL DEFAULT 'musicbrainz',
 		external_ids    JSONB NOT NULL DEFAULT '{}',
 		name_normalized VARCHAR(255) NOT NULL DEFAULT '',
@@ -104,8 +104,8 @@ func RunMigrations(db *sql.DB) error {
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
-	CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists(mbid);
-	CREATE INDEX IF NOT EXISTS idx_artists_source_id ON artists(metadata_source, mbid);
+	CREATE INDEX IF NOT EXISTS idx_artists_external_id ON artists(external_id);
+	CREATE INDEX IF NOT EXISTS idx_artists_source_id ON artists(metadata_source, external_id);
 	CREATE INDEX IF NOT EXISTS idx_artists_external ON artists USING GIN (external_ids jsonb_path_ops);
 	CREATE INDEX IF NOT EXISTS idx_artists_norm ON artists(name_normalized);
 
@@ -113,7 +113,7 @@ func RunMigrations(db *sql.DB) error {
 		id           VARCHAR(26) PRIMARY KEY,
 		title        VARCHAR(255) NOT NULL,
 		artist_id    VARCHAR(26) NOT NULL REFERENCES artists(id),
-		mbid         VARCHAR(36) NOT NULL DEFAULT '',
+		external_id  VARCHAR(36) NOT NULL DEFAULT '',
 		metadata_source VARCHAR(20) NOT NULL DEFAULT 'musicbrainz',
 		external_ids    JSONB NOT NULL DEFAULT '{}',
 		title_normalized VARCHAR(255) NOT NULL DEFAULT '',
@@ -128,8 +128,8 @@ func RunMigrations(db *sql.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
 	CREATE INDEX IF NOT EXISTS idx_albums_title ON albums(title);
-	CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums(mbid);
-	CREATE INDEX IF NOT EXISTS idx_albums_source_id ON albums(metadata_source, mbid);
+	CREATE INDEX IF NOT EXISTS idx_albums_external_id ON albums(external_id);
+	CREATE INDEX IF NOT EXISTS idx_albums_source_id ON albums(metadata_source, external_id);
 	CREATE INDEX IF NOT EXISTS idx_albums_external ON albums USING GIN (external_ids jsonb_path_ops);
 	CREATE INDEX IF NOT EXISTS idx_albums_norm ON albums(title_normalized, artist_id);
 
@@ -146,8 +146,9 @@ func RunMigrations(db *sql.DB) error {
 		file_size     BIGINT NOT NULL DEFAULT 0,
 		file_format   VARCHAR(10) NOT NULL DEFAULT '',
 		audio_codec   VARCHAR(32) NOT NULL DEFAULT '',
-		mbid          VARCHAR(36) NOT NULL DEFAULT '',
+		external_id   VARCHAR(36) NOT NULL DEFAULT '',
 		metadata_source VARCHAR(20) NOT NULL DEFAULT 'musicbrainz',
+		external_ids  JSONB NOT NULL DEFAULT '{}',
 		acoust_id     VARCHAR(36) NOT NULL DEFAULT '',
 		hash          VARCHAR(64) NOT NULL DEFAULT '',
 		lyrics_mask   SMALLINT NOT NULL DEFAULT 0,
@@ -165,7 +166,8 @@ func RunMigrations(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(hash);
 	CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
 	CREATE INDEX IF NOT EXISTS idx_tracks_filepath ON tracks(file_path);
-	CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks(mbid);
+	CREATE INDEX IF NOT EXISTS idx_tracks_external_id ON tracks(external_id);
+	CREATE INDEX IF NOT EXISTS idx_tracks_external_ids ON tracks USING GIN (external_ids jsonb_path_ops);
 
 	CREATE TABLE IF NOT EXISTS track_artists (
 		track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
@@ -187,12 +189,12 @@ func RunMigrations(db *sql.DB) error {
 
 	CREATE TABLE IF NOT EXISTS track_version_groups (
 		metadata_source VARCHAR(20) NOT NULL DEFAULT 'musicbrainz',
-		mbid       VARCHAR(36) NOT NULL,
+		external_id VARCHAR(36) NOT NULL,
 		library_id VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
 		track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-		PRIMARY KEY (metadata_source, mbid, track_id)
+		PRIMARY KEY (metadata_source, external_id, track_id)
 	);
-	CREATE INDEX IF NOT EXISTS idx_tvg_mbid ON track_version_groups(metadata_source, mbid);
+	CREATE INDEX IF NOT EXISTS idx_tvg_external_id ON track_version_groups(metadata_source, external_id);
 	CREATE INDEX IF NOT EXISTS idx_tvg_library ON track_version_groups(library_id);
 
 	CREATE TABLE IF NOT EXISTS playlists (
@@ -300,18 +302,19 @@ func RunMigrations(db *sql.DB) error {
 	);
 
 	CREATE TABLE IF NOT EXISTS user_metadata (
-		user_id      VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-		file_hash    VARCHAR(64) NOT NULL,
-		track_mbid   VARCHAR(36) NOT NULL DEFAULT '',
-		title        VARCHAR(255) NOT NULL DEFAULT '',
-		artist       VARCHAR(255) NOT NULL DEFAULT '',
-		album        VARCHAR(255) NOT NULL DEFAULT '',
-		album_artist VARCHAR(255) NOT NULL DEFAULT '',
-		track_number INTEGER NOT NULL DEFAULT 0,
-		disc_number  INTEGER NOT NULL DEFAULT 0,
-		year         INTEGER NOT NULL DEFAULT 0,
-		genre        VARCHAR(128) NOT NULL DEFAULT '',
-		updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		user_id          VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		file_hash        VARCHAR(64) NOT NULL,
+		metadata_source  VARCHAR(20) NOT NULL DEFAULT 'musicbrainz',
+		external_id      VARCHAR(36) NOT NULL DEFAULT '',
+		title            VARCHAR(255) NOT NULL DEFAULT '',
+		artist           VARCHAR(255) NOT NULL DEFAULT '',
+		album            VARCHAR(255) NOT NULL DEFAULT '',
+		album_artist     VARCHAR(255) NOT NULL DEFAULT '',
+		track_number     INTEGER NOT NULL DEFAULT 0,
+		disc_number      INTEGER NOT NULL DEFAULT 0,
+		year             INTEGER NOT NULL DEFAULT 0,
+		genre            VARCHAR(128) NOT NULL DEFAULT '',
+		updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		PRIMARY KEY (user_id, file_hash)
 	);
 

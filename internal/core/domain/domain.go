@@ -59,36 +59,36 @@ type LibraryMember struct {
 }
 
 type Artist struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	SortName     string            `json:"sort_name"`
-	MBID         string            `json:"mbid"`
-	MetadataSource string          `json:"metadata_source"`
-	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
-	Country      string            `json:"country"`
-	Biography    string            `json:"biography"`
-	CoverImageID *string           `json:"cover_image_id,omitempty"`
-	TrackCount   int               `json:"track_count"`
-	Roles        []string          `json:"roles,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	SortName       string            `json:"sort_name"`
+	ExternalID     string            `json:"external_id"`
+	MetadataSource string            `json:"metadata_source"`
+	ExternalIDs    map[string]string `json:"external_ids,omitempty"`
+	Country        string            `json:"country"`
+	Biography      string            `json:"biography"`
+	CoverImageID   *string           `json:"cover_image_id,omitempty"`
+	TrackCount     int               `json:"track_count"`
+	Roles          []string          `json:"roles,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 }
 
 type Album struct {
-	ID           string            `json:"id"`
-	Title        string            `json:"title"`
-	ArtistID     string            `json:"artist_id"`
-	MBID         string            `json:"mbid"`
-	MetadataSource string          `json:"metadata_source"`
-	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
-	Country      string            `json:"country"`
-	Year         int               `json:"year"`
-	Genre        string            `json:"genre"`
-	CoverImageID *string           `json:"cover_image_id,omitempty"`
-	SongCount    int               `json:"song_count"`
-	Duration     float64           `json:"duration"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	ID             string            `json:"id"`
+	Title          string            `json:"title"`
+	ArtistID       string            `json:"artist_id"`
+	ExternalID     string            `json:"external_id"`
+	MetadataSource string            `json:"metadata_source"`
+	ExternalIDs    map[string]string `json:"external_ids,omitempty"`
+	Country        string            `json:"country"`
+	Year           int               `json:"year"`
+	Genre          string            `json:"genre"`
+	CoverImageID   *string           `json:"cover_image_id,omitempty"`
+	SongCount      int               `json:"song_count"`
+	Duration       float64           `json:"duration"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedAt      time.Time         `json:"updated_at"`
 
 	Artist *Artist `json:"artist,omitempty"`
 }
@@ -102,30 +102,43 @@ type TrackAlbum struct {
 }
 
 type Track struct {
-	ID           string         `json:"id"`
-	LibraryID    string         `json:"library_id"`
-	Title        string         `json:"title"`
-	CoverImageID *string        `json:"cover_image_id,omitempty"`
-	Duration     float64        `json:"duration"`
-	BitRate      int            `json:"bit_rate"`
-	SampleRate   int            `json:"sample_rate"`
-	Channels     int            `json:"channels"`
-	FilePath     string         `json:"file_path"`
-	FileSize     int64          `json:"file_size"`
-	FileFormat   string         `json:"file_format"`
-	AudioCodec   string         `json:"audio_codec"`
-	MBID         string         `json:"mbid"`
-	MetadataSource string       `json:"metadata_source"`
-	AcoustID     string         `json:"acoust_id"`
-	Hash         string         `json:"hash"`
-	LyricsMask   int            `json:"lyrics_mask"`
-	LyricsOffset float64        `json:"lyrics_offset"`
-	Heat         int            `json:"heat"`
-	PlayCount    int            `json:"play_count"`
-	LastPlayedAt *time.Time     `json:"last_played_at,omitempty"`
-	Metadata     *TrackMetadata `json:"metadata,omitempty"`
-	Version      int            `json:"version"`
-	VersionLabel string         `json:"version_label"`
+	ID             string            `json:"id"`
+	LibraryID      string            `json:"library_id"`
+	Title          string            `json:"title"`
+	CoverImageID   *string           `json:"cover_image_id,omitempty"`
+	Duration       float64           `json:"duration"`
+	BitRate        int               `json:"bit_rate"`
+	SampleRate     int               `json:"sample_rate"`
+	Channels       int               `json:"channels"`
+	FilePath       string            `json:"file_path"`
+	FileSize       int64             `json:"file_size"`
+	FileFormat     string            `json:"file_format"`
+	AudioCodec     string            `json:"audio_codec"`
+	// ExternalID is the primary external identifier of the track, in the
+	// namespace of MetadataSource (musicbrainz UUIDs, NetEase numeric ids,
+	// user-defined values). It has no meaning on its own — every consumer
+	// must treat the pair (MetadataSource, ExternalID) as the identity.
+	ExternalID     string            `json:"external_id"`
+	MetadataSource string            `json:"metadata_source"`
+	// ExternalIDs maps every known source to that source's id for the track
+	// (a cross-source alias table). It is only populated by the multi-source
+	// merge/version-alignment logic — tracks that never participated in a
+	// merge keep it empty, which is the normal state and never triggers the
+	// `external_ids @>` matching clause. When present, the entry under
+	// MetadataSource must equal ExternalID; use SetExternalID to change the
+	// primary id so a stale alias cannot match the track into the wrong
+	// version group.
+	ExternalIDs    map[string]string `json:"external_ids,omitempty"`
+	AcoustID       string            `json:"acoust_id"`
+	Hash           string            `json:"hash"`
+	LyricsMask     int               `json:"lyrics_mask"`
+	LyricsOffset   float64           `json:"lyrics_offset"`
+	Heat           int               `json:"heat"`
+	PlayCount      int               `json:"play_count"`
+	LastPlayedAt   *time.Time        `json:"last_played_at,omitempty"`
+	Metadata       *TrackMetadata    `json:"metadata,omitempty"`
+	Version        int               `json:"version"`
+	VersionLabel   string            `json:"version_label"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 
@@ -303,4 +316,24 @@ type AudioDeviceConfig struct {
 	Config     map[string]string `json:"config"`      // type-specific: host, port, password, ...
 	CreatedAt  time.Time         `json:"created_at"`
 	UpdatedAt  time.Time         `json:"updated_at"`
+}
+
+// SetExternalID updates the track's primary external id and keeps the
+// cross-source alias table in step: any stale id recorded under
+// MetadataSource is replaced or removed so a leftover alias cannot match the
+// track into the wrong version group via `external_ids @>`. Tracks with an
+// empty alias table (never part of a multi-source merge) stay empty. When
+// MetadataSource is empty the id has no namespace yet, so nothing is written
+// to the alias table — callers adopt the source before recording the id (see
+// the REST save flow and scanner enrichment).
+func (t *Track) SetExternalID(id string) {
+	t.ExternalID = id
+	if len(t.ExternalIDs) == 0 || t.MetadataSource == "" {
+		return
+	}
+	if id == "" {
+		delete(t.ExternalIDs, t.MetadataSource)
+	} else {
+		t.ExternalIDs[t.MetadataSource] = id
+	}
 }

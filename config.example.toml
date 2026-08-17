@@ -40,8 +40,11 @@ cache_dir = "/opt/sonicore/data/cache"
 lyrics_dir = "/opt/sonicore/data/lyrics"
 
 [jwt]
-# 重要：部署时请用 openssl rand -hex 32 生成新密钥
-secret = "change-me-in-production"
+# 重要：必须替换为随机密钥（openssl rand -hex 32），长度 >= 32 字节。
+# 该占位符为公开已知值，secrets.New 会直接拒绝服务启动；同时它经 HKDF
+# 派生为 server_settings 中平台凭据（如网易云 Cookie）的落库加密密钥；
+# 更换密钥后已加密的 Cookie 无法解密，需在管理后台重新填写。
+secret = "change-me-in-production-0123456789abcdef0123456789"
 # 访问令牌过期时间
 expiration = "24h"
 # 刷新令牌过期时间（30 天）
@@ -57,6 +60,11 @@ refresh_expiration = "720h"
 # musicbrainz_api_url = "https://musicbrainz.org/ws/2"
 # musicbrainz_rate_limit = 1
 
+# 网易云音乐元数据识别（MusicBrainz 无结果时的兜底源）。
+# 开启后网易云平台同步启用（provider 始终构建，匿名可用）。
+# 识别结果以 metadata_source=netease 落库。
+# netease_enabled = false
+
 [platforms]
 # 外部音乐平台（榜单/搜索/详情）。当前仅支持网易云音乐。
 # 两种启用方式：在 enabled 中列出，或设置对应平台的 enabled = true
@@ -66,6 +74,9 @@ refresh_expiration = "720h"
 enabled = false
 # 可选：登录后导出的 Cookie（含 MUSIC_U/MUSIC_A）。留空则使用匿名访问。
 # cookie = ""
+# 出站请求限速（每秒请求数）。扫描会高频请求，网易云服务端会按频率限流
+# （code 405 操作频繁）；默认 1 较保守，可依账号实际耐受度调高，0 关闭限速。
+# rate_limit = 1
 
 [log]
 level = "info"

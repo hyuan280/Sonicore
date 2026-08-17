@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Search, X, Plus, Loader2, Check } from "lucide-react"
 
 export interface SelectedArtist {
-  name: string; mbid: string
+  name: string; external_id: string
 }
 
 interface Props {
@@ -59,7 +59,7 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
 
   const selectUnmatched = () => {
     if (!lastQuery) return
-    selectArtist({ name: lastQuery, mbid: "" })
+    selectArtist({ name: lastQuery, external_id: "" })
   }
 
   const removeArtist = (idx: number) => {
@@ -85,8 +85,8 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
       {artists.map((a, i) => (
         <div key={i} className="flex items-center gap-1 text-sm w-full">
           <span className="text-zinc-200 truncate flex-1 min-w-0">{a.name}</span>
-          {a.mbid ? (
-            <span className="text-xs text-zinc-500 font-mono shrink-0">{a.mbid.substring(0, 8)}</span>
+          {a.external_id ? (
+            <span className="text-xs text-zinc-500 font-mono shrink-0">{a.external_id.substring(0, 8)}</span>
           ) : (
             <span className="shrink-0" />
           )}
@@ -114,7 +114,7 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
               className="w-full flex items-center gap-1 px-2 py-1 rounded text-left text-sm hover:bg-zinc-700 cursor-pointer">
               <span className="text-zinc-200 truncate min-w-0">{r.name}</span>
               <Check className="w-3.5 h-3.5 text-green-500 shrink-0" />
-              <span className="text-xs text-zinc-500 font-mono ml-auto shrink-0">{r.mbid.substring(0, 8)}</span>
+              <span className="text-xs text-zinc-500 font-mono ml-auto shrink-0">{r.external_id ? r.external_id.substring(0, 8) : ""}</span>
             </button>
           ))}
           {showCreate && (

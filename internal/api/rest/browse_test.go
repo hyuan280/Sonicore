@@ -96,11 +96,11 @@ func TestDataTracksByLibrary(t *testing.T) {
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 			"duration", "bit_rate", "sample_rate", "channels",
-			"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
+			"file_path", "file_size", "file_format", "audio_codec", "external_id", "metadata_source", "external_ids", "acoust_id", "hash",
 			"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-			AddRow("t-001", "lib-001", "Song A", nil, 200, 128000, 44100, 2, "/m/a.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+			AddRow("t-001", "lib-001", "Song A", nil, 200, 128000, 44100, 2, "/m/a.mp3", 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 				0, 0, 0, 0, nil, nil, 1, "", now, now).
-			AddRow("t-002", "lib-001", "Song B", nil, 200, 128000, 44100, 2, "/m/b.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+			AddRow("t-002", "lib-001", "Song B", nil, 200, 128000, 44100, 2, "/m/b.mp3", 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 				0, 0, 0, 0, nil, nil, 1, "", now, now))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/data/tracks?libId=lib-001&q=song", nil)
@@ -133,13 +133,13 @@ func TestDataTracksSearchFilter(t *testing.T) {
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 			"duration", "bit_rate", "sample_rate", "channels",
-			"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
+			"file_path", "file_size", "file_format", "audio_codec", "external_id", "metadata_source", "external_ids", "acoust_id", "hash",
 			"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-			AddRow("t-001", "lib-001", "Match Song", nil, 200, 128000, 44100, 2, "/m/a.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+			AddRow("t-001", "lib-001", "Match Song", nil, 200, 128000, 44100, 2, "/m/a.mp3", 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 				0, 0, 0, 0, nil, nil, 1, "", now, now).
-			AddRow("t-002", "lib-001", "Unrelated", nil, 200, 128000, 44100, 2, "/m/b.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+			AddRow("t-002", "lib-001", "Unrelated", nil, 200, 128000, 44100, 2, "/m/b.mp3", 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 				0, 0, 0, 0, nil, nil, 1, "", now, now).
-			AddRow("t-003", "lib-001", "Version 2 Track", nil, 200, 128000, 44100, 2, "/m/c.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+			AddRow("t-003", "lib-001", "Version 2 Track", nil, 200, 128000, 44100, 2, "/m/c.mp3", 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 				0, 0, 0, 0, nil, nil, 2, "", now, now))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/data/tracks?q=song", nil)

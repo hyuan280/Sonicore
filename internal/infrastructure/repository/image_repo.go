@@ -65,6 +65,33 @@ func (r *ImageRepo) FindByPath(ctx context.Context, ownerType, path string) ([]d
 	return out, rows.Err()
 }
 
+// FindOrphans returns image rows whose owning entity no longer exists
+// (e.g. a track deleted through a path that did not clean its cover, a crash
+// between cleanup steps, or manual database edits). owner_id has no foreign
+// key to the entity tables, so orphaned rows cannot be removed by a CASCADE.
+func (r *ImageRepo) FindOrphans(ctx context.Context) ([]domain.Image, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, library_id, owner_type, owner_id, source, path,
+		 format, width, height, size, hash, variants, created_at, updated_at
+		 FROM images
+		 WHERE (owner_type = 'track' AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = images.owner_id))
+		    OR (owner_type = 'album' AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.id = images.owner_id))
+		    OR (owner_type = 'artist' AND NOT EXISTS (SELECT 1 FROM artists ar WHERE ar.id = images.owner_id))`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Image
+	for rows.Next() {
+		img, err := scanImage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *img)
+	}
+	return out, rows.Err()
+}
+
 func (r *ImageRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM images WHERE id = $1`, id)
 	return err
@@ -75,6 +102,17 @@ func (r *ImageRepo) Delete(ctx context.Context, id string) error {
 func (r *ImageRepo) DeleteByOwner(ctx context.Context, ownerType, ownerID string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM images WHERE owner_type = $1 AND owner_id = $2`, ownerType, ownerID)
 	return err
+}
+
+// CountPathExcept reports how many image rows other than excludeID reference
+// the given path. Used by the orphan sweep so a shared file (e.g. an album
+// cover pointing at a live track's original) is never removed out from under
+// a still-valid row.
+func (r *ImageRepo) CountPathExcept(ctx context.Context, path, excludeID string) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM images WHERE path = $1 AND id != $2`, path, excludeID).Scan(&n)
+	return n, err
 }
 
 // Update refreshes the mutable metadata of an image row (used when a track

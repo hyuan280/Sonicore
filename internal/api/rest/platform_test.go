@@ -196,6 +196,55 @@ func TestPlatformSearchTracks(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"total":7`)
 }
 
+// enrichStubProvider embeds stubProvider and implements TrackEnricher so the
+// handler's enrichment branch (replace on success, fall back on failure) is
+// exercised.
+type enrichStubProvider struct {
+	stubProvider
+	enrichErr bool
+}
+
+func (p *enrichStubProvider) EnrichTracks(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error) {
+	if p.enrichErr {
+		return nil, errors.New("enrich exploded")
+	}
+	out := make([]port.PlatformTrack, len(tracks))
+	copy(out, tracks)
+	for i := range out {
+		out[i].CoverURL = "https://cover.example/" + out[i].TrackID + ".jpg"
+	}
+	return out, nil
+}
+
+func TestPlatformSearchEnrichSuccess(t *testing.T) {
+	h := NewPlatformHandler(map[string]port.PlatformProvider{
+		"netease": &enrichStubProvider{stubProvider: stubProvider{name: "netease"}},
+	})
+
+	rec := httptest.NewRecorder()
+	req := mux.SetURLVars(platformRequest(http.MethodGet, "/api/platforms/netease/search?q=hello&type=track"),
+		map[string]string{"name": "netease"})
+	h.Search(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"cover_url":"https://cover.example/1.jpg"`, "enriched cover replaces the search hit")
+}
+
+func TestPlatformSearchEnrichFailureFallsBack(t *testing.T) {
+	h := NewPlatformHandler(map[string]port.PlatformProvider{
+		"netease": &enrichStubProvider{stubProvider: stubProvider{name: "netease"}, enrichErr: true},
+	})
+
+	rec := httptest.NewRecorder()
+	req := mux.SetURLVars(platformRequest(http.MethodGet, "/api/platforms/netease/search?q=hello&type=track"),
+		map[string]string{"name": "netease"})
+	h.Search(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code, "enrich failure degrades to the original hits, not an error")
+	assert.Contains(t, rec.Body.String(), `"title":"hello"`)
+	assert.NotContains(t, rec.Body.String(), "cover_url", "no cover enrichment on failure")
+}
+
 func TestPlatformSearchArtists(t *testing.T) {
 	h := newPlatformHandler()
 

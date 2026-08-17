@@ -32,7 +32,7 @@ func newCoverHandler(t *testing.T) (*CoverHandler, sqlmock.Sqlmock, *miniredis.M
 	t.Cleanup(func() { vk.Close() })
 
 	imagesDir := t.TempDir()
-	return NewCoverHandler(db, imagesDir, cache.NewSessionStore(vk), metadata.NewCoverManager(imagesDir, db)), mock, mr, imagesDir
+	return NewCoverHandler(db, imagesDir, cache.NewSessionStore(vk), metadata.NewCoverManager(imagesDir, db, nil)), mock, mr, imagesDir
 }
 
 func coverSession(t *testing.T, h *CoverHandler) string {
@@ -177,16 +177,16 @@ func TestCoverMissingFileTriesOnDemandThen404(t *testing.T) {
 		WithArgs("t-001").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "library_id", "title", "cover_image_id",
 			"duration", "bit_rate", "sample_rate", "channels",
-			"file_path", "file_size", "file_format", "audio_codec", "mbid", "metadata_source", "acoust_id", "hash",
+			"file_path", "file_size", "file_format", "audio_codec", "external_id", "metadata_source", "external_ids", "acoust_id", "hash",
 			"lyrics_mask", "lyrics_offset", "heat", "play_count", "last_played_at", "metadata", "version", "version_label", "created_at", "updated_at"}).
-			AddRow("t-001", "lib-001", "Song", "img-1", 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "", "h",
+			AddRow("t-001", "lib-001", "Song", "img-1", 200, 128000, 44100, 2, "/m/song.mp3", 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 				0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now()))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
 		WithArgs("t-001").
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "mbid"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
 
 	rec := httptest.NewRecorder()
 	h.Serve(rec, coverRequest(sess, "img-1"))
