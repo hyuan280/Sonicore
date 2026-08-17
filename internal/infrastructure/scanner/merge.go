@@ -95,10 +95,15 @@ func mergeKey(title, albums, artists string) (string, bool) {
 	if title == "" || albums == "" || artists == "" {
 		return "", false
 	}
+	// Reject placeholder components per value: albums/artists arrive
+	// \x1f-separated, so "Unknown Artist\x1fJohn" must still disqualify the
+	// track even though the joined string differs from "unknown artist".
 	for _, c := range []string{title, albums, artists} {
-		low := strings.ToLower(c)
-		if low == "unknown artist" || low == "unknown album" || low == "unknown" {
-			return "", false
+		for _, part := range strings.Split(c, "\x1f") {
+			low := strings.ToLower(strings.TrimSpace(part))
+			if low == "unknown artist" || low == "unknown album" || low == "unknown" {
+				return "", false
+			}
 		}
 	}
 	// Normalize the artist list: split on the aggregation separator (\x1f —
@@ -191,15 +196,20 @@ func (e *Engine) tryMergeByIdentifiedID(ctx context.Context, libraryID string, t
 	if existing == nil {
 		return false
 	}
+	// A match via the alias table may leave existing without a primary id.
+	// Aligning then would copy that empty id onto the freshly identified
+	// track, clearing its valid primary identity — so only align when the
+	// existing track actually carries one.
+	if existing.ExternalID == "" {
+		return false
+	}
 	mainSource := existing.MetadataSource
 	if mainSource == "" {
 		mainSource = "musicbrainz"
 	}
 	ids := mergeExternalIDs(existing.ExternalIDs, track.ExternalIDs)
 	ids[source] = track.ExternalID
-	if existing.ExternalID != "" {
-		ids[mainSource] = existing.ExternalID
-	}
+	ids[mainSource] = existing.ExternalID
 	changed := track.MetadataSource != mainSource || track.ExternalID != existing.ExternalID ||
 		!externalIDsEqual(track.ExternalIDs, ids)
 	if changed {
@@ -395,7 +405,10 @@ func (e *Engine) syncVersionGroups(ctx context.Context, libraryID string) {
 		}
 		mainSource, mainExternalID = mainTrack.Source, mainTrack.ExternalID
 		if mainSource == "" {
-			mainSource = "musicbrainz"
+			// No authoritative source to propagate (mirrors alignGroup's
+			// empty-main guard): defaulting it to musicbrainz would mis-attribute
+			// the group's ids and persist that attribution on every member.
+			continue
 		}
 		ids := mergeExternalIDs(mainTrack.ExternalIDs)
 		if mainExternalID != "" {

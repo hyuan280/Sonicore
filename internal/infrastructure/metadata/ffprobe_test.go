@@ -85,6 +85,9 @@ func TestSplitArtistNames(t *testing.T) {
 		{"semicolon separated", "X ; Y", []string{"X", "Y"}},
 		{"empty", "", nil},
 		{"unknown artist", "Unknown Artist", nil},
+		{"unknown artist mixed with real", "Real Artist, Unknown Artist", []string{"Real Artist"}},
+		{"unknown artist mixed (case/space)", "Unknown Artist,  Real Artist", []string{"Real Artist"}},
+		{"unknown artist lowercase among names", "a / unknown artist / b", []string{"a", "b"}},
 		{"trims whitespace", "  A ,  B  ", []string{"A", "B"}},
 	}
 	for _, tt := range tests {

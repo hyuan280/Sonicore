@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sonicore/server/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,6 +75,6 @@ func TestNewRejectsShortMaster(t *testing.T) {
 }
 
 func TestNewRejectsDefaultPlaceholder(t *testing.T) {
-	_, err := New([]byte(defaultPlaceholder))
+	_, err := New([]byte(config.JWTSecretPlaceholder))
 	require.Error(t, err, "the shipped config.example.toml placeholder is publicly known and must be rejected")
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sonicore/server/internal/core/domain"
@@ -60,6 +61,13 @@ type ScannerService struct {
 	// callers (single-flight), so a cache miss does not make every cover
 	// lookup rebuild the source chain independently.
 	registryFlight *registryFlight
+	// lastGoodRegistry is the most recent registry assembled from fully
+	// successful settings reads. When a read fails (DB blip, cancelled scan
+	// context), buildRegistryUnlocked returns it instead of publishing a
+	// default-config chain into the TTL cache. Atomic because rebuildEngine
+	// can clear the flight slot and let a new-generation builder run
+	// concurrently with a still-executing old one.
+	lastGoodRegistry atomic.Pointer[metadata.Registry]
 }
 
 // registryFlight tracks one in-flight registry build so concurrent callers
@@ -150,8 +158,12 @@ func (s *ScannerService) buildRegistry(ctx context.Context) *metadata.Registry {
 
 	// Build outside the lock: the settings reads, source-chain assembly and
 	// logging below must not serialize every concurrent caller (cover
-	// lookups, engine rebuilds) behind a slow or failing DB.
-	registry := s.buildRegistryUnlocked(ctx)
+	// lookups, engine rebuilds) behind a slow or failing DB. readOK reports
+	// whether every settings read succeeded; cacheable reports whether the
+	// assembled registry may be published to the TTL cache (false only for a
+	// degraded default-config build after a read failure with no last-good
+	// fallback).
+	registry, readOK, cacheable := s.buildRegistryUnlocked(ctx)
 
 	s.registryMu.Lock()
 	fl.reg = registry
@@ -165,9 +177,17 @@ func (s *ScannerService) buildRegistry(ctx context.Context) *metadata.Registry {
 	// Only publish when no rebuildEngine invalidated the cache while we were
 	// building — a stale build started before an explicit rebuild must not
 	// repopulate the cache (and thereby serve stale settings for the TTL).
-	if s.registryGen == gen {
+	// A degraded default-config build is never cached: publishing it would
+	// make the registry ignore admin settings for the TTL window.
+	if s.registryGen == gen && cacheable {
 		s.registryVal = registry
 		s.registryAt = time.Now()
+		// lastGoodRegistry is only refreshed from a build that actually read
+		// the settings AND still matches the current generation: a stale-gen
+		// builder finishing late must not overwrite the newer config.
+		if readOK {
+			s.lastGoodRegistry.Store(registry)
+		}
 	}
 	s.registryMu.Unlock()
 	return registry
@@ -177,18 +197,40 @@ func (s *ScannerService) buildRegistry(ctx context.Context) *metadata.Registry {
 // order from the latest settings. MusicBrainz is the primary source; NetEase
 // is the fallback (requires both the metadata switch and a platform
 // provider). Caller must not hold registryMu.
-func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) *metadata.Registry {
+//
+// readOK reports whether every settings read succeeded. cacheable reports
+// whether the returned registry may be published to the TTL cache: it is
+// true for a fresh successful build and for a lastGoodRegistry fallback (a
+// valid previous config), but false for a degraded default-config build (a
+// read failure with no last-good registry to fall back to) — the caller must
+// not cache that.
+func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) (*metadata.Registry, bool, bool) {
 	mbCfg := s.mbCfg
 	mbCfg.Client = s.mbClient
+	// A failed settings read must not be conflated with "not set": publishing
+	// a default-config chain would silently ignore the admin's saved
+	// switches/URLs/rate limits for the whole scan. Any read error therefore
+	// falls back to the last registry assembled from successful reads.
+	readErr := false
+	var firstErr error
+	var firstKey string
+	read := func(key string) (string, error) {
+		v, err := s.settingsRepo.Get(ctx, key)
+		if err != nil && !readErr {
+			firstErr, firstKey = err, key
+			readErr = true
+		}
+		return v, err
+	}
 	// Get returns ("", nil) for missing keys; only override when a value
 	// is actually stored.
-	if enabled, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_enabled"); err == nil && enabled != "" {
+	if enabled, err := read("metadata_musicbrainz_enabled"); err == nil && enabled != "" {
 		mbCfg.Enabled = enabled == "true"
 	}
-	if url, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_api_url"); err == nil && url != "" {
+	if url, err := read("metadata_musicbrainz_api_url"); err == nil && url != "" {
 		mbCfg.APIURL = url
 	}
-	if rl, err := s.settingsRepo.Get(ctx, "metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
+	if rl, err := read("metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
 		if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
 			log.Printf("[scanner] invalid musicbrainz rate limit %q", rl)
 		} else {
@@ -199,15 +241,25 @@ func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) *metadata.Re
 	neteaseEnabled := s.neteaseEnabled
 	// Get returns ("", nil) for missing keys; only override when a value
 	// is actually stored.
-	if enabled, err := s.settingsRepo.Get(ctx, "metadata_netease_enabled"); err == nil && enabled != "" {
+	if enabled, err := read("metadata_netease_enabled"); err == nil && enabled != "" {
 		neteaseEnabled = enabled == "true"
+	}
+
+	if readErr {
+		log.Printf("[scanner] settings read failed for %q: %v", firstKey, firstErr)
+		if last := s.lastGoodRegistry.Load(); last != nil {
+			return last, false, true
+		}
+		log.Printf("[scanner] no last-good registry, falling back to defaults")
 	}
 
 	registry := metadata.BuildRegistry(mbCfg, s.neteaseProvider, neteaseEnabled, s.umRepo)
 	if names := sourceNames(registry.Sources()); len(names) > 0 {
 		log.Printf("[scanner] metadata sources: %s", strings.Join(names, ", "))
 	}
-	return registry
+	// lastGoodRegistry is refreshed by the caller (buildRegistry) under its
+	// generation check, so a stale-gen build never overwrites new config.
+	return registry, !readErr, !readErr
 }
 
 // settingsCacheTTL bounds how stale a rebuilt metadata registry may be.

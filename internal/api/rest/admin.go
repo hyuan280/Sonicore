@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
@@ -37,28 +36,33 @@ func NewAdminHandler(db *sql.DB, enc *secrets.Encryptor) *AdminHandler {
 	}
 }
 
-// setSetting persists a server setting, logging and answering 500 on failure
-// so a "saved" response never lies about a write that did not land.
-func (h *AdminHandler) setSetting(ctx context.Context, w http.ResponseWriter, key, value string) bool {
-	if err := h.settingsRepo.Set(ctx, key, value); err != nil {
-		log.Printf("[admin] set setting %q: %v", key, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
-		return false
-	}
-	return true
-}
-
-// storeSecret persists a credential, encrypting it when an Encryptor is
-// configured so the value at rest in the settings DB is not plaintext.
-func (h *AdminHandler) storeSecret(ctx context.Context, key, plaintext string) error {
+// encryptSecret encrypts a credential when an Encryptor is configured so the
+// value at rest in the settings DB is not plaintext. The value to persist is
+// returned; callers commit it as part of the settings batch.
+func (h *AdminHandler) encryptSecret(plaintext string) (string, error) {
 	if plaintext == "" || h.enc == nil {
-		return h.settingsRepo.Set(ctx, key, plaintext)
+		return plaintext, nil
 	}
 	enc, err := h.enc.Encrypt(plaintext)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return h.settingsRepo.Set(ctx, key, enc)
+	return enc, nil
+}
+
+// cookieBroken reports whether the stored netease cookie exists but cannot be
+// decrypted (secret rotation, corruption), mirroring the provider's own
+// decrypt-and-degrade behavior in server.go. The failure is logged (without
+// the ciphertext) so the divergence is traceable.
+func (h *AdminHandler) cookieBroken(raw string) bool {
+	if raw == "" || h.enc == nil {
+		return false
+	}
+	if _, err := h.enc.Decrypt(raw); err != nil {
+		log.Printf("[admin] netease cookie decrypt failed: %v", err)
+		return true
+	}
+	return false
 }
 
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +150,11 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	neCookie, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_cookie")
 	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
+	// A stored cookie that no longer decrypts (secret rotation, corruption)
+	// is reported so ops can distinguish "not configured" from "configured
+	// but unreadable" — the provider silently degrades to anonymous in the
+	// latter case.
+	cookieBroken := h.cookieBroken(neCookie)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
@@ -155,8 +164,9 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_rate_limit":    neRateLimit,
 		// The cookie itself never leaves the server; only its presence is
 		// reported so the credential does not sit in browser state/DOM.
-		"platforms_netease_cookie_set": neCookie != "",
-		"subsonic_jukebox_id":           subJukebox,
+		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
+		"platforms_netease_cookie_error":  cookieBroken,
+		"subsonic_jukebox_id":             subJukebox,
 	})
 }
 
@@ -187,71 +197,65 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Collect every write and commit them in one transaction (SetMany), so a
+	// mid-batch write failure rolls the whole update back instead of leaving
+	// a partial state.
+	writes := make(map[string]string)
 	if req.AllowRegistration != nil {
 		val := "false"
 		if *req.AllowRegistration {
 			val = "true"
 		}
-		if !h.setSetting(r.Context(), w, "allow_registration", val) {
-			return
-		}
+		writes["allow_registration"] = val
 	}
 	if req.MusicBrainzEnabled != nil {
 		val := "false"
 		if *req.MusicBrainzEnabled {
 			val = "true"
 		}
-		if !h.setSetting(r.Context(), w, "metadata_musicbrainz_enabled", val) {
-			return
-		}
+		writes["metadata_musicbrainz_enabled"] = val
 	}
 	if req.MusicBrainzAPIURL != nil {
-		if !h.setSetting(r.Context(), w, "metadata_musicbrainz_api_url", *req.MusicBrainzAPIURL) {
-			return
-		}
+		writes["metadata_musicbrainz_api_url"] = *req.MusicBrainzAPIURL
 	}
 	if req.MusicBrainzRateLimit != nil {
-		if !h.setSetting(r.Context(), w, "metadata_musicbrainz_rate_limit", *req.MusicBrainzRateLimit) {
-			return
-		}
+		writes["metadata_musicbrainz_rate_limit"] = *req.MusicBrainzRateLimit
 	}
 	if req.NeteaseEnabled != nil {
 		val := "false"
 		if *req.NeteaseEnabled {
 			val = "true"
 		}
-		if !h.setSetting(r.Context(), w, "metadata_netease_enabled", val) {
-			return
-		}
+		writes["metadata_netease_enabled"] = val
 	}
 	if req.NeteaseCookie != nil {
 		// An empty value keeps the existing cookie (the client never holds
 		// the raw credential, so it cannot resend it); only a non-empty
 		// value overwrites, and a clear is requested explicitly.
 		if *req.NeteaseCookie != "" {
-			if err := h.storeSecret(r.Context(), "platforms_netease_cookie", *req.NeteaseCookie); err != nil {
+			enc, err := h.encryptSecret(*req.NeteaseCookie)
+			if err != nil {
 				log.Printf("[admin] store platforms_netease_cookie: %v", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store cookie"})
 				return
 			}
+			writes["platforms_netease_cookie"] = enc
 		}
 	}
 	if req.NeteaseCookieClear != nil && *req.NeteaseCookieClear {
-		if err := h.settingsRepo.Set(r.Context(), "platforms_netease_cookie", ""); err != nil {
-			log.Printf("[admin] clear platforms_netease_cookie: %v", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to clear cookie"})
-			return
-		}
+		writes["platforms_netease_cookie"] = ""
 	}
 	if req.NeteaseRateLimit != nil {
-		if !h.setSetting(r.Context(), w, "platforms_netease_rate_limit", *req.NeteaseRateLimit) {
-			return
-		}
+		writes["platforms_netease_rate_limit"] = *req.NeteaseRateLimit
 	}
 	if req.SubsonicJukeboxID != nil {
-		if !h.setSetting(r.Context(), w, "subsonic_jukebox_id", *req.SubsonicJukeboxID) {
-			return
-		}
+		writes["subsonic_jukebox_id"] = *req.SubsonicJukeboxID
+	}
+
+	if err := h.settingsRepo.SetMany(r.Context(), writes); err != nil {
+		log.Printf("[admin] save settings batch: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+		return
 	}
 
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
@@ -262,6 +266,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
+	cookieBroken := h.cookieBroken(neCookie)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
@@ -269,7 +274,8 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"metadata_musicbrainz_rate_limit": mbRateLimit,
 		"metadata_netease_enabled":        neEnabled == "true",
 		"platforms_netease_rate_limit":    neRateLimit,
-		"platforms_netease_cookie_set":    neCookie != "",
+		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
+		"platforms_netease_cookie_error":  cookieBroken,
 		"subsonic_jukebox_id":             subJukebox,
 	})
 }

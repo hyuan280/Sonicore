@@ -16,6 +16,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -74,6 +75,11 @@ const maxNetworkCoverBytes = 20 << 20
 // the image header before a full decode) so a small payload that declares a
 // huge canvas cannot blow up memory during decode/resize.
 const maxCoverDimension = 4096
+
+// maxCoverCandidateAttempts bounds how many platform cover candidates are
+// downloaded before giving up (each fetch can take up to 30s), so a slow or
+// hung CDN cannot stall the whole scan for minutes.
+const maxCoverCandidateAttempts = 2
 
 // vettedHTTPClient is the shared client for downloaded covers. Reusing one
 // Transport (instead of a fresh one per fetch) avoids leaking an idle
@@ -159,8 +165,57 @@ func redirectGuard(req *http.Request, via []*http.Request) error {
 }
 
 func publicIP(ip net.IP) bool {
-	return ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() &&
-		!ip.IsUnspecified() && !ip.IsMulticast()
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	// Non-global unicast ranges the stdlib predicate misses — CGNAT, the
+	// TEST-NET documentation blocks and the reserved 240.0.0.0/4. They are
+	// not globally routable, so treating them as reachable would widen the
+	// SSRF white-list into carrier-grade or reserved space.
+	a, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	a = a.Unmap()
+	for _, p := range nonGlobalNetworks {
+		if p.Contains(a) {
+			return false
+		}
+	}
+	return true
+}
+
+// nonGlobalNetworks lists non-global unicast blocks excluded by publicIP in
+// addition to net.IP's built-in loopback/private/link-local/unspecified/
+// multicast predicates. 0.0.0.0/8 is the important one: Linux routes it
+// locally, so a host like 0.0.0.1 bypasses the IsLoopback/IsUnspecified
+// checks and hits the local machine.
+var nonGlobalNetworks = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	// IPv6 translation/mapping prefixes that can carry or map to arbitrary
+	// IPv4 targets (e.g. 2002:7f00:1:: → 127.0.0.1, 64:ff9b::a00:1 →
+	// 10.0.0.1); net.IP's predicates do not cover them.
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	// RFC 8215 NAT64 local-use prefix (distinct from 64:ff9b::/96; maps
+	// private IPv4, e.g. 64:ff9b:1::a00:1 → 10.0.0.1).
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	// Deprecated special-use blocks kept closed for completeness: ::/96
+	// (IPv4-compatible), fec0::/10 (site-local, RFC 3879) and the 6to4
+	// relay anycast 192.88.99.0/24 (RFC 7526).
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("192.88.99.0/24"),
 }
 
 // fetchImage downloads a cover image and validates that the payload decodes
@@ -214,13 +269,19 @@ func fetchImageWithClient(ctx context.Context, url string, client *http.Client) 
 	}
 	// Check the canvas size from the header before a full decode so a tiny
 	// payload declaring a huge image cannot exhaust memory.
-	if cfg, _, cerr := image.DecodeConfig(bytes.NewReader(data)); cerr != nil {
+	cfg, format, cerr := image.DecodeConfig(bytes.NewReader(data))
+	if cerr != nil {
 		return nil, fmt.Errorf("cover download: not a decodable image: %w", cerr)
 	} else if cfg.Width > maxCoverDimension || cfg.Height > maxCoverDimension {
 		return nil, fmt.Errorf("cover download: image %dx%d exceeds %dpx limit", cfg.Width, cfg.Height, maxCoverDimension)
 	}
-	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
-		return nil, fmt.Errorf("cover download: not a decodable image: %w", err)
+	// Full-decode validate only JPEG payloads: non-JPEG covers are re-encoded
+	// by ensureJPEG right after this, which full-decodes them anyway, so a
+	// second decode here would double the peak memory of large covers.
+	if format == "jpeg" {
+		if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+			return nil, fmt.Errorf("cover download: not a decodable image: %w", err)
+		}
 	}
 	return data, nil
 }
@@ -246,6 +307,11 @@ func safeCoverURL(raw string) bool {
 	defer cancel()
 	addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, parsed.Hostname())
 	if err != nil {
+		return false
+	}
+	// A resolvable name with no address records is not acceptable either: an
+	// empty list must not silently pass the pre-filter.
+	if len(addrs) == 0 {
 		return false
 	}
 	for _, a := range addrs {
@@ -423,6 +489,10 @@ func (m *CoverManager) EnsureTrackCover(ctx context.Context, libraryID string, t
 		}
 		candidates, rerr := m.newRegistry().SearchCandidates(ctx, q)
 		if rerr == nil {
+			// Bound how many downloads a slow/hung upstream can stall the
+			// whole scan: a single candidate download can take up to 30s, so
+			// at most the first few plausible hits are attempted.
+			attempts := 0
 			for _, c := range candidates {
 				// The cover URL is only trusted when the candidate clears
 				// the source's confidence threshold; otherwise unrelated
@@ -431,6 +501,10 @@ func (m *CoverManager) EnsureTrackCover(ctx context.Context, libraryID string, t
 				if c.CoverArtURL == "" || c.Score < identifyThreshold {
 					continue
 				}
+				if attempts >= maxCoverCandidateAttempts {
+					break
+				}
+				attempts++
 				d, derr := fetchImage(ctx, c.CoverArtURL)
 				if derr != nil {
 					err = derr
@@ -584,8 +658,14 @@ func (m *CoverManager) importTrackCoverLocked(ctx context.Context, libraryID str
 	if w > 64 || h > 64 {
 		tmpThumb = thumbPath + ".tmp"
 		if err := ResizeToThumbnail(data, tmpThumb, 64); err != nil {
-			os.Remove(tmpThumb)
-			log.Printf("[cover] thumbnail resize error for %s: %v", track.ID, err)
+			// A cover whose header decodes but whose pixel data is corrupt
+			// (e.g. an embedded JPEG with intact SOF but broken entropy data)
+			// fails here on the full decode. Treat the failure as fatal so the
+			// broken image is never persisted as the track cover. Remove the
+			// staged main file too, not just the thumbnail.
+			cleanupTmp()
+			m.noteFail(track.ID)
+			return err
 		}
 	}
 	thumbWritten := tmpThumb != "" && fileSize(tmpThumb) > 0

@@ -86,8 +86,8 @@ func TestListFavoritesTrackType(t *testing.T) {
 	// loadTrackArtistsBulk
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
-			AddRow("t-001", "art-1", "performer", 0, "Band", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}).
+			AddRow("t-001", "art-1", "performer", 0, "Band", "", "musicbrainz"))
 
 	rec := httptest.NewRecorder()
 	h.ListFavorites(rec, udRequest(http.MethodGet, "/api/user/favorites?type=track", "", "u-001"))
@@ -224,7 +224,7 @@ func TestListHistory(t *testing.T) {
 			AddRow("h-1", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 
 	rec := httptest.NewRecorder()
 	h.ListHistory(rec, udRequest(http.MethodGet, "/api/user/history", "", "u-001"))
@@ -548,7 +548,7 @@ func TestGetQueueWithTracks(t *testing.T) {
 			AddRow("t-001", "Song", "Band", "Album", "alb-1", 200.0, "mp3", nil, 1, 1, 1, "", "", "musicbrainz"))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 
 	rec := httptest.NewRecorder()
 	h.GetQueue(rec, udRequest(http.MethodGet, "/api/user/queue", "", "u-001"))

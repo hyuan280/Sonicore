@@ -268,17 +268,18 @@ func (r *TrackRepo) FindByIDs(ctx context.Context, ids []string) ([]*domain.Trac
 }
 
 type trackArtistRow struct {
-	TrackID    string
-	ArtistID   string
-	Role       string
-	SortOrder  int
-	Name       string
-	ExternalID string
+	TrackID        string
+	ArtistID       string
+	Role           string
+	SortOrder      int
+	Name           string
+	ExternalID     string
+	MetadataSource string
 }
 
 func (r *TrackRepo) LoadTrackArtists(ctx context.Context, trackID string) ([]*domain.TrackArtist, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT ta.track_id, ta.artist_id, ta.role, ta.sort_order, a.name, a.external_id
+		`SELECT ta.track_id, ta.artist_id, ta.role, ta.sort_order, a.name, a.external_id, a.metadata_source
 		 FROM track_artists ta
 		 JOIN artists a ON a.id = ta.artist_id
 		 WHERE ta.track_id = $1
@@ -291,7 +292,7 @@ func (r *TrackRepo) LoadTrackArtists(ctx context.Context, trackID string) ([]*do
 	var artists []*domain.TrackArtist
 	for rows.Next() {
 		var row trackArtistRow
-		if err := rows.Scan(&row.TrackID, &row.ArtistID, &row.Role, &row.SortOrder, &row.Name, &row.ExternalID); err != nil {
+		if err := rows.Scan(&row.TrackID, &row.ArtistID, &row.Role, &row.SortOrder, &row.Name, &row.ExternalID, &row.MetadataSource); err != nil {
 			return nil, err
 		}
 		artists = append(artists, &domain.TrackArtist{
@@ -299,7 +300,7 @@ func (r *TrackRepo) LoadTrackArtists(ctx context.Context, trackID string) ([]*do
 			ArtistID:  row.ArtistID,
 			Role:      row.Role,
 			SortOrder: row.SortOrder,
-			Artist:    &domain.Artist{ID: row.ArtistID, Name: row.Name, ExternalID: row.ExternalID},
+			Artist:    &domain.Artist{ID: row.ArtistID, Name: row.Name, ExternalID: row.ExternalID, MetadataSource: row.MetadataSource},
 		})
 	}
 	return artists, rows.Err()
@@ -307,7 +308,7 @@ func (r *TrackRepo) LoadTrackArtists(ctx context.Context, trackID string) ([]*do
 
 func (r *TrackRepo) LoadTrackArtistsBulk(ctx context.Context, trackIDs []string) (map[string][]*domain.TrackArtist, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT ta.track_id, ta.artist_id, ta.role, ta.sort_order, a.name, a.external_id
+		`SELECT ta.track_id, ta.artist_id, ta.role, ta.sort_order, a.name, a.external_id, a.metadata_source
 		 FROM track_artists ta
 		 JOIN artists a ON a.id = ta.artist_id
 		 WHERE ta.track_id = ANY($1)
@@ -320,7 +321,7 @@ func (r *TrackRepo) LoadTrackArtistsBulk(ctx context.Context, trackIDs []string)
 	result := make(map[string][]*domain.TrackArtist)
 	for rows.Next() {
 		var row trackArtistRow
-		if err := rows.Scan(&row.TrackID, &row.ArtistID, &row.Role, &row.SortOrder, &row.Name, &row.ExternalID); err != nil {
+		if err := rows.Scan(&row.TrackID, &row.ArtistID, &row.Role, &row.SortOrder, &row.Name, &row.ExternalID, &row.MetadataSource); err != nil {
 			return nil, err
 		}
 		result[row.TrackID] = append(result[row.TrackID], &domain.TrackArtist{
@@ -328,7 +329,7 @@ func (r *TrackRepo) LoadTrackArtistsBulk(ctx context.Context, trackIDs []string)
 			ArtistID:  row.ArtistID,
 			Role:      row.Role,
 			SortOrder: row.SortOrder,
-			Artist:    &domain.Artist{ID: row.ArtistID, Name: row.Name, ExternalID: row.ExternalID},
+			Artist:    &domain.Artist{ID: row.ArtistID, Name: row.Name, ExternalID: row.ExternalID, MetadataSource: row.MetadataSource},
 		})
 	}
 	return result, rows.Err()

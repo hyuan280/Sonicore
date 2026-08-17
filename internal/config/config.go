@@ -82,6 +82,13 @@ type JWTConfig struct {
 	RefreshExpiration string `mapstructure:"refresh_expiration"`
 }
 
+// JWTSecretPlaceholder is the shipped jwt.secret default (also in
+// config.example.toml). It is publicly known, so the encryption layer
+// (secrets.New) rejects it outright; keeping it here keeps the config
+// package as the single source of truth (infra packages depend on config,
+// not the other way round).
+const JWTSecretPlaceholder = "change-me-in-production-0123456789abcdef0123456789"
+
 type AudioConfig struct {
 	PulseServer string `mapstructure:"pulse_server"`
 }
@@ -132,7 +139,7 @@ func Load() *Config {
 	v.SetDefault("data.images_dir", "/opt/sonicore/data/images")
 	v.SetDefault("data.cache_dir", "/opt/sonicore/data/cache")
 	v.SetDefault("data.lyrics_dir", "/opt/sonicore/data/lyrics")
-	v.SetDefault("jwt.secret", "change-me-in-production-0123456789abcdef0123456789")
+	v.SetDefault("jwt.secret", JWTSecretPlaceholder)
 	v.SetDefault("jwt.expiration", "24h")
 	v.SetDefault("jwt.refresh_expiration", "720h")
 	v.SetDefault("log.level", "info")

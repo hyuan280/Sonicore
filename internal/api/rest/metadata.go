@@ -548,8 +548,15 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			}
 			if !cleanupOK {
 				log.Printf("[metadata] version cleanup failed for %s; skipping renumber", track.ID)
-			} else if ids := h.externalIDGroupIDs(r.Context(), oldSource, oldExtID, track.LibraryID); len(ids) >= 1 {
-				h.renumberGroup(r.Context(), oldSource, ids, oldExtID, track.LibraryID)
+			} else {
+				// Normalize the old source like reResolveVersions does: legacy
+				// empty sources are stored as musicbrainz in the version-group
+				// rows, so a raw "" lookup would miss them (and renumberGroup
+				// could insert duplicate '' rows).
+				normOld := sourceOrDefaultSource(oldSource)
+				if ids := h.externalIDGroupIDs(r.Context(), normOld, oldExtID, track.LibraryID); len(ids) >= 1 {
+					h.renumberGroup(r.Context(), normOld, ids, oldExtID, track.LibraryID)
+				}
 			}
 		}
 	}
@@ -827,8 +834,14 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		gen = cached.Genre
 	}
 	tExtID := result.TrackExternalID
+	extSource := result.Source
 	if cached != nil && cached.ExternalID != "" {
+		// The cached id lives in the cache record's namespace; the source
+		// must follow it or the response would hand back a mismatched
+		// (source, track_external_id) pair that Save would persist under the
+		// wrong namespace.
 		tExtID = cached.ExternalID
+		extSource = utils.SourceOrDefault(cached.MetadataSource)
 	}
 
 	var artists []map[string]interface{}
@@ -849,7 +862,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		"track_external_id": tExtID,
 		"album_external_id": result.AlbumExternalID,
 		"artists":           artists,
-		"source":            result.Source,
+		"source":            extSource,
 	}
 	if req.TrackID != "" {
 		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
@@ -1262,7 +1275,7 @@ func (h *MetadataHandler) buildTrackAlbums(ctx context.Context, track *domain.Tr
 func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, externalID, source string) *domain.Artist {
 	// Resolve through the shared cross-source chain (primary ID → alias →
 	// normalized name → create).
-	a, err := h.entities.FindOrCreateArtist(ctx, source, externalID, name)
+	a, err := h.entities.FindOrCreateArtist(ctx, source, externalID, name, "")
 	if err != nil {
 		return nil
 	}

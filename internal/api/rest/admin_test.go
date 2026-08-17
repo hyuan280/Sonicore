@@ -183,10 +183,12 @@ func TestAdminGetSettings(t *testing.T) {
 func TestAdminUpdateSettingsPartial(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	// only allow_registration is set
+	// only allow_registration is set; the batch commits in one transaction
+	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
 		WithArgs("allow_registration", "false").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	// then 7 reads for the response
 	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id"} {
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
@@ -215,14 +217,21 @@ func (p prefixArg) Match(v driver.Value) bool {
 func TestAdminUpdateSettingsEncryptsCookie(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
+	// The stored value must actually decrypt: GetSettings now reports a
+	// broken cookie when it cannot, so a stub would flip cookie_set to false.
+	stored, err := h.enc.Encrypt("MUSIC_U=session-token")
+	require.NoError(t, err)
+
+	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
 		WithArgs("platforms_netease_cookie", prefixArg{prefix: "enc:v1:"}).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	// response reads: cookie comes back encrypted → cookie_set true
 	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id"} {
 		val := ""
 		if k == "platforms_netease_cookie" {
-			val = "enc:v1:stub"
+			val = stored
 		}
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
 			WithArgs(k).
@@ -235,7 +244,33 @@ func TestAdminUpdateSettingsEncryptsCookie(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":true`)
+	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_error":false`)
 	assert.NotContains(t, rec.Body.String(), "MUSIC_U=session-token", "plaintext never echoed")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAdminGetSettingsReportsBrokenCookie(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	// A stored cookie that no longer decrypts (e.g. after a secret rotation
+	// or corruption) must surface as broken, not as "configured". Query order
+	// mirrors GetSettings' reads.
+	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "platforms_netease_rate_limit", "subsonic_jukebox_id"} {
+		val := ""
+		if k == "platforms_netease_cookie" {
+			val = "enc:v1:not-valid"
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
+			WithArgs(k).
+			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(val))
+	}
+
+	rec := httptest.NewRecorder()
+	h.GetSettings(rec, httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":false`)
+	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_error":true`)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -544,17 +544,17 @@ func (c *cachedSettings) get(repo *repository.SettingsRepo, key string) string {
 			// flaky DB does not force every hot-path read into the (up to
 			// 2s) synchronous query path on each call.
 			c.vals[key] = settingsCacheEntry{value: old.value, at: time.Now()}
-			log.Printf("[server] settings %q read failed: %v (using cached value)", key, err)
 			c.mu.Unlock()
+			log.Printf("[server] settings %q read failed: %v (using cached value)", key, err)
 			return old.value
 		}
-		log.Printf("[server] settings %q read failed: %v", key, err)
 		// Back off on the empty value too (cold start / never-set keys): an
 		// empty string is a safe "no override, use defaults" semantic, and
 		// caching it prevents every hot-path read from paying the 2s query
 		// during a DB outage.
 		c.vals[key] = settingsCacheEntry{value: "", at: time.Now()}
 		c.mu.Unlock()
+		log.Printf("[server] settings %q read failed: %v", key, err)
 		return ""
 	}
 	c.vals[key] = settingsCacheEntry{value: value, at: time.Now()}

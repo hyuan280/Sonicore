@@ -133,8 +133,8 @@ func TestTrackRepoFindByIDWithRelations(t *testing.T) {
 	// LoadTrackArtists
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
-			AddRow("t-001", "a-1", "main", 0, "Artist", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}).
+			AddRow("t-001", "a-1", "main", 0, "Artist", "", "musicbrainz"))
 
 	got, err := repo.FindByID(context.Background(), "t-001")
 	require.NoError(t, err)
@@ -188,8 +188,8 @@ func TestTrackRepoFindByIDs(t *testing.T) {
 
 	// Bulk artists: t-002 has one
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}).
-			AddRow("t-002", "a-2", "main", 0, "Artist2", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}).
+			AddRow("t-002", "a-2", "main", 0, "Artist2", "", "musicbrainz"))
 
 	got, err := repo.FindByIDs(context.Background(), []string{"t-001", "t-002"})
 	require.NoError(t, err)
@@ -211,7 +211,7 @@ func TestTrackRepoFindByArtistID(t *testing.T) {
 
 	// bulk loads after rows
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 

@@ -210,4 +210,22 @@ func TestScoreNeteaseTrack(t *testing.T) {
 	assert.InDelta(t, 0.8, scoreNeteaseTrack(q, neTrack("1", "晴天 (Live)", "周杰伦", "")), 1e-9)
 	// unrelated
 	assert.InDelta(t, 0.0, scoreNeteaseTrack(q, neTrack("1", "别的", "别的", "别的")), 1e-9)
+	// Query-side paren suffix trimmed symmetrically: "晴天 (Live)" matches a
+	// candidate titled "晴天 (Live)" exactly, not by containment.
+	assert.InDelta(t, 0.5, scoreNeteaseTrack(port.MetadataQuery{Title: "晴天 (Live)"}, neTrack("1", "晴天 (Live)", "", "")), 1e-9)
+	// Whole-name artist compare: a separator-bearing name matches as a unit
+	// (the API returns complete names; splitRawArtists would split "AC/DC").
+	whole := port.PlatformTrack{Platform: "netease", TrackID: "2", Title: "x", Artist: "AC/DC"}
+	whole.Artists = []port.ArtistInfo{{Name: "AC/DC"}}
+	assert.InDelta(t, 0.3, scoreNeteaseTrack(port.MetadataQuery{Artist: "AC/DC"}, whole), 1e-9, "whole-name artist matches as a unit")
+	// A multi-artist query must NOT collapse into a single combined name: the
+	// whole compare keeps separators, so "Pink, Floyd" cannot match the
+	// single artist "Pink Floyd" (normalizeForMatch would fold the comma).
+	multi := port.PlatformTrack{Platform: "netease", TrackID: "4", Title: "x", Artist: "Pink Floyd"}
+	multi.Artists = []port.ArtistInfo{{Name: "Pink Floyd"}}
+	assert.InDelta(t, 0.0, scoreNeteaseTrack(port.MetadataQuery{Artist: "Pink, Floyd"}, multi), 1e-9, "multi-artist query does not match a single combined name")
+	// Partial fallback: query "AC/DC" against a candidate carrying only "AC".
+	partial := port.PlatformTrack{Platform: "netease", TrackID: "3", Title: "x", Artist: "AC"}
+	partial.Artists = []port.ArtistInfo{{Name: "AC"}}
+	assert.InDelta(t, 0.15, scoreNeteaseTrack(port.MetadataQuery{Artist: "AC/DC"}, partial), 1e-9, "whole compare misses, split fallback gives partial credit")
 }

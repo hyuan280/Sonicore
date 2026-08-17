@@ -53,7 +53,7 @@ func expectStreamTrack(mock sqlmock.Sqlmock, rows *sqlmock.Rows) {
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 }
 
 func validSession(t *testing.T, h *StreamHandler) string {

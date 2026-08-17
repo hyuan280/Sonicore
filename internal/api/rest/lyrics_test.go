@@ -34,7 +34,7 @@ func expectTrackFindByID(mock sqlmock.Sqlmock, track *domain.Track) {
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs(track.ID).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 }
 
 func newLyricsHandler(t *testing.T) (*LyricsHandler, sqlmock.Sqlmock) {

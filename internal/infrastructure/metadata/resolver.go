@@ -11,8 +11,13 @@ import (
 )
 
 // andWordRe matches the word "and" (lowercased input) so only the standalone
-// conjunction is dropped, never the substring inside another word.
-var andWordRe = regexp.MustCompile(`\band\b`)
+// conjunction is dropped, never the substring inside another word. Go regexp
+// \b is ASCII-only, so explicit Unicode letter/number boundaries are used:
+// without them "and" between CJK characters (e.g. "梦想and现实") would be
+// treated as standalone despite being inside a mixed-script word. Underscore
+// is excluded from the boundary class to match \b's word semantics (a word
+// char), so "And_Justice_For_All" keeps its "and".
+var andWordRe = regexp.MustCompile(`(^|[^\pL\pN_])and([^\pL\pN_]|$)`)
 
 type ArtistResult struct {
 	Name       string
@@ -256,8 +261,18 @@ func normalizeForMatch(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, "&", " ")
 	// "and" only as a whole word: replacing the substring inside "Command"
-	// or "England" would silently mangle titles into false-equality.
-	s = andWordRe.ReplaceAllString(s, " ")
+	// or "England" would silently mangle titles into false-equality. The
+	// captured boundary characters are kept (replaced by a space). ReplaceAll
+	// is non-overlapping and consumes the trailing boundary, so two "and"s
+	// separated by one separator ("x and and y") would leave the second one;
+	// loop until stable (each pass strictly removes an "and", so it ends).
+	for {
+		next := andWordRe.ReplaceAllString(s, "$1 $2")
+		if next == s {
+			break
+		}
+		s = next
+	}
 	for _, r := range []string{",", ".", "!", "?", "-", "\u2013"} {
 		s = strings.ReplaceAll(s, r, " ")
 	}

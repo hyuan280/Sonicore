@@ -189,29 +189,58 @@ func searchQuery(q port.MetadataQuery) string {
 func scoreNeteaseTrack(q port.MetadataQuery, t port.PlatformTrack) float64 {
 	var score float64
 
-	if q.Title != "" {
-		if normalizeForMatch(TrimParenSuffix(t.Title)) == normalizeForMatch(q.Title) {
+	// Normalize the query side symmetrically with the candidate side: a
+	// paren-suffixed query title ("晴天 (Live)") must match the candidate's
+	// trimmed title exactly instead of falling back to containment scoring.
+	qTitle := TrimParenSuffix(q.Title)
+
+	if qTitle != "" {
+		if normalizeForMatch(TrimParenSuffix(t.Title)) == normalizeForMatch(qTitle) {
 			score += 0.5
-		} else if titlesMatch(q.Title, TrimParenSuffix(t.Title)) {
+		} else if titlesMatch(qTitle, TrimParenSuffix(t.Title)) {
 			score += 0.3
 		}
 	}
 
-	queryArtists := splitRawArtists(q.Artist)
-	if len(queryArtists) > 0 && len(t.Artists) > 0 {
-		hits := 0
-		for _, qa := range queryArtists {
-			for _, ra := range t.Artists {
-				// ra.Name is a complete artist name from the API's artist
-				// array (t.Artist is only a comma-joined derivative); no
-				// re-split, so names like "AC/DC" match as a unit.
-				if normalizeForMatch(TrimParenSuffix(ra.Name)) == normalizeForMatch(qa) {
-					hits++
-					break
-				}
+	// Artist scoring first tries the whole query artist string as one name:
+	// the API returns complete artist names, so a separator-bearing single
+	// name like "AC/DC" matches as a unit. The comparison is done on the raw
+	// string (lowercase + paren strip only, NO separator folding): folding
+	// would collapse a multi-artist tag like "Pink, Floyd" into "pink floyd"
+	// and falsely match a single artist named "Pink Floyd". Only when the
+	// whole name fails do we fall back to per-separator partial matching.
+	whole := strings.ToLower(strings.TrimSpace(TrimParenSuffix(q.Artist)))
+	wholeHit := false
+	if whole != "" {
+		for _, ra := range t.Artists {
+			if strings.ToLower(strings.TrimSpace(TrimParenSuffix(ra.Name))) == whole {
+				wholeHit = true
+				break
 			}
 		}
-		score += 0.3 * float64(hits) / float64(len(queryArtists))
+	}
+	if wholeHit {
+		score += 0.3
+	} else {
+		// Strip the paren suffix before splitting, symmetric with the whole
+		// compare above, so an artist like "林俊杰 (Live)" in a multi-artist
+		// query matches "林俊杰" instead of failing on the raw suffix.
+		queryArtists := splitRawArtists(TrimParenSuffix(q.Artist))
+		if len(queryArtists) > 0 && len(t.Artists) > 0 {
+			hits := 0
+			for _, qa := range queryArtists {
+				for _, ra := range t.Artists {
+					// ra.Name is a complete artist name from the API's artist
+					// array (t.Artist is only a comma-joined derivative); no
+					// re-split, so names like "AC/DC" match as a unit.
+					if normalizeForMatch(TrimParenSuffix(ra.Name)) == normalizeForMatch(qa) {
+						hits++
+						break
+					}
+				}
+			}
+			score += 0.3 * float64(hits) / float64(len(queryArtists))
+		}
 	}
 
 	if q.Album != "" && t.Album != "" && titlesMatch(q.Album, t.Album) {

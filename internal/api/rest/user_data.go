@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -132,7 +133,10 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			var coverID sql.NullString
 			var version int
 			var versionLabel, extID, metaSource string
-			rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &extID, &metaSource)
+			if err := rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &extID, &metaSource); err != nil {
+				log.Printf("[favorites] scan row error: %v", err)
+				continue
+			}
 			item := map[string]interface{}{
 				"item_type": t, "item_id": id, "created_at": ca,
 				"title": title, "duration": duration, "suffix": fileFormat,
@@ -861,19 +865,20 @@ func (h *UserDataHandler) SaveQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 type trackSummary struct {
-	ID           string  `json:"id"`
-	Title        string  `json:"title"`
-	Artist       string  `json:"artist"`
-	Album        string  `json:"album"`
-	AlbumID      string  `json:"album_id"`
-	Duration     float64 `json:"duration"`
-	Suffix       string  `json:"suffix"`
-	CoverImageID *string `json:"cover_image_id,omitempty"`
-	DiscNumber   int     `json:"disc_number,omitempty"`
-	TrackNumber  int     `json:"track,omitempty"`
-	Version      int     `json:"version"`
-	VersionLabel string  `json:"version_label"`
-	ExternalID   string  `json:"external_id"`
+	ID             string  `json:"id"`
+	Title          string  `json:"title"`
+	Artist         string  `json:"artist"`
+	Album          string  `json:"album"`
+	AlbumID        string  `json:"album_id"`
+	Duration       float64 `json:"duration"`
+	Suffix         string  `json:"suffix"`
+	CoverImageID   *string `json:"cover_image_id,omitempty"`
+	DiscNumber     int     `json:"disc_number,omitempty"`
+	TrackNumber    int     `json:"track,omitempty"`
+	Version        int     `json:"version"`
+	VersionLabel   string  `json:"version_label"`
+	ExternalID     string  `json:"external_id"`
+	MetadataSource string  `json:"metadata_source"`
 }
 
 func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
@@ -926,8 +931,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t trackSummary
 		var coverID sql.NullString
-		var metaSource string
-		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber, &t.Version, &t.VersionLabel, &t.ExternalID, &metaSource); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.AlbumID, &t.Duration, &t.Suffix, &coverID, &t.TrackNumber, &t.DiscNumber, &t.Version, &t.VersionLabel, &t.ExternalID, &t.MetadataSource); err != nil {
 			continue
 		}
 		item := map[string]interface{}{
@@ -939,7 +943,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 			"version":         t.Version,
 			"version_label":   t.VersionLabel,
 			"external_id":     t.ExternalID,
-			"metadata_source": metaSource,
+			"metadata_source": t.MetadataSource,
 		}
 		if t.AlbumID != "" {
 			item["albums"] = []map[string]interface{}{{"id": t.AlbumID, "title": t.Album, "track": t.TrackNumber, "disc_number": t.DiscNumber}}

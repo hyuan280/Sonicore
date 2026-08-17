@@ -123,7 +123,7 @@ func TestFindOrCreateArtistCreates(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	a, err := er.FindOrCreateArtist(context.Background(), "netease", "6452", "周杰伦")
+	a, err := er.FindOrCreateArtist(context.Background(), "netease", "6452", "周杰伦", "CN")
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	assert.Equal(t, "netease", a.MetadataSource)
@@ -216,7 +216,7 @@ func TestFindOrCreateArtistEmptyNameReusesUnknown(t *testing.T) {
 		WithArgs("unknownartist").
 		WillReturnRows(artistRow("a-unk", "Unknown Artist", "", "musicbrainz", `{}`))
 
-	a, err := er.FindOrCreateArtist(context.Background(), "netease", "", "")
+	a, err := er.FindOrCreateArtist(context.Background(), "netease", "", "", "")
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	assert.Equal(t, "a-unk", a.ID)

@@ -186,7 +186,7 @@ func TestCoverMissingFileTriesOnDemandThen404(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 
 	rec := httptest.NewRecorder()
 	h.Serve(rec, coverRequest(sess, "img-1"))

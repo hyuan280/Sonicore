@@ -88,6 +88,9 @@ func RunMigrations(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_images_owner ON images(owner_type, owner_id);
 	CREATE INDEX IF NOT EXISTS idx_images_owner_path ON images(owner_type, path);
 	CREATE INDEX IF NOT EXISTS idx_images_hash ON images(hash);
+	-- CountPathExcept filters on path alone (orphan sweep), which cannot use
+	-- the (owner_type, path) composite index's leftmost prefix.
+	CREATE INDEX IF NOT EXISTS idx_images_path ON images(path);
 
 	CREATE TABLE IF NOT EXISTS artists (
 		id         VARCHAR(26) PRIMARY KEY,

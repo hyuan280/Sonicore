@@ -40,7 +40,12 @@ func TestNormalizeForMatch(t *testing.T) {
 	assert.Equal(t, "a b", normalizeForMatch("A&B"), "ampersand replaced with space")
 	assert.Equal(t, "x y", normalizeForMatch("x–y"))
 	assert.Equal(t, "a b", normalizeForMatch("a and b"), "standalone 'and' dropped")
+	assert.Equal(t, "x y", normalizeForMatch("x and and y"), "consecutive 'and's all dropped")
+	assert.Equal(t, "", normalizeForMatch("and and"), "leading consecutive 'and's all dropped")
 	assert.Equal(t, "command", normalizeForMatch("Command"), "'and' inside a word is kept")
+	assert.Equal(t, "梦想and现实", normalizeForMatch("梦想and现实"), "mixed-script 'and' is not a standalone word")
+	assert.Equal(t, "ロックandダンス", normalizeForMatch("ロックandダンス"), "mixed-script 'and' is not a standalone word")
+	assert.Equal(t, "and_justice_for_all", normalizeForMatch("And_Justice_For_All"), "underscore is a word char, not a boundary")
 	assert.Equal(t, "", normalizeForMatch("  "))
 }
 

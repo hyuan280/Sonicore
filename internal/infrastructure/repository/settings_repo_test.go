@@ -61,3 +61,27 @@ func TestSettingsRepoSet(t *testing.T) {
 	require.NoError(t, repo.Set(context.Background(), "registration", "disabled"))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestSettingsRepoSetMany(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewSettingsRepo(db)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
+		WithArgs("a", "1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
+		WithArgs("b", "2").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, repo.SetMany(context.Background(), map[string]string{"a": "1", "b": "2"}))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSettingsRepoSetManyEmpty(t *testing.T) {
+	db, _ := newMockDB(t)
+	repo := NewSettingsRepo(db)
+
+	require.NoError(t, repo.SetMany(context.Background(), nil))
+}

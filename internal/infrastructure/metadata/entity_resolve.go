@@ -76,8 +76,10 @@ func (e *EntityResolver) FindArtist(ctx context.Context, source, externalID, nam
 
 // FindOrCreateArtist resolves like FindArtist and creates a new record when
 // nothing matched. The new record is stored under the given source with the
-// external ID as its primary identifier.
-func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externalID, name string) (*domain.Artist, error) {
+// external ID as its primary identifier, prefilling the country so a brand-new
+// artist is created with its final values (avoiding an INSERT followed by an
+// UPDATE from the scanner's backfill, which then only serves existing rows).
+func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externalID, name, country string) (*domain.Artist, error) {
 	source = utils.SourceOrDefault(source)
 	// Apply the placeholder before lookup so an existing "Unknown Artist"
 	// row is found by its normalized name and reused instead of creating one
@@ -96,6 +98,7 @@ func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externa
 		SortName:       name,
 		ExternalID:     externalID,
 		MetadataSource: source,
+		Country:        country,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

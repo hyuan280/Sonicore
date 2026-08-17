@@ -50,10 +50,6 @@ func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string
 		return ""
 	}
 
-	keywords := []string{"live", "acoustic", "remaster", "remastered", "deluxe", "bonus",
-		"demo", "instrumental", "edit", "extended", "mix", "radio", "karaoke", "unplugged",
-		"anniversary", "orchestral", "piano", "reprise"}
-
 	dir := strings.ToLower(filepath.Base(filepath.Dir(filePath)))
 	stem := strings.ToLower(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
 
@@ -61,9 +57,11 @@ func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string
 	// track title, so substring matching would mislabel ordinary titles
 	// ("Radio Ga Ga"→radio, "Live Forever"→live, "Piano Man"→piano) and words
 	// merely containing a keyword ("Deliverance"→live, "Credits"→edit,
-	// "Remix"/"Mixtape"→mix). The title/album/artist tokens are blacklisted
-	// (the same way extractFromPath does) so the track's own name never
-	// produces a label.
+	// "Remix"/"Mixtape"→mix). The title/album/artist tokens are always
+	// blacklisted (the same way extractFromPath does) so the track's own name
+	// never produces a label: if the title already carries a version marker
+	// ("Song (Live)"), a "Live" label is redundant, and a filename-derived
+	// title must not be re-labeled from its own tokens either.
 	blacklist := make(map[string]bool)
 	for _, raw := range []string{title, album, artist} {
 		for _, tok := range splitByPunct(raw) {
@@ -77,10 +75,8 @@ func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string
 		if lower == "" || len(lower) <= 1 || isYear(lower) || blacklist[lower] {
 			continue
 		}
-		for _, kw := range keywords {
-			if lower == kw {
-				return fmt.Sprintf("%s · %s%s", titleCase(kw), strings.ToUpper(fileFormat), versionBitRate(bitRate))
-			}
+		if versionKeyword(lower) {
+			return fmt.Sprintf("%s · %s%s", titleCase(lower), strings.ToUpper(fileFormat), versionBitRate(bitRate))
 		}
 	}
 
@@ -108,7 +104,10 @@ func extractFromPath(dir, stem, title, artist, album, filePath string) string {
 	// Blacklist the known fields (title/album/artist) split the same way the
 	// path tokens are (punctuation-aware), so names like "司夏,河图" or
 	// "Poppin'Party,Glitter*Green" are excluded piece by piece instead of
-	// leaking their trailing parts into the version label.
+	// leaking their trailing parts into the version label. Title is always
+	// excluded here (unlike the keyword pass in ExtractVersionLabel, which
+	// deliberately keeps a filename-derived title searchable): this fallback
+	// must not join a tag-less file's whole stem into a fake label.
 	for _, raw := range []string{title, album, artist} {
 		for _, tok := range splitByPunct(raw) {
 			if len(tok) > 1 {
@@ -125,7 +124,13 @@ func extractFromPath(dir, stem, title, artist, album, filePath string) string {
 	blacklist["track"] = true
 
 	tokens := splitByPunct(dir + " " + stem)
+	// The fallback joins every surviving token (deduplicated) as the label.
+	// Version keywords are NOT matched here: ExtractVersionLabel already ran
+	// the identical token scan against a smaller blacklist before calling
+	// this fallback, so any version keyword that survives would have been
+	// caught and returned upstream — matching it again would be dead code.
 	var kept []string
+	seen := make(map[string]bool)
 	for _, tok := range tokens {
 		lower := strings.ToLower(tok)
 		if lower == "" || len(lower) <= 1 {
@@ -137,12 +142,29 @@ func extractFromPath(dir, stem, title, artist, album, filePath string) string {
 		if blacklist[lower] {
 			continue
 		}
+		// Collapse duplicate tokens ("Song / Song") instead of repeating them.
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
 		kept = append(kept, titleCase(tok))
 	}
 	if len(kept) == 0 {
 		return ""
 	}
 	return strings.Join(kept, ", ")
+}
+
+// versionKeyword reports whether s is one of the version markers used for
+// version labels.
+func versionKeyword(s string) bool {
+	switch s {
+	case "live", "acoustic", "remaster", "remastered", "deluxe", "bonus",
+		"demo", "instrumental", "edit", "extended", "mix", "radio", "karaoke",
+		"unplugged", "anniversary", "orchestral", "piano", "reprise":
+		return true
+	}
+	return false
 }
 
 func splitByPunct(s string) []string {

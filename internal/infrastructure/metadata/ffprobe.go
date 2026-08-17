@@ -254,16 +254,27 @@ func splitArtistNames(artist string) []string {
 	if artist == "" || artist == "Unknown Artist" {
 		return nil
 	}
+	var parts []string
 	if strings.Contains(artist, "/") {
-		return splitTrim(artist, "/")
+		parts = splitTrim(artist, "/")
+	} else if strings.Contains(artist, ",") {
+		parts = splitTrim(artist, ",")
+	} else if strings.Contains(artist, ";") {
+		parts = splitTrim(artist, ";")
+	} else {
+		parts = []string{artist}
 	}
-	if strings.Contains(artist, ",") {
-		return splitTrim(artist, ",")
+	// Drop placeholder "Unknown Artist" components (case/space-insensitive) so
+	// a tag like "Real Artist, Unknown Artist" never persists a placeholder
+	// performer association for a track that was actually matched.
+	var out []string
+	for _, p := range parts {
+		if strings.EqualFold(strings.TrimSpace(p), "Unknown Artist") {
+			continue
+		}
+		out = append(out, p)
 	}
-	if strings.Contains(artist, ";") {
-		return splitTrim(artist, ";")
-	}
-	return []string{artist}
+	return out
 }
 
 func splitTrim(s, sep string) []string {

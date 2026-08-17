@@ -16,16 +16,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/sonicore/server/internal/config"
 )
 
 // storedPrefix marks an encrypted value in server_settings. Values without
 // it are treated as legacy plaintext.
 const storedPrefix = "enc:v1:"
-
-// defaultPlaceholder is the jwt.secret value shipped in config.example.toml.
-// It is publicly known, so a deployment that leaves it in place lets anyone
-// derive the at-rest encryption key; it is rejected outright.
-const defaultPlaceholder = "change-me-in-production-0123456789abcdef0123456789"
 
 // hkdfInfo is the HKDF domain-separation label so the same master secret can
 // serve encryption without reusing key material elsewhere.
@@ -45,7 +42,7 @@ type Encryptor struct {
 // rejected at construction. The error lets callers fail startup with an
 // actionable message instead of crashing the process.
 func New(master []byte) (*Encryptor, error) {
-	if string(master) == defaultPlaceholder {
+	if string(master) == config.JWTSecretPlaceholder {
 		return nil, errors.New("secrets: jwt.secret is the built-in placeholder — replace it with a random value of at least 32 bytes (`openssl rand -hex 32`)")
 	}
 	if len(master) < 32 {

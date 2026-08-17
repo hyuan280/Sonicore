@@ -77,7 +77,33 @@ func TestExtractFromPath(t *testing.T) {
 			artist:   "My Band",
 			album:    "Album",
 			filePath: "/music/My Band/Album 2020/Song (Live in Paris).flac",
-			want:     "Music, Live, In, Paris",
+			// This fallback is only reached when ExtractVersionLabel's keyword
+			// scan found nothing; it joins every surviving token.
+			want: "Music, Live, In, Paris",
+		},
+		{
+			name:     "untagged filename-derived title kept out of the fallback label",
+			dir:      "/music",
+			stem:     "Song (Live)",
+			title:    "Song (Live)",
+			artist:   "",
+			album:    "",
+			filePath: "/music/Song (Live).flac",
+			// The fallback never joins a tag-less file's whole stem into a
+			// fake label: title tokens are always blacklisted here. Version
+			// detection for untagged files lives in ExtractVersionLabel's
+			// keyword pass, not in this fallback.
+			want: "Music",
+		},
+		{
+			name:     "version keyword in album/artist is blacklisted",
+			dir:      "/music",
+			stem:     "Song",
+			title:    "Song",
+			artist:   "Live",
+			album:    "Deluxe Edition",
+			filePath: "/music/Song.flac",
+			want:     "Music", // "live" belongs to the artist, not a version marker
 		},
 		{
 			name:     "year dropped",
@@ -242,6 +268,10 @@ func TestMergeKey(t *testing.T) {
 	assert.False(t, ok, "unknown album disqualified")
 	_, ok = mergeKey("Song", "Album", "Unknown Artist")
 	assert.False(t, ok, "unknown artist disqualified")
+	_, ok = mergeKey("Song", "Album", "Unknown Artist\x1fJohn Doe")
+	assert.False(t, ok, "unknown component among multi-artist disqualified")
+	_, ok = mergeKey("Song", "Unknown Album\x1fGreatest Hits", "Artist")
+	assert.False(t, ok, "unknown album component among multi-album disqualified")
 }
 
 func TestSourcePriority(t *testing.T) {

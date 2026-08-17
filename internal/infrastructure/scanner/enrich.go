@@ -71,10 +71,20 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 					}
 					track.ExternalIDs[src] = track.ExternalID
 				}
+				oldSrc := track.MetadataSource
+				if oldSrc == "" {
+					oldSrc = metadata.SourceMusicBrainz
+				}
 				track.MetadataSource = enrichment.Source
 				if enrichment.TrackExternalID != "" {
 					track.SetExternalID(enrichment.TrackExternalID)
-				} else if track.ExternalID != "" {
+				} else if track.ExternalID != "" && oldSrc != enrichment.Source {
+					// A real namespace change with no new id: clear the old
+					// primary (already preserved as an alias above). When the
+					// old source normalizes to the new one (legacy empty →
+					// musicbrainz), the id already lives in the target
+					// namespace, so clearing it would delete the primary AND
+					// its just-written same-key alias together.
 					track.SetExternalID("")
 				}
 				changed = true
@@ -188,7 +198,11 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 				}
 			}
 		}
-		if enrichment.AlbumExternalID != "" && len(track.Albums) > 0 {
+		// No AlbumExternalID gate: sources like the user cache enrich the
+		// album by title/year/genre only (they never carry an album external
+		// id), and those corrections must still land on the album row. Each
+		// field below guards its own value.
+		if len(track.Albums) > 0 {
 			album, err := albumRepo.FindByID(ctx, track.Albums[0].AlbumID)
 			if err != nil {
 				log.Printf("[scan] album lookup for enrichment %s: %v", track.Albums[0].AlbumID, err)

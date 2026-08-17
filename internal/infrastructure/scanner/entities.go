@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"log"
 
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
@@ -29,12 +30,16 @@ func findOrCreateArtist(ctx context.Context, er *metadata.EntityResolver, artist
 		source = metadata.SourceMusicBrainz
 	}
 
-	artist, err := er.FindOrCreateArtist(ctx, source, externalID, name)
+	artist, err := er.FindOrCreateArtist(ctx, source, externalID, name, artistCountry(enrichment))
 	if err != nil {
 		return nil, err
 	}
 
 	if enrichment != nil {
+		// Snapshot the pre-backfill values so a failed write rolls the
+		// in-memory artist back to the persisted state (matching the album
+		// backfill and the mergeArtistID convention).
+		oldName, oldSortName, oldCountry := artist.Name, artist.SortName, artist.Country
 		updated := false
 		if (artist.Name == "" || artist.Name == "Unknown Artist") && enrichment.Artist != "" {
 			artist.Name = enrichment.Artist
@@ -46,8 +51,13 @@ func findOrCreateArtist(ctx context.Context, er *metadata.EntityResolver, artist
 			updated = true
 		}
 		if updated {
+			// Same best-effort semantics as the album backfill: a transient
+			// write failure must not drop the track creation upstream (a
+			// failed main performer would leave primaryPerformerID empty),
+			// so log, roll back and return the artist.
 			if err := artistRepo.Update(ctx, artist); err != nil {
-				return nil, err
+				artist.Name, artist.SortName, artist.Country = oldName, oldSortName, oldCountry
+				log.Printf("[scan] artist backfill update error: %v", err)
 			}
 		}
 	}
@@ -93,6 +103,11 @@ func findOrCreateAlbum(ctx context.Context, er *metadata.EntityResolver, albumRe
 	}
 
 	if enrichment != nil {
+		// Snapshot the pre-backfill values so a failed write can roll the
+		// in-memory object back to match the persisted row (the convention
+		// mergeAlbumID follows), instead of handing callers values that were
+		// never persisted.
+		oldTitle, oldYear, oldGenre, oldCountry := album.Title, album.Year, album.Genre, album.Country
 		updated := false
 		if album.Title == "Unknown Album" && enrichment.Album != "" {
 			album.Title = enrichment.Album
@@ -111,8 +126,13 @@ func findOrCreateAlbum(ctx context.Context, er *metadata.EntityResolver, albumRe
 			updated = true
 		}
 		if updated {
+			// A backfill update is an optional metadata enhancement; a
+			// transient write failure must not fail the album (which would
+			// drop the whole track creation upstream), so it is logged, the
+			// in-memory values are rolled back, and the album is returned.
 			if err := albumRepo.Update(ctx, album); err != nil {
-				return nil, err
+				album.Title, album.Year, album.Genre, album.Country = oldTitle, oldYear, oldGenre, oldCountry
+				log.Printf("[scan] album backfill update error: %v", err)
 			}
 		}
 	}
@@ -122,6 +142,13 @@ func findOrCreateAlbum(ctx context.Context, er *metadata.EntityResolver, albumRe
 func albumCountry(enrichment *metadata.EnrichmentResult) string {
 	if enrichment != nil {
 		return enrichment.AlbumCountry
+	}
+	return ""
+}
+
+func artistCountry(enrichment *metadata.EnrichmentResult) string {
+	if enrichment != nil {
+		return enrichment.ArtistCountry
 	}
 	return ""
 }

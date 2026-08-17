@@ -153,15 +153,16 @@ export default function AdminPage() {
           <button onClick={async () => {
             setMbSaving(true); setMbError("")
             try {
+              // An empty API URL or rate limit is sent verbatim so clearing a
+              // field resets it to the server's config default (the backend
+              // treats an empty stored value as "no override").
               await api.admin.updateSettings({
                 metadata_musicbrainz_enabled: mbEnabled,
-                metadata_musicbrainz_api_url: mbApiUrl || undefined,
-                // An empty rate limit is sent verbatim so clearing the field
-                // resets the provider to the config default.
+                metadata_musicbrainz_api_url: mbApiUrl,
                 metadata_musicbrainz_rate_limit: mbRateLimit,
               })
               setMbModified(false)
-              setMbInit({ enabled: mbEnabled, apiUrl: mbApiUrl || mbInit.apiUrl, rateLimit: mbRateLimit })
+              setMbInit({ enabled: mbEnabled, apiUrl: mbApiUrl, rateLimit: mbRateLimit })
             } catch (err) { setMbError(translateApiError(t, err)) }
             setMbSaving(false)
           }} disabled={mbSaving}
