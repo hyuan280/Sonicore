@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/core/domain"
 )
 
@@ -104,15 +106,35 @@ func (r *ImageRepo) DeleteByOwner(ctx context.Context, ownerType, ownerID string
 	return err
 }
 
-// CountPathExcept reports how many image rows other than excludeID reference
-// the given path. Used by the orphan sweep so a shared file (e.g. an album
-// cover pointing at a live track's original) is never removed out from under
-// a still-valid row.
-func (r *ImageRepo) CountPathExcept(ctx context.Context, path, excludeID string) (int, error) {
-	var n int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM images WHERE path = $1 AND id != $2`, path, excludeID).Scan(&n)
-	return n, err
+// SharedPaths reports which of the given paths are referenced by at least one
+// image row outside the excluded set. Used by the orphan sweep so a shared
+// file (e.g. an album cover pointing at a live track's original) is never
+// removed out from under a still-valid row. excludedIDs is the orphan snapshot:
+// rows belonging to those orphans are about to be deleted by the same sweep and
+// must not count as a live reference — a path referenced only by snapshot
+// orphans is absent from the result and therefore removable (the sweep's
+// idempotent os.Remove cleans it up once, regardless of how many orphans
+// reference it).
+func (r *ImageRepo) SharedPaths(ctx context.Context, paths, excludedIDs []string) (map[string]struct{}, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT path FROM images WHERE path = ANY($1) AND id != ALL($2)`,
+		pq.Array(paths), pq.Array(excludedIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	shared := make(map[string]struct{})
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		shared[p] = struct{}{}
+	}
+	return shared, rows.Err()
 }
 
 // Update refreshes the mutable metadata of an image row (used when a track

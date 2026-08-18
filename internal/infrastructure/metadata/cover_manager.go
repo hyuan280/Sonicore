@@ -1042,58 +1042,109 @@ func (m *CoverManager) DeleteArtistCovers(ctx context.Context, artistID string) 
 // the sweep continues, so one stuck row cannot block the rest. Physical files
 // are only removed when no other (live) images row still references them —
 // album covers share a track's original path and must not be deleted out
-// from under the track.
+// from under the track. The orphan snapshot and the shared-path count run
+// outside extractMu; only each orphan's file removal + row delete take the
+// lock, in a short critical section, so a slow sweep does not serialize
+// concurrent cover restores/imports for its whole duration.
 func (m *CoverManager) SweepOrphanCovers(ctx context.Context) error {
-	m.extractMu.Lock()
-	defer m.extractMu.Unlock()
-
+	// Snapshot the orphan set outside the lock: orphan-ness only ever grows
+	// (owners are never resurrected with the same id), so a row missed here is
+	// caught by the next sweep. Holding no lock during the read keeps a slow
+	// maintenance pass from serializing concurrent cover restores/imports.
 	imgs, err := m.images.FindOrphans(ctx)
 	if err != nil {
 		return err
 	}
-	for _, img := range imgs {
-		// Remove the files while the row still exists: a failed file removal
-		// keeps the row so the next sweep retries. (Deleting the row first
-		// would leak the files permanently — FindOrphans can no longer see
-		// them.) Only after every file was handled is the row dropped; a
-		// failed row deletion leaves the row pointing at already-gone files,
-		// which the next sweep self-heals via idempotent removes.
-		if err := m.removeOrphanCoverFiles(ctx, img); err != nil {
-			log.Printf("[cover] orphan cover files for %s kept for retry: %v", img.ID, err)
-			continue
+
+	// Batch the shared-path detection into a single query (the old per-path
+	// CountPathExcept was N×M round trips). "Shared" means referenced by a live
+	// (non-snapshot) row: the orphan IDs are excluded so a path referenced only
+	// by orphans being swept in this pass counts as removable — the idempotent
+	// os.Remove below cleans the file up on the first orphan and the later ones
+	// no-op. Concurrent imports only ever write deterministic paths of live
+	// owners, never orphan paths, so a path classified removable here cannot be
+	// re-referenced by a live row before the file is deleted; the only stale
+	// snapshot risk is the reverse (a live reference disappearing mid-sweep via
+	// a concurrent deletion), which leaves an unreferenced file on disk — the
+	// same benign leak the previous whole-sweep lock allowed when the live row
+	// was deleted after the sweep, just without the unbounded blocking.
+	shared := map[string]struct{}{}
+	if len(imgs) > 0 {
+		var paths, orphanIDs []string
+		for _, img := range imgs {
+			orphanIDs = append(orphanIDs, img.ID)
+			paths = append(paths, img.Path)
+			for _, v := range img.Variants {
+				if v.Path != "" {
+					paths = append(paths, v.Path)
+				}
+			}
 		}
-		if err := m.images.Delete(ctx, img.ID); err != nil {
-			log.Printf("[cover] delete orphan images row %s: %v", img.ID, err)
+		s, err := m.images.SharedPaths(ctx, paths, orphanIDs)
+		if err != nil {
+			// Uncertain shared state: never remove a file we could not verify
+			// (that would risk deleting a live row's cover). Keep every row;
+			// the next sweep retries.
+			log.Printf("[cover] orphan shared-path check error, sweep deferred: %v", err)
+			return nil
+		}
+		shared = s
+	}
+
+	for _, img := range imgs {
+		// Short critical section per orphan: only this one row's file removal
+		// and row deletion are serialized against concurrent imports/
+		// backfills, so a waiting HTTP cover restore blocks for at most one
+		// orphan instead of the whole sweep.
+		if err := m.sweepOrphan(ctx, img, shared); err != nil {
+			// File removal failure keeps the row for a later retry; a row
+			// delete failure leaves the row pointing at already-gone files,
+			// which the next sweep self-heals via idempotent removes.
+			log.Printf("[cover] orphan cover %s kept for retry: %v", img.ID, err)
 		}
 	}
 	return nil
 }
 
+// sweepOrphan removes one orphan's files and then its row, holding extractMu
+// for the duration. The lock is released with defer so an early return or a
+// panic inside the critical section cannot leak it and stall every cover
+// restore/import. Files are removed while the row still exists: a failed
+// removal keeps the row so the next sweep retries. (Deleting the row first
+// would leak the files permanently — FindOrphans can no longer see them.) Only
+// after every file was handled is the row dropped.
+func (m *CoverManager) sweepOrphan(ctx context.Context, img domain.Image, shared map[string]struct{}) error {
+	m.extractMu.Lock()
+	defer m.extractMu.Unlock()
+
+	if err := m.removeOrphanCoverFiles(ctx, img, shared); err != nil {
+		return err
+	}
+	return m.images.Delete(ctx, img.ID)
+}
+
 // removeOrphanCoverFiles deletes an orphan's own files, skipping any path
-// still referenced by another images row (album rows share a track's
-// original). An error is returned when any path could not be counted or
-// removed, so the caller keeps the row and retries next sweep. A path still
-// referenced by a live row is not an error — the shared file is kept and the
-// row is still safe to drop.
-func (m *CoverManager) removeOrphanCoverFiles(ctx context.Context, img domain.Image) error {
+// still referenced by a live image row (shared — e.g. album rows sharing a
+// live track's original). Multiple orphans may share a path among themselves
+// (both were referencing the same deleted track original); the idempotent
+// os.Remove means the first one removes the file and the rest no-op, so no
+// per-orphan reference bookkeeping is needed. An error is returned when any
+// path could not be removed, so the caller keeps the row and retries next
+// sweep. A shared path is not an error — the file is kept and the row is still
+// safe to drop. Caller must hold extractMu.
+func (m *CoverManager) removeOrphanCoverFiles(ctx context.Context, img domain.Image, shared map[string]struct{}) error {
 	paths := []string{img.Path}
 	for _, v := range img.Variants {
-		paths = append(paths, v.Path)
+		if v.Path != "" {
+			paths = append(paths, v.Path)
+		}
 	}
 	retry := false
 	for _, p := range paths {
 		if p == "" {
 			continue
 		}
-		n, err := m.images.CountPathExcept(ctx, p, img.ID)
-		if err != nil {
-			// A failed count leaves the file on disk; keep the row so the
-			// leak stays retryable and observable.
-			log.Printf("[cover] count refs for orphan cover %s: %v", p, err)
-			retry = true
-			continue
-		}
-		if n > 0 {
+		if _, isShared := shared[p]; isShared {
 			continue // still referenced by a live row; keep the file
 		}
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {

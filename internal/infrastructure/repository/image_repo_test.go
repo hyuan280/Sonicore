@@ -11,6 +11,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestImageRepoSharedPaths(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewImageRepo(db)
+	q := regexp.QuoteMeta(`SELECT DISTINCT path FROM images WHERE path = ANY($1) AND id != ALL($2)`)
+	mock.ExpectQuery(q).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"path"}).
+			AddRow("/img/lib-1/track_live-1.jpg"))
+
+	got, err := repo.SharedPaths(context.Background(), []string{
+		"/img/lib-1/track_live-1.jpg",
+		"/img/lib-1/track_gone-1_64.jpg",
+	}, []string{"img-orphan-1", "img-orphan-2"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]struct{}{"/img/lib-1/track_live-1.jpg": {}}, got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestImageRepoSharedPathsEmpty(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := NewImageRepo(db)
+	got, err := repo.SharedPaths(context.Background(), nil, nil)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+	require.NoError(t, mock.ExpectationsWereMet(), "no query for an empty path set")
+}
+
 func TestImageRepoFindOrphans(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

@@ -69,10 +69,11 @@ func TestSweepOrphanCovers(t *testing.T) {
 		}).AddRow("img-1", "lib-1", "track", "gone-1", "embed", orphanPath, "jpg", 600, 600, 1234, "h1",
 			`[{"path":"`+variantPath+`","width":64,"height":64,"size":100}]`, now, now))
 	// Files are removed before the row (so a failed removal stays retryable);
-	// both paths count as unreferenced, then the row is deleted.
-	countQ := regexp.QuoteMeta(`SELECT COUNT(*) FROM images WHERE path = $1 AND id != $2`)
-	mock.ExpectQuery(countQ).WithArgs(orphanPath, "img-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery(countQ).WithArgs(variantPath, "img-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	// the batched shared-path check reports nothing shared, then the row is
+	// deleted.
+	sharedQ := regexp.QuoteMeta(`SELECT DISTINCT path FROM images WHERE path = ANY($1) AND id != ALL($2)`)
+	mock.ExpectQuery(sharedQ).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"path"}))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM images WHERE id = $1`)).
 		WithArgs("img-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -112,8 +113,8 @@ func TestSweepOrphanCoversKeepsSharedFile(t *testing.T) {
 		}).AddRow("img-alb", nil, "album", "gone-alb", "backfill", sharedPath, "jpg", 600, 600, 1234, "h1", "[]", now, now))
 	// The path is still referenced by the live track row → file must survive,
 	// but the shared reference is not a failure, so the orphan row is deleted.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM images WHERE path = $1 AND id != $2`)).
-		WithArgs(sharedPath, "img-alb").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT DISTINCT path FROM images WHERE path = ANY($1) AND id != ALL($2)`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"path"}).AddRow(sharedPath))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM images WHERE id = $1`)).
 		WithArgs("img-alb").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -153,8 +154,8 @@ func TestSweepOrphanCoversKeepsRowWhenFileRemovalFails(t *testing.T) {
 		}).AddRow("img-2", "lib-1", "track", "gone-2", "embed", stuckPath, "jpg", 600, 600, 1234, "h1", "[]", now, now))
 	// Unreferenced, but os.Remove fails (non-empty directory) → the row must
 	// be retained so the next sweep retries: no DELETE is expected.
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM images WHERE path = $1 AND id != $2`)).
-		WithArgs(stuckPath, "img-2").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT DISTINCT path FROM images WHERE path = ANY($1) AND id != ALL($2)`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"path"}))
 
 	m := &CoverManager{imagesDir: imagesDir, images: repository.NewImageRepo(db)}
 	require.NoError(t, m.SweepOrphanCovers(context.Background()))
@@ -162,6 +163,56 @@ func TestSweepOrphanCoversKeepsRowWhenFileRemovalFails(t *testing.T) {
 	_, err = os.Stat(stuckPath)
 	assert.NoError(t, err, "file that could not be removed survives")
 	require.NoError(t, mock.ExpectationsWereMet(), "no row delete happens so the leak stays retryable")
+}
+
+// Two orphans in the same snapshot reference the same path (e.g. an orphaned
+// track row and an orphaned album row both pointing at a deleted track's
+// original). The batched shared-path check excludes snapshot orphans, so the
+// path is not shared and must be removed: the first orphan deletes the file,
+// the second's idempotent os.Remove no-ops, and both rows are dropped. This
+// guards the regression where a "referenced more than once" count kept the
+// file for both orphans and leaked it permanently.
+func TestSweepOrphanCoversRemovesFileSharedOnlyByOrphans(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	imagesDir := t.TempDir()
+	sharedPath := filepath.Join(imagesDir, "lib-1", "track_gone-3.jpg")
+	require.NoError(t, os.MkdirAll(filepath.Dir(sharedPath), 0755))
+	require.NoError(t, os.WriteFile(sharedPath, []byte("jpeg"), 0644))
+
+	now := time.Date(2024, 10, 1, 20, 0, 0, 0, time.UTC)
+	findQuery := regexp.QuoteMeta(`SELECT id, library_id, owner_type, owner_id, source, path,
+		 format, width, height, size, hash, variants, created_at, updated_at
+		 FROM images
+		 WHERE (owner_type = 'track' AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = images.owner_id))
+		    OR (owner_type = 'album' AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.id = images.owner_id))
+		    OR (owner_type = 'artist' AND NOT EXISTS (SELECT 1 FROM artists ar WHERE ar.id = images.owner_id))`)
+	mock.ExpectQuery(findQuery).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "library_id", "owner_type", "owner_id", "source", "path",
+			"format", "width", "height", "size", "hash", "variants", "created_at", "updated_at",
+		}).
+			AddRow("img-track", "lib-1", "track", "gone-3", "embed", sharedPath, "jpg", 600, 600, 1234, "h1", "[]", now, now).
+			AddRow("img-alb", nil, "album", "gone-alb", "backfill", sharedPath, "jpg", 600, 600, 1234, "h1", "[]", now, now))
+	// Both snapshot orphans are excluded → the path is not shared, so each
+	// orphan removes the file (idempotently) and then its row.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT DISTINCT path FROM images WHERE path = ANY($1) AND id != ALL($2)`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"path"}))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM images WHERE id = $1`)).
+		WithArgs("img-track").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM images WHERE id = $1`)).
+		WithArgs("img-alb").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	m := &CoverManager{imagesDir: imagesDir, images: repository.NewImageRepo(db)}
+	require.NoError(t, m.SweepOrphanCovers(context.Background()))
+
+	_, err = os.Stat(sharedPath)
+	assert.True(t, os.IsNotExist(err), "file shared only by orphans removed")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestCoverPath(t *testing.T) {
