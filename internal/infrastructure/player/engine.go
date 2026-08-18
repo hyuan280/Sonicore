@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	audioDriver     string
-	driverChecked   bool
-	driverCheckMu   sync.Mutex
+	audioDriver   string
+	driverChecked bool
+	driverCheckMu sync.Mutex
 )
 
 func detectAudioDriver() string {
@@ -55,12 +55,12 @@ type State string
 type PlayMode string
 
 const (
-	StateStopped    State    = "stopped"
-	StatePlaying    State    = "playing"
-	ModeNormal      PlayMode = "normal"
-	ModeRepeatAll   PlayMode = "repeat_all"
-	ModeRepeatOne   PlayMode = "repeat_one"
-	ModeShuffle     PlayMode = "shuffle"
+	StateStopped  State    = "stopped"
+	StatePlaying  State    = "playing"
+	ModeNormal    PlayMode = "normal"
+	ModeRepeatAll PlayMode = "repeat_all"
+	ModeRepeatOne PlayMode = "repeat_one"
+	ModeShuffle   PlayMode = "shuffle"
 )
 
 type TrackInfo struct {
@@ -88,10 +88,10 @@ type Status struct {
 type TrackResolver func(id string) (*TrackInfo, error)
 
 type Engine struct {
-	id        string
-	deviceID  string
-	driver    string
-	resolve   TrackResolver
+	id       string
+	deviceID string
+	driver   string
+	resolve  TrackResolver
 
 	mu           sync.Mutex
 	cancel       context.CancelFunc
@@ -113,18 +113,18 @@ type Engine struct {
 
 func NewEngine(id, deviceID, driver string, resolver TrackResolver) *Engine {
 	return &Engine{
-		id:        id,
-		deviceID:  deviceID,
-		driver:    driver,
-		resolve:   resolver,
-		state:     StateStopped,
-		volume:    0.8,
-		playMode:  ModeNormal,
+		id:       id,
+		deviceID: deviceID,
+		driver:   driver,
+		resolve:  resolver,
+		state:    StateStopped,
+		volume:   0.8,
+		playMode: ModeNormal,
 	}
 }
 
-func (e *Engine) ID() string           { return e.id }
-func (e *Engine) DeviceID() string     { return e.deviceID }
+func (e *Engine) ID() string               { return e.id }
+func (e *Engine) DeviceID() string         { return e.deviceID }
 func (e *Engine) OnChange(fn func(Status)) { e.onChange = fn }
 
 func (e *Engine) RestoreState(queue []string, queueIdx int, shuffleOrder []int, shuffleIdx int, playMode string, volume float64) {

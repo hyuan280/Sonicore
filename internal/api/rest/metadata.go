@@ -424,13 +424,16 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 						// Update missing metadata
 						updated := false
 						if album.Year == 0 && year != 0 {
-							album.Year = year; updated = true
+							album.Year = year
+							updated = true
 						}
 						if album.Country == "" && country != "" {
-							album.Country = country; updated = true
+							album.Country = country
+							updated = true
 						}
 						if album.Genre == "" && genre != "" {
-							album.Genre = genre; updated = true
+							album.Genre = genre
+							updated = true
 						}
 						if updated {
 							h.albumRepo.Update(r.Context(), album)
@@ -452,9 +455,9 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				for _, al := range req.Albums {
 					if albumID, ok := resolveAlbum(al); ok {
 						trackAlbums = append(trackAlbums, &domain.TrackAlbum{
-							AlbumID:      albumID,
-							TrackNumber:  len(trackAlbums) + 1,
-							DiscNumber:   1,
+							AlbumID:     albumID,
+							TrackNumber: len(trackAlbums) + 1,
+							DiscNumber:  1,
 						})
 					}
 				}
@@ -478,10 +481,12 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 					if album, err := h.albumRepo.FindByID(r.Context(), trackAlbums[0].AlbumID); err == nil {
 						updated := false
 						if req.Year != 0 && album.Year == 0 {
-							album.Year = req.Year; updated = true
+							album.Year = req.Year
+							updated = true
 						}
 						if req.Genre != "" {
-							album.Genre = req.Genre; updated = true
+							album.Genre = req.Genre
+							updated = true
 						}
 						if updated {
 							h.albumRepo.Update(r.Context(), album)
@@ -771,20 +776,20 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 				if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
 					resp["albums"] = als
 				}
-		var albumID string
-		if len(track.Albums) > 0 {
-			albumID = track.Albums[0].AlbumID
-		}
-		if albumID != "" {
-			if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
-				resp["year"] = album.Year
-				resp["genre"] = album.Genre
-			}
-		}
-		if cached != nil {
-			if cached.Title != "" {
-				resp["title"] = cached.Title
-			}
+				var albumID string
+				if len(track.Albums) > 0 {
+					albumID = track.Albums[0].AlbumID
+				}
+				if albumID != "" {
+					if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
+						resp["year"] = album.Year
+						resp["genre"] = album.Genre
+					}
+				}
+				if cached != nil {
+					if cached.Title != "" {
+						resp["title"] = cached.Title
+					}
 					if cached.Year != 0 {
 						resp["year"] = cached.Year
 					}

@@ -30,10 +30,10 @@ func TestCodecPlayable(t *testing.T) {
 
 func TestDecide(t *testing.T) {
 	tests := []struct {
-		name     string
-		bitrate  int
-		codec    string
-		quality  Quality
+		name      string
+		bitrate   int
+		codec     string
+		quality   Quality
 		transcode bool
 	}{
 		{"lossless playable no transcode", 1411000, "flac", QualityLossless, false},

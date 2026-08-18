@@ -6,9 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sonicore/server/internal/core/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 func TestWriteJSON(t *testing.T) {

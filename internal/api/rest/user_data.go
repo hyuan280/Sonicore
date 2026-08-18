@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -389,21 +390,21 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 
 	var items []map[string]interface{}
 	var trackIDs []string
-		for rows.Next() {
-			var id, tid string
-			var pa time.Time
-			var title, album, albumID, fileFormat string
-			var duration float64
-			var coverID sql.NullString
-			rows.Scan(&id, &tid, &pa, &title, &album,
-				&albumID, &duration, &fileFormat, &coverID)
-			item := map[string]interface{}{
-				"id": id, "track_id": tid, "played_at": pa,
-				"title": title, "duration": duration, "suffix": fileFormat,
-			}
-			if albumID != "" {
-				item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
-			}
+	for rows.Next() {
+		var id, tid string
+		var pa time.Time
+		var title, album, albumID, fileFormat string
+		var duration float64
+		var coverID sql.NullString
+		rows.Scan(&id, &tid, &pa, &title, &album,
+			&albumID, &duration, &fileFormat, &coverID)
+		item := map[string]interface{}{
+			"id": id, "track_id": tid, "played_at": pa,
+			"title": title, "duration": duration, "suffix": fileFormat,
+		}
+		if albumID != "" {
+			item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
+		}
 		if coverID.Valid {
 			item["cover_image_id"] = coverID.String
 		}
@@ -614,8 +615,8 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 			albums := make([]map[string]interface{}, len(track.Albums))
 			for i, tal := range track.Albums {
 				entry := map[string]interface{}{
-					"id": tal.AlbumID,
-					"track": tal.TrackNumber,
+					"id":          tal.AlbumID,
+					"track":       tal.TrackNumber,
 					"disc_number": tal.DiscNumber,
 				}
 				if tal.Album != nil {
@@ -683,7 +684,9 @@ func (h *UserDataHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 	userID := middleware.GetUserID(r.Context())
 	plID := mux.Vars(r)["id"]
 
-	var req struct{ TrackID string `json:"track_id"` }
+	var req struct {
+		TrackID string `json:"track_id"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if req.TrackID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track_id required"})
@@ -716,7 +719,9 @@ func (h *UserDataHandler) AddTracksToPlaylist(w http.ResponseWriter, r *http.Req
 	userID := middleware.GetUserID(r.Context())
 	plID := mux.Vars(r)["id"]
 
-	var req struct{ TrackIDs []string `json:"track_ids"` }
+	var req struct {
+		TrackIDs []string `json:"track_ids"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if len(req.TrackIDs) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track_ids required"})
@@ -752,7 +757,9 @@ func (h *UserDataHandler) RemoveTracksFromPlaylist(w http.ResponseWriter, r *htt
 	userID := middleware.GetUserID(r.Context())
 	plID := mux.Vars(r)["id"]
 
-	var req struct{ TrackIDs []string `json:"track_ids"` }
+	var req struct {
+		TrackIDs []string `json:"track_ids"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if len(req.TrackIDs) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track_ids required"})

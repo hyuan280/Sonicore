@@ -6,16 +6,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sonicore/server/internal/core/port"
-	"github.com/sonicore/server/internal/infrastructure/external/netease"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/external/netease"
 )
 
 type fakeNeteaseProvider struct {
-	search  func(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error)
-	enrich  func(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error)
-	track   func(ctx context.Context, id string) (*port.TrackDetail, error)
+	search func(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error)
+	enrich func(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error)
+	track  func(ctx context.Context, id string) (*port.TrackDetail, error)
 }
 
 func (f *fakeNeteaseProvider) SearchTracks(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error) {

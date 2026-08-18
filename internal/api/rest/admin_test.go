@@ -14,10 +14,11 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
-	"github.com/sonicore/server/internal/core/domain"
-	"github.com/sonicore/server/internal/infrastructure/secrets"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/secrets"
 )
 
 func newAdminHandler(t *testing.T) (*AdminHandler, sqlmock.Sqlmock) {

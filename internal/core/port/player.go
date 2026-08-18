@@ -1,11 +1,11 @@
 package port
 
 type PlaybackState struct {
-	TrackID   string  `json:"track_id"`
-	Status    string  `json:"status"`
-	Position  float64 `json:"position"`
-	Duration  float64 `json:"duration"`
-	Volume    float64 `json:"volume"`
+	TrackID  string  `json:"track_id"`
+	Status   string  `json:"status"`
+	Position float64 `json:"position"`
+	Duration float64 `json:"duration"`
+	Volume   float64 `json:"volume"`
 }
 
 type Player interface {

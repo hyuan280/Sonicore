@@ -5,15 +5,15 @@ import "github.com/sonicore/server/internal/core/domain"
 type Permission string
 
 const (
-	PermAdminAccess         Permission = "admin:access"
-	PermAdminManageUsers    Permission = "admin:users:manage"
-	PermAdminManageSettings Permission = "admin:settings:manage"
-	PermLibraryCreate       Permission = "library:create"
-	PermLibraryDelete       Permission = "library:delete"
+	PermAdminAccess          Permission = "admin:access"
+	PermAdminManageUsers     Permission = "admin:users:manage"
+	PermAdminManageSettings  Permission = "admin:settings:manage"
+	PermLibraryCreate        Permission = "library:create"
+	PermLibraryDelete        Permission = "library:delete"
 	PermLibraryManageMembers Permission = "library:members:manage"
-	PermLibraryScan         Permission = "library:scan"
-	PermMetadataEdit        Permission = "metadata:edit"
-	PermDownload            Permission = "download"
+	PermLibraryScan          Permission = "library:scan"
+	PermMetadataEdit         Permission = "metadata:edit"
+	PermDownload             Permission = "download"
 )
 
 var rolePermissions = map[domain.Role][]Permission{

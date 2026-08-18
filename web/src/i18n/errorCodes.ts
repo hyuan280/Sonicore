@@ -1,7 +1,7 @@
 // Error codes mirror internal/core/domain/error_codes.go
 // Keep both files in sync when adding new codes.
 
-import type { TFunction } from "i18next"
+import type { TFunction } from "i18next";
 
 // Category ranges:
 //   1 –  99  common
@@ -111,47 +111,47 @@ export const ERROR_CODES = {
   INVALID_PLATFORM_ID: 701,
   UNSUPPORTED_SEARCH_TYPE: 702,
   PLATFORM_UPSTREAM_ERROR: 703,
-} as const
+} as const;
 
-const CODE_TO_I18N_KEY: Record<number, string> = {}
-const CODE_TO_NAME: Record<number, string> = {}
+const CODE_TO_I18N_KEY: Record<number, string> = {};
+const CODE_TO_NAME: Record<number, string> = {};
 for (const [key, value] of Object.entries(ERROR_CODES)) {
-  CODE_TO_I18N_KEY[value] = `errors.${getCategory(value)}.${key}`
-  CODE_TO_NAME[value] = key
+  CODE_TO_I18N_KEY[value] = `errors.${getCategory(value)}.${key}`;
+  CODE_TO_NAME[value] = key;
 }
 
 function getCategory(code: number): string {
-  if (code <= 99) return "common"
-  if (code <= 199) return "auth"
-  if (code <= 299) return "library"
-  if (code <= 399) return "user"
-  if (code <= 499) return "metadata"
-  if (code <= 599) return "jukebox"
-  if (code <= 699) return "stream"
-  if (code <= 799) return "platform"
-  return "common"
+  if (code <= 99) return "common";
+  if (code <= 199) return "auth";
+  if (code <= 299) return "library";
+  if (code <= 399) return "user";
+  if (code <= 499) return "metadata";
+  if (code <= 599) return "jukebox";
+  if (code <= 699) return "stream";
+  if (code <= 799) return "platform";
+  return "common";
 }
 
 export function getErrorI18nKey(code: number): string | undefined {
-  return CODE_TO_I18N_KEY[code]
+  return CODE_TO_I18N_KEY[code];
 }
 
 export function getErrorName(code: number): string | undefined {
-  return CODE_TO_NAME[code]
+  return CODE_TO_NAME[code];
 }
 
 export interface ApiError {
-  code?: number
-  error?: string
-  message?: string
-  status?: number
+  code?: number;
+  error?: string;
+  message?: string;
+  status?: number;
 }
 
 export function translateApiError(t: TFunction, err: unknown): string {
-  const apiErr = err as ApiError
+  const apiErr = err as ApiError;
   if (apiErr?.code !== undefined) {
-    const key = getErrorI18nKey(apiErr.code)
-    if (key) return t(key, { defaultValue: apiErr?.error || apiErr?.message })
+    const key = getErrorI18nKey(apiErr.code);
+    if (key) return t(key, { defaultValue: apiErr?.error || apiErr?.message });
   }
-  return apiErr?.error || apiErr?.message || t("common.unknown")
+  return apiErr?.error || apiErr?.message || t("common.unknown");
 }

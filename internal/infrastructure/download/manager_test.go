@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/domain"
-	"github.com/sonicore/server/internal/core/port"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/core/port"
 )
 
 type fakeSource struct {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"

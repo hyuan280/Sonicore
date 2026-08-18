@@ -74,13 +74,13 @@ func TestTitlesMatch(t *testing.T) {
 
 func TestMatchPartsScore(t *testing.T) {
 	rec := MBRecording{
-		Title: "Song (Live)",
+		Title:   "Song (Live)",
 		Artists: []MBArtistRef{{Name: "Band One"}},
 		Releases: []struct {
-			ID     string         `json:"id"`
-			Title  string         `json:"title"`
-			Date   string         `json:"date"`
-			Status string         `json:"status"`
+			ID      string        `json:"id"`
+			Title   string        `json:"title"`
+			Date    string        `json:"date"`
+			Status  string        `json:"status"`
 			Artists []MBArtistRef `json:"artist-credit"`
 		}{{Title: "Album Name"}},
 	}
@@ -109,10 +109,10 @@ func TestFieldsMatch(t *testing.T) {
 		Title:   "Song",
 		Artists: []MBArtistRef{{Name: "Band One"}, {Name: "Band Two"}},
 		Releases: []struct {
-			ID      string         `json:"id"`
-			Title   string         `json:"title"`
-			Date    string         `json:"date"`
-			Status  string         `json:"status"`
+			ID      string        `json:"id"`
+			Title   string        `json:"title"`
+			Date    string        `json:"date"`
+			Status  string        `json:"status"`
 			Artists []MBArtistRef `json:"artist-credit"`
 		}{{Title: "Album"}},
 	}
@@ -331,7 +331,6 @@ func TestEnrichUsesArtistDetailCache(t *testing.T) {
 
 	assert.Equal(t, 1, artistHits, "two tracks crediting the same artist share one lookup per scan")
 }
-
 
 func TestEnrichEmptyTitle(t *testing.T) {
 	r, _ := newResolverWithServer(t, func(w http.ResponseWriter, req *http.Request) {

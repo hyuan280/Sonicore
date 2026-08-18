@@ -68,7 +68,9 @@ func (r *PlaylistRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func scanPlaylist(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Playlist, error) {
+func scanPlaylist(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.Playlist, error) {
 	var p domain.Playlist
 	var trackIDs []byte
 	err := scanner.Scan(&p.ID, &p.Name, &p.OwnerID,

@@ -6,8 +6,15 @@
 }
 
 /* fully hidden scrollbar (overrides the global *::-webkit-scrollbar rule) */
-.no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
-.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
 
 :root {
   --bg: #0a0a0a;
@@ -17,29 +24,77 @@
   --card: #18181b;
   --accent: #22c55e;
 }
-html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
 
 /* dark scrollbar */
-*::-webkit-scrollbar { width: 6px; height: 6px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
-*::-webkit-scrollbar-thumb:hover { background: #52525b; }
-* { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
 
 /* dark checkbox */
-input[type="checkbox"] { accent-color: #22c55e; }
-input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 16px; height: 16px;
-  border: 1.5px solid #52525b; border-radius: 3px; background: transparent; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-  box-sizing: border-box; }
-input[type="checkbox"]:checked { background: #22c55e; border-color: #22c55e; }
-input[type="checkbox"]:checked::after { content: "✓"; color: #000; font-size: 13px; font-weight: bold; line-height: 1; }
-input[type="checkbox"]:hover { border-color: #a1a1aa; }
+input[type="checkbox"] {
+  accent-color: #22c55e;
+}
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid #52525b;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+input[type="checkbox"]:checked {
+  background: #22c55e;
+  border-color: #22c55e;
+}
+input[type="checkbox"]:checked::after {
+  content: "✓";
+  color: #000;
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 1;
+}
+input[type="checkbox"]:hover {
+  border-color: #a1a1aa;
+}
 
 /* progress bar loading sweep (transcode wait / buffering) */
 @keyframes progress-sweep {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(330%); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(330%);
+  }
 }
 .progress-sweep::after {
   content: "";

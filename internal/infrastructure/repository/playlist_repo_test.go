@@ -8,19 +8,20 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 func testPlaylist() *domain.Playlist {
 	now := time.Date(2024, 4, 1, 15, 30, 0, 0, time.UTC)
 	return &domain.Playlist{
-		ID:       "pl-001",
-		Name:     "Road Trip",
-		OwnerID:  "u-001",
-		IsPublic: true,
-		TrackIDs: []string{"t-001", "t-002"},
+		ID:        "pl-001",
+		Name:      "Road Trip",
+		OwnerID:   "u-001",
+		IsPublic:  true,
+		TrackIDs:  []string{"t-001", "t-002"},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

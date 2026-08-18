@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/domain"
-	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/lyrics"
 )
 
 // expectTrackFindByID mocks the three queries issued by TrackRepo.FindByID.
@@ -48,19 +49,19 @@ func newLyricsHandler(t *testing.T) (*LyricsHandler, sqlmock.Sqlmock) {
 func lyricsTestTrack() *domain.Track {
 	now := time.Now()
 	return &domain.Track{
-		ID:          "t-001",
-		LibraryID:   "lib-001",
-		Title:       "Song",
-		Duration:    200,
-		FilePath:    "/m/song.mp3",
-		FileSize:    1000,
-		FileFormat:  "mp3",
-		AudioCodec:  "mp3",
-		Hash:        "h",
-		LyricsMask:  lyrics.PriorityBit(lyrics.PriorityUser),
+		ID:           "t-001",
+		LibraryID:    "lib-001",
+		Title:        "Song",
+		Duration:     200,
+		FilePath:     "/m/song.mp3",
+		FileSize:     1000,
+		FileFormat:   "mp3",
+		AudioCodec:   "mp3",
+		Hash:         "h",
+		LyricsMask:   lyrics.PriorityBit(lyrics.PriorityUser),
 		LyricsOffset: 1.5,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 }
 

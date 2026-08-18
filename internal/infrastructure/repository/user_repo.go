@@ -57,7 +57,9 @@ func (r *UserRepo) ListAll(ctx context.Context) ([]domain.User, error) {
 	return users, rows.Err()
 }
 
-func scanUser(row interface{ Scan(dest ...interface{}) error }) (*domain.User, error) {
+func scanUser(row interface {
+	Scan(dest ...interface{}) error
+}) (*domain.User, error) {
 	var u domain.User
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
 		&u.Role, &u.CreatedAt, &u.UpdatedAt)

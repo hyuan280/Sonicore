@@ -76,11 +76,11 @@ type Client struct {
 	// (runtime-configurable via admin settings); overrides SetCookie.
 	cookieProvider func() string
 
-	anonMu      sync.Mutex
+	anonMu       sync.Mutex
 	anonInFlight bool
-	anonDone    bool
-	anonRetryAt time.Time
-	anonErr     error
+	anonDone     bool
+	anonRetryAt  time.Time
+	anonErr      error
 }
 
 func NewClient() *Client {
@@ -323,7 +323,7 @@ func (c *Client) ensureAnon() {
 }
 
 type apiResponse struct {
-	body     map[string]any
+	body      map[string]any
 	setCookie map[string]string
 }
 

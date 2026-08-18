@@ -1,8 +1,8 @@
-import { cn } from "../../lib/utils"
+import { cn } from "../../lib/utils";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "ghost" | "danger"
-  size?: "sm" | "md" | "lg"
+  variant?: "primary" | "ghost" | "danger";
+  size?: "sm" | "md" | "lg";
 }
 
 export function Button({ className, variant = "primary", size = "md", ...props }: ButtonProps) {
@@ -20,5 +20,5 @@ export function Button({ className, variant = "primary", size = "md", ...props }
       )}
       {...props}
     />
-  )
+  );
 }

@@ -37,9 +37,9 @@ type EnrichmentResult struct {
 	Year             int
 	Biography        string
 	Lyrics           string // network lyrics (NetEase), stored at network priority
-	Title            string  // MB-corrected title (if ffprobe was wrong)
-	Artist           string  // MB-corrected artist (first performer)
-	Album            string  // MB-corrected album
+	Title            string // MB-corrected title (if ffprobe was wrong)
+	Artist           string // MB-corrected artist (first performer)
+	Album            string // MB-corrected album
 }
 
 type Resolver struct {

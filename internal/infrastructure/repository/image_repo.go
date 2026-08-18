@@ -147,7 +147,9 @@ func (r *ImageRepo) Update(ctx context.Context, img *domain.Image) error {
 	return err
 }
 
-func scanImage(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Image, error) {
+func scanImage(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.Image, error) {
 	var img domain.Image
 	var libID sql.NullString
 	err := scanner.Scan(&img.ID, &libID, &img.OwnerType, &img.OwnerID,

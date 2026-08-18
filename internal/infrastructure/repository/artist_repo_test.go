@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 func testArtist() *domain.Artist {
@@ -18,7 +19,7 @@ func testArtist() *domain.Artist {
 		ID:             "a-001",
 		Name:           "The Beatles",
 		SortName:       "Beatles, The",
-		ExternalID:           "b10bbbfc-cf9e-42e0-be17-ab2d0b1e5d0f",
+		ExternalID:     "b10bbbfc-cf9e-42e0-be17-ab2d0b1e5d0f",
 		MetadataSource: "musicbrainz",
 		ExternalIDs:    map[string]string{"netease": "6452"},
 		Country:        "GB",

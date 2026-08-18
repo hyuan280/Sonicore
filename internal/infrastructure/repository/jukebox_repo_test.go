@@ -8,25 +8,26 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 func testJukebox() *domain.Jukebox {
 	return &domain.Jukebox{
-		ID:             "jb-001",
-		Name:           "Living Room",
-		DeviceID:       "hw:1,0",
-		DeviceName:     "USB Audio",
-		DeviceDriver:   "alsa",
-		Volume:         0.8,
-		PlayMode:       "normal",
-		Queue:          []string{"t-001", "t-002"},
-		QueueIdx:       0,
-		ShuffleOrder:   []int{1, 0},
-		ShuffleIdx:     1,
-		PathMapping:    map[string]string{"/music": "/mnt/music"},
+		ID:           "jb-001",
+		Name:         "Living Room",
+		DeviceID:     "hw:1,0",
+		DeviceName:   "USB Audio",
+		DeviceDriver: "alsa",
+		Volume:       0.8,
+		PlayMode:     "normal",
+		Queue:        []string{"t-001", "t-002"},
+		QueueIdx:     0,
+		ShuffleOrder: []int{1, 0},
+		ShuffleIdx:   1,
+		PathMapping:  map[string]string{"/music": "/mnt/music"},
 	}
 }
 

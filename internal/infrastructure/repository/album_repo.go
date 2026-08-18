@@ -25,7 +25,9 @@ const albumCols = `id, title, artist_id, external_id, metadata_source, external_
 // albumColsPrefixed is albumCols qualified with the al. alias for JOIN queries.
 const albumColsPrefixed = `al.id, al.title, al.artist_id, al.external_id, al.metadata_source, al.external_ids, al.country, al.year, al.genre, al.cover_image_id, al.song_count, al.duration, al.created_at, al.updated_at`
 
-func scanAlbum(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Album, error) {
+func scanAlbum(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.Album, error) {
 	var a domain.Album
 	var coverID sql.NullString
 	var ext []byte

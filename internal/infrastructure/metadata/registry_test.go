@@ -5,9 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sonicore/server/internal/core/port"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/port"
 )
 
 // fakeSource is a scriptable port.MetadataSource for registry tests.
@@ -57,14 +58,14 @@ func (f *fakeSource) Lookup(ctx context.Context, id string) (*port.MetadataCandi
 // fullCand builds a candidate carrying every field.
 func fullCand(source, id, title string) *port.MetadataCandidate {
 	return &port.MetadataCandidate{
-		Source:     source,
-		ExternalID: id,
-		Title:      title,
-		Artists:    []port.ArtistInfo{{Name: "Artist"}},
-		Album:      "Album",
+		Source:      source,
+		ExternalID:  id,
+		Title:       title,
+		Artists:     []port.ArtistInfo{{Name: "Artist"}},
+		Album:       "Album",
 		CoverArtURL: "https://cover",
-		Lyrics:     "lyrics",
-		Score:      1.0,
+		Lyrics:      "lyrics",
+		Score:       1.0,
 	}
 }
 

@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 )
 
 func newTestScannerService(t *testing.T) (*ScannerService, *sql.DB, sqlmock.Sqlmock) {

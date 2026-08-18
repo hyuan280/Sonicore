@@ -14,11 +14,11 @@ import (
 )
 
 type Manager struct {
-	db         *sql.DB
-	jobRepo    *repository.DownloadJobRepo
-	sources    []port.DownloadSource
-	mu         sync.Mutex
-	active     map[string]context.CancelFunc
+	db      *sql.DB
+	jobRepo *repository.DownloadJobRepo
+	sources []port.DownloadSource
+	mu      sync.Mutex
+	active  map[string]context.CancelFunc
 }
 
 func NewManager(db *sql.DB) *Manager {

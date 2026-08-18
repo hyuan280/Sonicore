@@ -5,10 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sonicore/server/internal/core/domain"
-	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/auth"
 )
 
 func authMiddlewareHandler(t *testing.T) (func(http.Handler) http.Handler, *auth.JWTService) {

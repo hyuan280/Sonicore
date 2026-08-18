@@ -15,7 +15,9 @@ func NewLibraryRepo(db *sql.DB) *LibraryRepo {
 	return &LibraryRepo{db: db}
 }
 
-func scanLibrary(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Library, error) {
+func scanLibrary(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.Library, error) {
 	var l domain.Library
 	err := scanner.Scan(&l.ID, &l.Name, &l.Path, &l.OwnerID,
 		&l.MetadataStorageMode, &l.ScanInterval, &l.LastScannedAt,

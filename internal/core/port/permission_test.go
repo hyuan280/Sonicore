@@ -3,8 +3,9 @@ package port
 import (
 	"testing"
 
-	"github.com/sonicore/server/internal/core/domain"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 func TestHasPermissionSuperAdmin(t *testing.T) {

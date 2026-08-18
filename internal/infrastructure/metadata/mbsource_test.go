@@ -7,9 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sonicore/server/internal/core/port"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/port"
 )
 
 // newTestMBSource starts a fake MusicBrainz API server and builds a source
@@ -39,7 +40,8 @@ func TestMBSourceEnabledAndPriority(t *testing.T) {
 	assert.False(t, NewMBSource(MBConfig{Enabled: false}).Enabled())
 }
 
-func TestMBSourceSearchCandidatesRanksBestFirst(t *testing.T) {	s := newTestMBSource(t, func(w http.ResponseWriter, r *http.Request) {
+func TestMBSourceSearchCandidatesRanksBestFirst(t *testing.T) {
+	s := newTestMBSource(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/recording", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{

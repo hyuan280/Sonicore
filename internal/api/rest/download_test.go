@@ -13,19 +13,20 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/download"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // failSource always matches and fails instantly, so Manager's async goroutine
 // drains deterministically.
 type failSource struct{}
 
-func (failSource) Name() string                             { return "fail" }
-func (failSource) Match(url string) bool                    { return true }
+func (failSource) Name() string          { return "fail" }
+func (failSource) Match(url string) bool { return true }
 func (failSource) Resolve(ctx context.Context, url string) (*port.SourceInfo, error) {
 	return nil, nil
 }

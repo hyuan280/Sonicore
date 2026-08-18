@@ -20,13 +20,13 @@ import (
 var ErrNotFound = errors.New("musicbrainz: not found")
 
 type MBClient struct {
-	http           *http.Client
-	base           string
-	appName        string
-	appVer         string
+	http            *http.Client
+	base            string
+	appName         string
+	appVer          string
 	rateLimitPerSec int // requests per second
-	lastReq        time.Time
-	mu             sync.Mutex
+	lastReq         time.Time
+	mu              sync.Mutex
 }
 
 type MBConfig struct {
@@ -199,11 +199,11 @@ type MBArtistSearch struct {
 }
 
 type MBArtistBrief struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
 	SortName string `json:"sort-name"`
-	Type   string `json:"type"`
-	Country string `json:"country"`
+	Type     string `json:"type"`
+	Country  string `json:"country"`
 }
 
 type MBReleaseSearch struct {
@@ -211,24 +211,24 @@ type MBReleaseSearch struct {
 }
 
 type MBRelease struct {
-	ID       string        `json:"id"`
-	Title    string        `json:"title"`
-	Date     string        `json:"date"`
-	Status   string        `json:"status"`
-	Artists  []MBArtistRef `json:"artist-credit"`
-	Media    []MBMedia     `json:"media"`
+	ID      string        `json:"id"`
+	Title   string        `json:"title"`
+	Date    string        `json:"date"`
+	Status  string        `json:"status"`
+	Artists []MBArtistRef `json:"artist-credit"`
+	Media   []MBMedia     `json:"media"`
 }
 
 type MBArtistRef struct {
-	Name  string `json:"name"`
+	Name   string         `json:"name"`
 	Artist *MBArtistBrief `json:"artist,omitempty"`
 }
 
 type MBMedia struct {
-	Title      string      `json:"title"`
-	Format     string      `json:"format"`
-	TrackCount int         `json:"track-count"`
-	Tracks     []MBTrack   `json:"tracks,omitempty"`
+	Title      string    `json:"title"`
+	Format     string    `json:"format"`
+	TrackCount int       `json:"track-count"`
+	Tracks     []MBTrack `json:"tracks,omitempty"`
 }
 
 type MBTrack struct {
@@ -248,10 +248,10 @@ type MBRecording struct {
 	Length   int           `json:"length"`
 	Artists  []MBArtistRef `json:"artist-credit"`
 	Releases []struct {
-		ID     string        `json:"id"`
-		Title  string        `json:"title"`
-		Date   string        `json:"date"`
-		Status string        `json:"status"`
+		ID      string        `json:"id"`
+		Title   string        `json:"title"`
+		Date    string        `json:"date"`
+		Status  string        `json:"status"`
 		Artists []MBArtistRef `json:"artist-credit"`
 	} `json:"releases"`
 	Tags []MBTag `json:"tags,omitempty"`
@@ -323,12 +323,12 @@ func (c *MBClient) SearchReleases(ctx context.Context, name string) ([]MBRelease
 }
 
 type MBArtistFull struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
 	SortName string `json:"sort-name"`
-	Type    string `json:"type"`
-	Country string `json:"country"`
-	Area    *struct {
+	Type     string `json:"type"`
+	Country  string `json:"country"`
+	Area     *struct {
 		Name string `json:"name"`
 	} `json:"area"`
 	LifeSpan *struct {
@@ -369,14 +369,14 @@ func (c *MBClient) SearchRelease(ctx context.Context, title, artist string) (*MB
 }
 
 type MBReleaseFull struct {
-	ID       string        `json:"id"`
-	Title    string        `json:"title"`
-	Date     string        `json:"date"`
-	Country  string        `json:"country"`
-	Status   string        `json:"status"`
-	Artists  []MBArtistRef `json:"artist-credit"`
-	Media    []MBMedia     `json:"media"`
-	Tags     []MBTag `json:"tags"`
+	ID      string        `json:"id"`
+	Title   string        `json:"title"`
+	Date    string        `json:"date"`
+	Country string        `json:"country"`
+	Status  string        `json:"status"`
+	Artists []MBArtistRef `json:"artist-credit"`
+	Media   []MBMedia     `json:"media"`
+	Tags    []MBTag       `json:"tags"`
 }
 
 func (c *MBClient) LookupRelease(ctx context.Context, mbid string) (*MBReleaseFull, error) {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/api/rest"
 	"github.com/sonicore/server/internal/api/subsonic"

@@ -12,17 +12,17 @@ import (
 )
 
 type ProbeResult struct {
-	Format  ProbeFormat  `json:"format"`
+	Format  ProbeFormat   `json:"format"`
 	Streams []ProbeStream `json:"streams"`
 }
 
 type ProbeFormat struct {
-	Filename       string            `json:"filename"`
-	FormatName     string            `json:"format_name"`
-	Duration       string            `json:"duration"`
-	Size           string            `json:"size"`
-	BitRate        string            `json:"bit_rate"`
-	Tags           map[string]string `json:"tags,omitempty"`
+	Filename   string            `json:"filename"`
+	FormatName string            `json:"format_name"`
+	Duration   string            `json:"duration"`
+	Size       string            `json:"size"`
+	BitRate    string            `json:"bit_rate"`
+	Tags       map[string]string `json:"tags,omitempty"`
 }
 
 type ProbeStream struct {
@@ -176,11 +176,11 @@ func buildAudioMeta(path string, result *ProbeResult) *AudioMeta {
 		meta.Album = tags["album"]
 		meta.Genre = tags["genre"]
 		meta.Comment = tags["comment"]
-	meta.Composer = tags["composer"]
-	meta.Lyricist = tags["lyricist"]
-	meta.Lyrics = lyricsTag(tags)
-	meta.Arranger = tags["arranger"]
-	meta.MBID = tags["musicbrainz_trackid"]
+		meta.Composer = tags["composer"]
+		meta.Lyricist = tags["lyricist"]
+		meta.Lyrics = lyricsTag(tags)
+		meta.Arranger = tags["arranger"]
+		meta.MBID = tags["musicbrainz_trackid"]
 		if meta.MBID == "" {
 			meta.MBID = tags["musicbrainz track id"]
 		}

@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/port"
-	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
 func newUserSource(t *testing.T, row *repository.UserMetadata) *userSource {

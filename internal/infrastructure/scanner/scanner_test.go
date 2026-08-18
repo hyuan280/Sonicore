@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTitleCase(t *testing.T) {
@@ -374,9 +375,9 @@ type fakePrioSource struct {
 	priority int
 }
 
-func (f *fakePrioSource) Name() string { return f.name }
-func (f *fakePrioSource) Enabled() bool { return f.enabled }
-func (f *fakePrioSource) Priority() int { return f.priority }
+func (f *fakePrioSource) Name() string                      { return f.name }
+func (f *fakePrioSource) Enabled() bool                     { return f.enabled }
+func (f *fakePrioSource) Priority() int                     { return f.priority }
 func (f *fakePrioSource) Capabilities() port.MetadataFields { return 0 }
 func (f *fakePrioSource) SearchCandidates(context.Context, port.MetadataQuery) ([]port.MetadataCandidate, error) {
 	return nil, nil

@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/sonicore/server/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/config"
 )
 
 func newTestSessionStore(t *testing.T) (*SessionStore, *miniredis.Miniredis) {

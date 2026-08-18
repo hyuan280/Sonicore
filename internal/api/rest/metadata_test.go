@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 )
 
 func newMetadataHandler(t *testing.T) (*MetadataHandler, sqlmock.Sqlmock) {

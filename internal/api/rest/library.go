@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
@@ -50,9 +51,9 @@ func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, covers *metadata
 }
 
 type createLibraryRequest struct {
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Mode   string `json:"metadata_storage_mode"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Mode string `json:"metadata_storage_mode"`
 }
 
 type addMemberRequest struct {
@@ -402,5 +403,3 @@ func (h *LibraryHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, members)
 }
-
-

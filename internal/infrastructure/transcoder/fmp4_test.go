@@ -27,8 +27,8 @@ func fullBox(typ string, version byte, payload []byte) []byte {
 // mdhd with a 32-bit (version 0) timescale at the standard offset.
 func mdhdV0(timescale uint32) []byte {
 	payload := make([]byte, 4+4+4+4+2+2)
-	binary.BigEndian.PutUint32(payload[0:4], 0)   // creation
-	binary.BigEndian.PutUint32(payload[4:8], 0)   // modification
+	binary.BigEndian.PutUint32(payload[0:4], 0) // creation
+	binary.BigEndian.PutUint32(payload[4:8], 0) // modification
 	binary.BigEndian.PutUint32(payload[8:12], timescale)
 	binary.BigEndian.PutUint32(payload[12:16], 1000000) // duration
 	return fullBox("mdhd", 0, payload)

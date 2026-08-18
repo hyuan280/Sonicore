@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sonicore/server/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/config"
 )
 
 func mustNew(t *testing.T, master []byte) *Encryptor {

@@ -9,20 +9,20 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	Data     DataConfig     `mapstructure:"data"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Log      LogConfig      `mapstructure:"log"`
-	Audio    AudioConfig    `mapstructure:"audio"`
-	Metadata MetadataConfig `mapstructure:"metadata"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Redis     RedisConfig     `mapstructure:"redis"`
+	Data      DataConfig      `mapstructure:"data"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
+	Log       LogConfig       `mapstructure:"log"`
+	Audio     AudioConfig     `mapstructure:"audio"`
+	Metadata  MetadataConfig  `mapstructure:"metadata"`
 	Platforms PlatformsConfig `mapstructure:"platforms"`
 }
 
 // PlatformsConfig controls external music platform integration.
 type PlatformsConfig struct {
-	Enabled []string             `mapstructure:"enabled"`
+	Enabled []string              `mapstructure:"enabled"`
 	Netease NeteasePlatformConfig `mapstructure:"netease"`
 }
 
@@ -77,8 +77,8 @@ type DataConfig struct {
 }
 
 type JWTConfig struct {
-	Secret          string `mapstructure:"secret"`
-	Expiration      string `mapstructure:"expiration"`
+	Secret            string `mapstructure:"secret"`
+	Expiration        string `mapstructure:"expiration"`
 	RefreshExpiration string `mapstructure:"refresh_expiration"`
 }
 

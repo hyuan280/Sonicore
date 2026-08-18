@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+
 	"github.com/sonicore/server/internal/api/ws"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/player"
@@ -161,10 +162,10 @@ func (h *JukeboxHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	j := &domain.Jukebox{
-		ID:         domain.NewID(),
-		Name:       req.Name,
-		Volume:     0.8,
-		PlayMode:   "normal",
+		ID:       domain.NewID(),
+		Name:     req.Name,
+		Volume:   0.8,
+		PlayMode: "normal",
 	}
 
 	if req.DeviceConfigID != "" {
@@ -212,13 +213,13 @@ func (h *JukeboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"id":            j.ID,
-		"name":          j.Name,
-		"device_name":   j.DeviceName,
-		"device_id":     j.DeviceID,
-		"volume":        j.Volume,
-		"play_mode":     j.PlayMode,
-		"path_mapping":  j.PathMapping,
+		"id":           j.ID,
+		"name":         j.Name,
+		"device_name":  j.DeviceName,
+		"device_id":    j.DeviceID,
+		"volume":       j.Volume,
+		"play_mode":    j.PlayMode,
+		"path_mapping": j.PathMapping,
 	})
 }
 
@@ -610,11 +611,11 @@ func (h *JukeboxHandler) UpdateDeviceConfig(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req struct {
-		Name       *string            `json:"name"`
-		DeviceType *string            `json:"device_type"`
-		DeviceID   *string            `json:"device_id"`
-		Driver     *string            `json:"driver"`
-		Config     map[string]string  `json:"config"`
+		Name       *string           `json:"name"`
+		DeviceType *string           `json:"device_type"`
+		DeviceID   *string           `json:"device_id"`
+		Driver     *string           `json:"driver"`
+		Config     map[string]string `json:"config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -654,8 +655,8 @@ func (h *JukeboxHandler) DeleteDeviceConfig(w http.ResponseWriter, r *http.Reque
 			jbxName = jbx.Name
 		}
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":     "device is bound to jukebox",
-			"jukebox":   jbxName,
+			"error":   "device is bound to jukebox",
+			"jukebox": jbxName,
 		})
 		return
 	}

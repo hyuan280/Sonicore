@@ -6,6 +6,7 @@ import (
 	"log"
 
 	_ "github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/config"
 )
 

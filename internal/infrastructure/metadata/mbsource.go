@@ -34,9 +34,9 @@ func NewMBSource(cfg MBConfig) *mbSource {
 	}
 }
 
-func (s *mbSource) Name() string         { return s.name }
-func (s *mbSource) Enabled() bool        { return s.enabled }
-func (s *mbSource) Priority() int        { return s.priority }
+func (s *mbSource) Name() string  { return s.name }
+func (s *mbSource) Enabled() bool { return s.enabled }
+func (s *mbSource) Priority() int { return s.priority }
 
 // Capabilities: MusicBrainz has no network cover URL or lyrics. This is a
 // deliberate decision, not an omission: candidates never carry a

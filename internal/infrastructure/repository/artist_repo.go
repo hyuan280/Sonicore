@@ -26,7 +26,9 @@ const artistCols = `id, name, sort_name, external_id, metadata_source, external_
 // artistColsPrefixed is artistCols qualified with the a. alias for JOIN queries.
 const artistColsPrefixed = `a.id, a.name, a.sort_name, a.external_id, a.metadata_source, a.external_ids, a.country, a.biography, a.cover_image_id, a.created_at, a.updated_at`
 
-func scanArtist(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Artist, error) {
+func scanArtist(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.Artist, error) {
 	var a domain.Artist
 	var coverID sql.NullString
 	var ext []byte

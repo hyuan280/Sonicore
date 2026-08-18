@@ -9,10 +9,11 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
-	"github.com/sonicore/server/internal/core/service"
-	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/service"
+	"github.com/sonicore/server/internal/infrastructure/metadata"
 )
 
 func now() time.Time { return time.Now() }

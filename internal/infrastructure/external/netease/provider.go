@@ -236,16 +236,16 @@ func (p *Provider) GetTrack(ctx context.Context, trackID string) (*port.TrackDet
 	}
 
 	detail := &port.TrackDetail{
-		Platform:  p.Name(),
-		TrackID:   tracks[0].TrackID,
-		Title:     tracks[0].Title,
-		Artist:    tracks[0].Artist,
-		ArtistID:  tracks[0].ArtistID,
-		Artists:   tracks[0].Artists,
-		Album:     tracks[0].Album,
-		AlbumID:   tracks[0].AlbumID,
-		Duration:  tracks[0].Duration,
-		CoverURL:  tracks[0].CoverURL,
+		Platform: p.Name(),
+		TrackID:  tracks[0].TrackID,
+		Title:    tracks[0].Title,
+		Artist:   tracks[0].Artist,
+		ArtistID: tracks[0].ArtistID,
+		Artists:  tracks[0].Artists,
+		Album:    tracks[0].Album,
+		AlbumID:  tracks[0].AlbumID,
+		Duration: tracks[0].Duration,
+		CoverURL: tracks[0].CoverURL,
 	}
 
 	if obj, ok := body["lrc"].(map[string]any); ok {
@@ -289,12 +289,12 @@ func (p *Provider) GetArtistTracks(ctx context.Context, artistID string, page, l
 		offset = 0
 	}
 	body, err := p.request(ctx, "/api/v1/artist/songs", map[string]any{
-		"id":           artistID,
+		"id":            artistID,
 		"private_cloud": "true",
-		"work_type":    1,
-		"order":        "hot",
-		"offset":       offset,
-		"limit":        limit,
+		"work_type":     1,
+		"order":         "hot",
+		"offset":        offset,
+		"limit":         limit,
 	}, "eapi")
 	if err != nil {
 		return nil, 0, err

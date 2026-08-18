@@ -1,11 +1,11 @@
-import { create } from "zustand"
-import { api } from "../api/client"
-import type { Library } from "../types"
+import { create } from "zustand";
+import { api } from "../api/client";
+import type { Library } from "../types";
 
 interface LibraryState {
-  libraries: Library[]
-  loading: boolean
-  load: () => Promise<void>
+  libraries: Library[];
+  loading: boolean;
+  load: () => Promise<void>;
 }
 
 export const useLibrary = create<LibraryState>((set) => ({
@@ -13,8 +13,8 @@ export const useLibrary = create<LibraryState>((set) => ({
   loading: false,
 
   load: async () => {
-    set({ loading: true })
-    const libs = await api.libraries.list()
-    set({ libraries: libs, loading: false })
+    set({ loading: true });
+    const libs = await api.libraries.list();
+    set({ libraries: libs, loading: false });
   },
-}))
+}));

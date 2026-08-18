@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sonicore/server/internal/core/port"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/port"
 )
 
 func newFakeProvider(t *testing.T, handler http.HandlerFunc) *Provider {
@@ -76,8 +77,8 @@ func TestMapTrackDetailShape(t *testing.T) {
 
 func TestMapArtistBrief(t *testing.T) {
 	a := mapArtistBrief(map[string]any{
-		"id":   jsonNum(11),
-		"name": "Band",
+		"id":     jsonNum(11),
+		"name":   "Band",
 		"picUrl": "pic-url",
 	})
 	assert.Equal(t, "Band", a.Name)

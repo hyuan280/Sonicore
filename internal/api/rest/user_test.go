@@ -12,11 +12,12 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/sonicore/server/internal/config"
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/cache"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func newUserHandler(t *testing.T) (*UserHandler, sqlmock.Sqlmock, *miniredis.Miniredis) {
@@ -124,7 +125,7 @@ func TestUserChangePasswordWrongPassword(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	h.ChangePassword(rec, userIDRequest(http.MethodPost, "/api/users/me/password",
-		`{"old_password":"wrong","new_password":"new-pass"}` , "u-001"))
+		`{"old_password":"wrong","new_password":"new-pass"}`, "u-001"))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "wrong password")

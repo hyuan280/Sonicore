@@ -14,13 +14,13 @@ import (
 )
 
 type AuthHandler struct {
-	db            *sql.DB
-	jwtService    *auth.JWTService
-	userRepo      *repository.UserRepo
-	settingsRepo  *repository.SettingsRepo
-	tokenStore    *cache.TokenStore
-	sessionStore  *cache.SessionStore
-	refreshExp    time.Duration
+	db           *sql.DB
+	jwtService   *auth.JWTService
+	userRepo     *repository.UserRepo
+	settingsRepo *repository.SettingsRepo
+	tokenStore   *cache.TokenStore
+	sessionStore *cache.SessionStore
+	refreshExp   time.Duration
 }
 
 func NewAuthHandler(db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, refreshExp time.Duration) *AuthHandler {
@@ -228,5 +228,3 @@ func (h *AuthHandler) writeAuthResponse(w http.ResponseWriter, r *http.Request, 
 		Role:         user.Role,
 	})
 }
-
-

@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
-	"github.com/sonicore/server/internal/core/port"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/sonicore/server/internal/core/port"
 )
 
 // stubProvider is a scriptable PlatformProvider for handler tests.

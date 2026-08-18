@@ -176,11 +176,11 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 							ArtistCountry:    ar.Country,
 							Artist:           ar.Name,
 						}
-					artist, err := findOrCreateArtist(ctx, er, artistRepo, ar.Name, enrich)
-					if err != nil {
-						log.Printf("[scan] create artist for enrichment %s: %v", ar.Name, err)
-						continue
-					}
+						artist, err := findOrCreateArtist(ctx, er, artistRepo, ar.Name, enrich)
+						if err != nil {
+							log.Printf("[scan] create artist for enrichment %s: %v", ar.Name, err)
+							continue
+						}
 						newArtists = append(newArtists, &domain.TrackArtist{
 							ArtistID:  artist.ID,
 							Role:      "performer",

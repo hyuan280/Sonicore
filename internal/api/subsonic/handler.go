@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/auth"
@@ -1052,19 +1053,19 @@ func isAdmin(u *domain.User) bool {
 func userToSub(u *domain.User) map[string]interface{} {
 	isAdm := u.Role == domain.RoleSuperAdmin || u.Role == domain.RoleAdmin
 	return map[string]interface{}{
-		"username":    u.Username,
-		"email":       u.Email,
-		"admin":       isAdm,
-		"scrobbling":  true,
-		"download":    true,
-		"upload":      isAdm,
-		"playlist":    true,
-		"coverArt":    true,
-		"comment":     false,
-		"podcast":     false,
-		"share":       false,
+		"username":        u.Username,
+		"email":           u.Email,
+		"admin":           isAdm,
+		"scrobbling":      true,
+		"download":        true,
+		"upload":          isAdm,
+		"playlist":        true,
+		"coverArt":        true,
+		"comment":         false,
+		"podcast":         false,
+		"share":           false,
 		"videoConversion": false,
-		"lastfm":      false,
+		"lastfm":          false,
 	}
 }
 
@@ -1425,23 +1426,23 @@ func trackToSub(t *domain.Track) map[string]interface{} {
 		}
 	}
 	out := map[string]interface{}{
-		"id":                   t.ID,
-		"title":                t.Title,
-		"artist":               "",
-		"album":                albumTitle,
-		"albumId":              albumID,
-		"track":                trackNum,
-		"discNumber":           discNum,
-		"duration":             t.Duration,
-		"bitRate":              t.BitRate / 1000,
-		"size":                 t.FileSize,
-		"suffix":               t.FileFormat,
-		"contentType":          "audio/" + t.FileFormat,
+		"id":                    t.ID,
+		"title":                 t.Title,
+		"artist":                "",
+		"album":                 albumTitle,
+		"albumId":               albumID,
+		"track":                 trackNum,
+		"discNumber":            discNum,
+		"duration":              t.Duration,
+		"bitRate":               t.BitRate / 1000,
+		"size":                  t.FileSize,
+		"suffix":                t.FileFormat,
+		"contentType":           "audio/" + t.FileFormat,
 		"transcodedContentType": "audio/" + t.FileFormat,
-		"transcodedSuffix":     t.FileFormat,
-		"path":                 t.FilePath,
-		"isDir":                false,
-		"type":                 "music",
+		"transcodedSuffix":      t.FileFormat,
+		"path":                  t.FilePath,
+		"isDir":                 false,
+		"type":                  "music",
 	}
 	if t.CoverImageID != nil {
 		out["coverArt"] = *t.CoverImageID

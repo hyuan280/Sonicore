@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Frontend formatting (lint-staged runs prettier --write on staged web files)
+cd web && npx lint-staged
+status=$?
+cd ..
+[ $status -ne 0 ] && exit $status
+
+# Go formatting
+goimports_bin=$(command -v goimports || { gopath=$(go env GOPATH 2>/dev/null); [ -n "$gopath" ] && echo "$gopath/bin/goimports"; })
+if [ -n "$goimports_bin" ] && [ -x "$goimports_bin" ]; then
+  gofiles=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+  if [ -n "$gofiles" ]; then
+    "$goimports_bin" -w -local github.com/sonicore/server $gofiles
+    git add $gofiles
+  fi
+else
+  echo "warning: goimports not found, skipped Go formatting (go install golang.org/x/tools/cmd/goimports@latest)" >&2
+fi

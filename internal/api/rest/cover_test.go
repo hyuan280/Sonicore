@@ -14,11 +14,12 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gorilla/mux"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/sonicore/server/internal/config"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func newCoverHandler(t *testing.T) (*CoverHandler, sqlmock.Sqlmock, *miniredis.Miniredis, string) {

@@ -14,9 +14,9 @@ func TestNormalizeName(t *testing.T) {
 		{"周杰伦", "周杰伦"},
 		{"The Beatles", "thebeatles"},
 		{"  The   Beatles!  ", "thebeatles"},
-		{"ＣＨＥＣＫ　ＩＴ！", "checkit"}, // full-width to half-width
+		{"ＣＨＥＣＫ　ＩＴ！", "checkit"},    // full-width to half-width
 		{"A.B&C (Live)", "abclive"}, // punctuation stripped, inner space dropped
-		{"中　文　名", "中文名"},      // full-width spaces dropped
+		{"中　文　名", "中文名"},            // full-width spaces dropped
 		{"", ""},
 		{"JAY CHOU", "jaychou"},
 	}

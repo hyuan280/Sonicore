@@ -10,18 +10,18 @@ import (
 // already had a MusicBrainz id keeps source=musicbrainz + that id), so the
 // user-metadata source can re-provide them.
 type UserMetadata struct {
-	UserID      string
-	FileHash    string
+	UserID         string
+	FileHash       string
 	MetadataSource string
-	ExternalID  string
-	Title       string
-	Artist      string
-	Album       string
-	AlbumArtist string
-	TrackNumber int
-	DiscNumber  int
-	Year        int
-	Genre       string
+	ExternalID     string
+	Title          string
+	Artist         string
+	Album          string
+	AlbumArtist    string
+	TrackNumber    int
+	DiscNumber     int
+	Year           int
+	Genre          string
 }
 
 type UserMetadataRepo struct {

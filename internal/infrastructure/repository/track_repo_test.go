@@ -10,36 +10,37 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/sonicore/server/internal/core/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 func testTrack() *domain.Track {
 	now := time.Date(2024, 10, 1, 20, 0, 0, 0, time.UTC)
 	return &domain.Track{
-		ID:          "t-001",
-		LibraryID:   "lib-001",
-		Title:       "Song",
-		Duration:    240,
-		BitRate:     320,
-		SampleRate:  44100,
-		Channels:    2,
-		FilePath:    "/music/song.mp3",
-		FileSize:    10_000_000,
-		FileFormat:  "mp3",
-		AudioCodec:  "mp3",
-		ExternalID:         "mbid-1",
+		ID:             "t-001",
+		LibraryID:      "lib-001",
+		Title:          "Song",
+		Duration:       240,
+		BitRate:        320,
+		SampleRate:     44100,
+		Channels:       2,
+		FilePath:       "/music/song.mp3",
+		FileSize:       10_000_000,
+		FileFormat:     "mp3",
+		AudioCodec:     "mp3",
+		ExternalID:     "mbid-1",
 		MetadataSource: "musicbrainz",
-		Hash:        "hash-1",
-		LyricsMask:  0,
-		LyricsOffset: 0,
-		Heat:        1,
-		PlayCount:   0,
-		Version:     1,
-		VersionLabel: "",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Hash:           "hash-1",
+		LyricsMask:     0,
+		LyricsOffset:   0,
+		Heat:           1,
+		PlayCount:      0,
+		Version:        1,
+		VersionLabel:   "",
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 }
 

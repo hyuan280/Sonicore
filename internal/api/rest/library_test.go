@@ -10,9 +10,10 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
-	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sonicore/server/internal/infrastructure/player"
 )
 
 func newLibraryHandler(t *testing.T) (*LibraryHandler, sqlmock.Sqlmock) {

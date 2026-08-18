@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/core/domain"
 )
 
@@ -55,7 +56,9 @@ func finishTrackScan(t *domain.Track, metadata, coverID sql.NullString, extIDs [
 	return parseExternalIDs(extIDs, &t.ExternalIDs)
 }
 
-func scanTrack(scanner interface{ Scan(dest ...interface{}) error }) (*domain.Track, error) {
+func scanTrack(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.Track, error) {
 	var t domain.Track
 	var metadata sql.NullString
 	var coverID sql.NullString
@@ -693,7 +696,9 @@ func (r *TrackRepo) FindVersionsByExternalIDBulk(ctx context.Context, keys []Ver
 // scanTrackWithExtID scans a track row whose first column is a version-group
 // external id, then the canonical track columns — all in a single Scan so the
 // row is consumed exactly once.
-func scanTrackWithExtID(scanner interface{ Scan(dest ...interface{}) error }, groupExtID *string) (*domain.Track, error) {
+func scanTrackWithExtID(scanner interface {
+	Scan(dest ...interface{}) error
+}, groupExtID *string) (*domain.Track, error) {
 	var t domain.Track
 	var metadata sql.NullString
 	var coverID sql.NullString

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
@@ -164,22 +165,22 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_rate_limit":    neRateLimit,
 		// The cookie itself never leaves the server; only its presence is
 		// reported so the credential does not sit in browser state/DOM.
-		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
-		"platforms_netease_cookie_error":  cookieBroken,
-		"subsonic_jukebox_id":             subJukebox,
+		"platforms_netease_cookie_set":   neCookie != "" && !cookieBroken,
+		"platforms_netease_cookie_error": cookieBroken,
+		"subsonic_jukebox_id":            subJukebox,
 	})
 }
 
 type updateSettingsRequest struct {
-	AllowRegistration     *bool   `json:"allow_registration,omitempty"`
-	MusicBrainzEnabled    *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
-	MusicBrainzAPIURL     *string `json:"metadata_musicbrainz_api_url,omitempty"`
-	MusicBrainzRateLimit  *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
-	NeteaseEnabled        *bool   `json:"metadata_netease_enabled,omitempty"`
-	NeteaseCookie         *string `json:"platforms_netease_cookie,omitempty"`
-	NeteaseCookieClear    *bool   `json:"platforms_netease_cookie_clear,omitempty"`
-	NeteaseRateLimit      *string `json:"platforms_netease_rate_limit,omitempty"`
-	SubsonicJukeboxID     *string `json:"subsonic_jukebox_id,omitempty"`
+	AllowRegistration    *bool   `json:"allow_registration,omitempty"`
+	MusicBrainzEnabled   *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
+	MusicBrainzAPIURL    *string `json:"metadata_musicbrainz_api_url,omitempty"`
+	MusicBrainzRateLimit *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
+	NeteaseEnabled       *bool   `json:"metadata_netease_enabled,omitempty"`
+	NeteaseCookie        *string `json:"platforms_netease_cookie,omitempty"`
+	NeteaseCookieClear   *bool   `json:"platforms_netease_cookie_clear,omitempty"`
+	NeteaseRateLimit     *string `json:"platforms_netease_rate_limit,omitempty"`
+	SubsonicJukeboxID    *string `json:"subsonic_jukebox_id,omitempty"`
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -316,9 +317,9 @@ func (h *AdminHandler) ListDirs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"current":   browseDir,
-		"parent":    parentDir,
-		"dirs":      dirs,
+		"current":    browseDir,
+		"parent":     parentDir,
+		"dirs":       dirs,
 		"has_parent": browseDir != "/",
 	})
 }

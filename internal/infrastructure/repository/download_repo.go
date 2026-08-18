@@ -64,7 +64,9 @@ func (r *DownloadJobRepo) Update(ctx context.Context, job *domain.DownloadJob) e
 	return err
 }
 
-func scanDownloadJob(scanner interface{ Scan(dest ...interface{}) error }) (*domain.DownloadJob, error) {
+func scanDownloadJob(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*domain.DownloadJob, error) {
 	var j domain.DownloadJob
 	err := scanner.Scan(&j.ID, &j.URL, &j.Source, &j.LibraryID, &j.Format,
 		&j.Status, &j.Progress, &j.TargetPath, &j.Metadata, &j.Error,
