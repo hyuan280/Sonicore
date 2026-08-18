@@ -13,11 +13,6 @@ import (
 )
 
 func (e *Engine) applyNetworkLyrics(ctx context.Context, libraryID string, track *domain.Track, enrichment *metadata.EnrichmentResult) bool {
-	// The lyrics write itself is not cancellable: Store.Save is a plain
-	// filesystem write that takes no context, so a scan cancelled mid-flight
-	// may still leave a saved file whose track row never committed. The
-	// orphan sweep in overwrite scans removes such leftovers. ctx is kept for
-	// signature consistency with the other enrichment helpers.
 	if enrichment == nil || enrichment.Lyrics == "" {
 		return false
 	}
@@ -27,8 +22,12 @@ func (e *Engine) applyNetworkLyrics(ctx context.Context, libraryID string, track
 	if track.LyricsMask&lyrics.PriorityBit(lyrics.PriorityNetwork) != 0 || track.LyricsMask&lower != 0 {
 		return false
 	}
-	if err := e.lyricsStore.Save(libraryID, track.ID, lyrics.PriorityNetwork, enrichment.Lyrics); err != nil {
-		log.Printf("[scan] network lyrics save error for %s: %v", track.FilePath, err)
+	if err := e.lyricsStore.Save(ctx, libraryID, track.ID, lyrics.PriorityNetwork, enrichment.Lyrics); err != nil {
+		if ctx.Err() != nil {
+			log.Printf("[scan] network lyrics save cancelled for %s: %v (original: %v)", track.FilePath, ctx.Err(), err)
+		} else {
+			log.Printf("[scan] network lyrics save error for %s: %v", track.FilePath, err)
+		}
 		return false
 	}
 	track.LyricsMask |= lyrics.PriorityBit(lyrics.PriorityNetwork)

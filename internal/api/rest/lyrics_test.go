@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -98,7 +99,7 @@ func TestLyricsGetFound(t *testing.T) {
 	track := lyricsTestTrack()
 	expectTrackFindByID(mock, track)
 
-	require.NoError(t, h.lyricsStore.Save(track.LibraryID, track.ID, lyrics.PriorityUser, "[00:01.00]line"))
+	require.NoError(t, h.lyricsStore.Save(context.Background(), track.LibraryID, track.ID, lyrics.PriorityUser, "[00:01.00]line"))
 
 	rec := httptest.NewRecorder()
 	h.GetLyrics(rec, lyricsGetRequest(track.ID))
@@ -135,7 +136,7 @@ func TestLyricsGetRepairsStaleMask(t *testing.T) {
 	track.LyricsMask = lyrics.PriorityBit(lyrics.PriorityUser) | lyrics.PriorityBit(lyrics.PriorityNetwork)
 	expectTrackFindByID(mock, track)
 
-	require.NoError(t, h.lyricsStore.Save(track.LibraryID, track.ID, lyrics.PriorityUser, "user lyrics"))
+	require.NoError(t, h.lyricsStore.Save(context.Background(), track.LibraryID, track.ID, lyrics.PriorityUser, "user lyrics"))
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tracks SET title=$1, cover_image_id=$2,

@@ -290,8 +290,13 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			}
 
 			if sContent, sFmt := e.findSidecarLyrics(path); sContent != "" {
-				e.lyricsStore.Save(lib.ID, existing.ID, lyrics.PrioritySidecar, sContent)
-				if existing.LyricsMask&lyrics.PriorityBit(lyrics.PrioritySidecar) == 0 || sFmt == "lrc" {
+				if err := e.lyricsStore.Save(ctx, lib.ID, existing.ID, lyrics.PrioritySidecar, sContent); err != nil {
+					if ctx.Err() != nil {
+						log.Printf("[scan] sidecar lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
+					} else {
+						log.Printf("[scan] sidecar lyrics save error for %s: %v", path, err)
+					}
+				} else if existing.LyricsMask&lyrics.PriorityBit(lyrics.PrioritySidecar) == 0 || sFmt == "lrc" {
 					existing.LyricsMask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
 					changed = true
 				}
@@ -552,12 +557,26 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		// Extract lyrics: embedded (priority 0) then sidecar (priority 1)
 		mask := 0
 		if meta.Lyrics != "" {
-			e.lyricsStore.Save(lib.ID, trackID, lyrics.PriorityEmbedded, meta.Lyrics)
-			mask |= lyrics.PriorityBit(lyrics.PriorityEmbedded)
+			if err := e.lyricsStore.Save(ctx, lib.ID, trackID, lyrics.PriorityEmbedded, meta.Lyrics); err != nil {
+				if ctx.Err() != nil {
+					log.Printf("[scan] embedded lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
+				} else {
+					log.Printf("[scan] embedded lyrics save error for %s: %v", path, err)
+				}
+			} else {
+				mask |= lyrics.PriorityBit(lyrics.PriorityEmbedded)
+			}
 		}
 		if sContent, _ := e.findSidecarLyrics(path); sContent != "" {
-			e.lyricsStore.Save(lib.ID, trackID, lyrics.PrioritySidecar, sContent)
-			mask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
+			if err := e.lyricsStore.Save(ctx, lib.ID, trackID, lyrics.PrioritySidecar, sContent); err != nil {
+				if ctx.Err() != nil {
+					log.Printf("[scan] sidecar lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
+				} else {
+					log.Printf("[scan] sidecar lyrics save error for %s: %v", path, err)
+				}
+			} else {
+				mask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
+			}
 		}
 		track.LyricsMask = mask
 		if e.applyNetworkLyrics(ctx, lib.ID, track, enrichment) {

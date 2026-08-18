@@ -1,6 +1,7 @@
 package lyrics
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,7 +58,7 @@ func TestStoreSaveGetRoundTrip(t *testing.T) {
 	store := NewStore(t.TempDir())
 	content := "[00:01.00]Hello world\n[00:05.00]Second line"
 
-	require.NoError(t, store.Save("lib-1", "track-1", PrioritySidecar, content))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PrioritySidecar, content))
 
 	got, priority, format, actualMask, err := store.Get("lib-1", "track-1", PriorityBit(PrioritySidecar))
 	require.NoError(t, err)
@@ -70,8 +71,8 @@ func TestStoreSaveGetRoundTrip(t *testing.T) {
 func TestStoreSaveOverwritesSamePriority(t *testing.T) {
 	store := NewStore(t.TempDir())
 
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "first"))
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "second"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "first"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "second"))
 
 	got, _, _, _, err := store.Get("lib-1", "track-1", PriorityBit(PriorityUser))
 	require.NoError(t, err)
@@ -81,9 +82,9 @@ func TestStoreSaveOverwritesSamePriority(t *testing.T) {
 func TestStoreGetPriorityOrder(t *testing.T) {
 	store := NewStore(t.TempDir())
 
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityEmbedded, "embedded"))
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityNetwork, "network"))
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "user"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityEmbedded, "embedded"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityNetwork, "network"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "user"))
 
 	mask := PriorityBit(PriorityEmbedded) | PriorityBit(PriorityNetwork) | PriorityBit(PriorityUser)
 	got, priority, _, actualMask, err := store.Get("lib-1", "track-1", mask)
@@ -95,8 +96,8 @@ func TestStoreGetPriorityOrder(t *testing.T) {
 
 func TestStoreGetHonorsMask(t *testing.T) {
 	store := NewStore(t.TempDir())
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "user"))
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityNetwork, "network"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "user"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityNetwork, "network"))
 
 	got, priority, _, _, err := store.Get("lib-1", "track-1", PriorityBit(PriorityNetwork))
 	require.NoError(t, err)
@@ -106,7 +107,7 @@ func TestStoreGetHonorsMask(t *testing.T) {
 
 func TestStoreGetReportsMissingMaskBits(t *testing.T) {
 	store := NewStore(t.TempDir())
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "user"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "user"))
 
 	_, _, _, actualMask, err := store.Get("lib-1", "track-1", PriorityBit(PriorityUser)|PriorityBit(PrioritySidecar))
 	require.NoError(t, err)
@@ -123,8 +124,8 @@ func TestStoreGetNotFound(t *testing.T) {
 
 func TestStoreGetAcrossLibraries(t *testing.T) {
 	store := NewStore(t.TempDir())
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "lib1 content"))
-	require.NoError(t, store.Save("lib-2", "track-1", PriorityUser, "lib2 content"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "lib1 content"))
+	require.NoError(t, store.Save(context.Background(), "lib-2", "track-1", PriorityUser, "lib2 content"))
 
 	got, _, _, _, err := store.Get("lib-2", "track-1", PriorityBit(PriorityUser))
 	require.NoError(t, err)
@@ -133,7 +134,7 @@ func TestStoreGetAcrossLibraries(t *testing.T) {
 
 func TestStoreDelete(t *testing.T) {
 	store := NewStore(t.TempDir())
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "content"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "content"))
 
 	require.NoError(t, store.Delete("lib-1", "track-1", PriorityUser))
 	_, _, _, _, err := store.Get("lib-1", "track-1", PriorityBit(PriorityUser))
@@ -147,9 +148,9 @@ func TestStoreDeleteMissingFile(t *testing.T) {
 
 func TestStoreDeleteAll(t *testing.T) {
 	store := NewStore(t.TempDir())
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "user"))
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityNetwork, "network"))
-	require.NoError(t, store.Save("lib-1", "track-2", PriorityUser, "other"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "user"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityNetwork, "network"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-2", PriorityUser, "other"))
 
 	require.NoError(t, store.DeleteAll("lib-1", "track-1"))
 
@@ -165,8 +166,8 @@ func TestStoreFilesArePidIsolated(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "user txt"))
-	require.NoError(t, store.Save("lib-1", "track-1", PriorityUser, "[00:01.00]user lrc"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "user txt"))
+	require.NoError(t, store.Save(context.Background(), "lib-1", "track-1", PriorityUser, "[00:01.00]user lrc"))
 
 	files, err := os.ReadDir(filepath.Join(dir, "lib-1"))
 	require.NoError(t, err)

@@ -1,6 +1,7 @@
 package lyrics
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +32,14 @@ func (s *Store) Dir() string {
 }
 
 // Save writes lyrics content and returns the bitmask bit for this priority.
-func (s *Store) Save(libraryID, trackID string, priority int, content string) error {
+// The write honours ctx at operation boundaries: os.WriteFile itself cannot be
+// interrupted, but a cancelled context aborts the save before any filesystem
+// mutation (dir creation, stale-extension removal, write), so a scan cancelled
+// mid-flight does not leave a half-written lyrics file behind.
+func (s *Store) Save(ctx context.Context, libraryID, trackID string, priority int, content string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	libDir := filepath.Join(s.dir, libraryID)
 	if err := os.MkdirAll(libDir, 0755); err != nil {
 		return fmt.Errorf("create lyrics dir: %w", err)
@@ -42,6 +50,9 @@ func (s *Store) Save(libraryID, trackID string, priority int, content string) er
 		os.Remove(base + ext)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	format := detectFormat(content)
 	path := base + "." + format
 	return os.WriteFile(path, []byte(content), 0644)
