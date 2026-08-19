@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,36 +33,17 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string {
-	var filePath, fileFormat, title, artist, album string
-	var bitRate int
-	if err := db.QueryRowContext(ctx,
-		`SELECT t.file_path, t.file_format, t.bit_rate, t.title,
-		        COALESCE((SELECT string_agg(a2.name, ',' ORDER BY ta2.sort_order)
-		                  FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id
-		                  WHERE ta2.track_id = t.id), ''),
-		        COALESCE((SELECT al.title FROM track_albums tal JOIN albums al ON al.id = tal.album_id WHERE tal.track_id = t.id ORDER BY tal.disc_number, tal.track_number LIMIT 1), '')
-		 FROM tracks t WHERE t.id = $1`, trackID).Scan(&filePath, &fileFormat, &bitRate, &title, &artist, &album); err != nil {
-		if err != sql.ErrNoRows {
-			log.Printf("[scan] version label query error for %s: %v", trackID, err)
-		}
-		return ""
-	}
+type TrackVersionInfo struct {
+	ID, FilePath, FileFormat, Title, Artist, Album, VersionLabel string
+	BitRate                                                      int
+}
 
-	dir := strings.ToLower(filepath.Base(filepath.Dir(filePath)))
-	stem := strings.ToLower(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))
+func ExtractVersionLabelFromInfo(info TrackVersionInfo) string {
+	dir := strings.ToLower(filepath.Base(filepath.Dir(info.FilePath)))
+	stem := strings.ToLower(strings.TrimSuffix(filepath.Base(info.FilePath), filepath.Ext(info.FilePath)))
 
-	// Version keywords must match whole tokens, not substrings: `stem` is the
-	// track title, so substring matching would mislabel ordinary titles
-	// ("Radio Ga Ga"→radio, "Live Forever"→live, "Piano Man"→piano) and words
-	// merely containing a keyword ("Deliverance"→live, "Credits"→edit,
-	// "Remix"/"Mixtape"→mix). The title/album/artist tokens are always
-	// blacklisted (the same way extractFromPath does) so the track's own name
-	// never produces a label: if the title already carries a version marker
-	// ("Song (Live)"), a "Live" label is redundant, and a filename-derived
-	// title must not be re-labeled from its own tokens either.
 	blacklist := make(map[string]bool)
-	for _, raw := range []string{title, album, artist} {
+	for _, raw := range []string{info.Title, info.Album, info.Artist} {
 		for _, tok := range splitByPunct(raw) {
 			if len(tok) > 1 {
 				blacklist[strings.ToLower(tok)] = true
@@ -76,15 +56,33 @@ func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) string
 			continue
 		}
 		if versionKeyword(lower) {
-			return fmt.Sprintf("%s · %s%s", titleCase(lower), strings.ToUpper(fileFormat), versionBitRate(bitRate))
+			return fmt.Sprintf("%s · %s%s", titleCase(lower), strings.ToUpper(info.FileFormat), versionBitRate(info.BitRate))
 		}
 	}
 
-	if label := extractFromPath(dir, stem, title, artist, album, filePath); label != "" {
-		return fmt.Sprintf("%s · %s%s", label, strings.ToUpper(fileFormat), versionBitRate(bitRate))
+	if label := extractFromPath(dir, stem, info.Title, info.Artist, info.Album, info.FilePath); label != "" {
+		return fmt.Sprintf("%s · %s%s", label, strings.ToUpper(info.FileFormat), versionBitRate(info.BitRate))
 	}
 
-	return fmt.Sprintf("%s%s", strings.ToUpper(fileFormat), versionBitRate(bitRate))
+	return fmt.Sprintf("%s%s", strings.ToUpper(info.FileFormat), versionBitRate(info.BitRate))
+}
+
+func ExtractVersionLabel(ctx context.Context, db *sql.DB, trackID string) (string, error) {
+	var info TrackVersionInfo
+	info.ID = trackID
+	if err := db.QueryRowContext(ctx,
+		`SELECT t.file_path, t.file_format, t.bit_rate, t.title,
+		        COALESCE((SELECT string_agg(a2.name, ',' ORDER BY ta2.sort_order)
+		                  FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id
+		                  WHERE ta2.track_id = t.id), ''),
+		        COALESCE((SELECT al.title FROM track_albums tal JOIN albums al ON al.id = tal.album_id WHERE tal.track_id = t.id ORDER BY tal.disc_number, tal.track_number LIMIT 1), '')
+		 FROM tracks t WHERE t.id = $1`, trackID).Scan(&info.FilePath, &info.FileFormat, &info.BitRate, &info.Title, &info.Artist, &info.Album); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("query version label for %s: %w", trackID, err)
+	}
+	return ExtractVersionLabelFromInfo(info), nil
 }
 
 // versionBitRate renders the bit-rate suffix for a version label. A zero
@@ -212,4 +210,81 @@ func titleCase(s string) string {
 	}
 	runes[0] = rune(unicode.ToUpper(runes[0]))
 	return string(runes)
+}
+
+type VersionUpdate struct {
+	ID      string
+	Version int
+	Label   string
+}
+
+type VersionGroupInsert struct {
+	Source     string
+	ExternalID string
+	LibraryID  string
+	TrackID    string
+}
+
+type VersionGroupDelete struct {
+	Source     string
+	ExternalID string
+	LibraryID  string
+}
+
+const batchSize = 500
+
+type batchDB interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
+func BatchUpdateVersionLabels(ctx context.Context, db batchDB, updates []VersionUpdate) error {
+	for i := 0; i < len(updates); i += batchSize {
+		end := i + batchSize
+		if end > len(updates) {
+			end = len(updates)
+		}
+		batch := updates[i:end]
+		var sb strings.Builder
+		sb.WriteString("UPDATE tracks SET version = v.version, version_label = v.label FROM (VALUES ")
+		args := make([]interface{}, 0, len(batch)*3)
+		for j, u := range batch {
+			if j > 0 {
+				sb.WriteString(", ")
+			}
+			n := j * 3
+			fmt.Fprintf(&sb, "($%d, $%d, $%d)", n+1, n+2, n+3)
+			args = append(args, u.ID, u.Version, u.Label)
+		}
+		sb.WriteString(") AS v(id, version, label) WHERE tracks.id = v.id")
+		if _, err := db.ExecContext(ctx, sb.String(), args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func BatchInsertVersionGroups(ctx context.Context, db batchDB, inserts []VersionGroupInsert) error {
+	for i := 0; i < len(inserts); i += batchSize {
+		end := i + batchSize
+		if end > len(inserts) {
+			end = len(inserts)
+		}
+		batch := inserts[i:end]
+		var sb strings.Builder
+		sb.WriteString("INSERT INTO track_version_groups (metadata_source, external_id, library_id, track_id) VALUES ")
+		args := make([]interface{}, 0, len(batch)*4)
+		for j, ins := range batch {
+			if j > 0 {
+				sb.WriteString(", ")
+			}
+			n := j * 4
+			fmt.Fprintf(&sb, "($%d, $%d, $%d, $%d)", n+1, n+2, n+3, n+4)
+			args = append(args, ins.Source, ins.ExternalID, ins.LibraryID, ins.TrackID)
+		}
+		sb.WriteString(" ON CONFLICT DO NOTHING")
+		if _, err := db.ExecContext(ctx, sb.String(), args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }

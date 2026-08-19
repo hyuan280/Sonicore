@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/lib/pq"
+
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
@@ -526,7 +528,9 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err == nil && oldExtID != track.ExternalID && track.ExternalID != "" {
-			h.reResolveVersions(r.Context(), track.LibraryID, oldExtID, track.ExternalID, track.ID, oldSource)
+			if err := h.reResolveVersions(r.Context(), track.LibraryID, oldExtID, track.ExternalID, track.ID, oldSource); err != nil {
+				log.Printf("[metadata] reResolveVersions: %v", err)
+			}
 		}
 		// A source-only change cleared the id: the old (source, external_id)
 		// pair is gone, so drop the track from its previous version group
@@ -560,7 +564,9 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				// could insert duplicate '' rows).
 				normOld := sourceOrDefaultSource(oldSource)
 				if ids := h.externalIDGroupIDs(r.Context(), normOld, oldExtID, track.LibraryID); len(ids) >= 1 {
-					h.renumberGroup(r.Context(), normOld, ids, oldExtID, track.LibraryID)
+					if err := h.renumberGroup(r.Context(), normOld, ids, oldExtID, track.LibraryID); err != nil {
+						log.Printf("[metadata] renumberGroup: %v", err)
+					}
 				}
 			}
 		}
@@ -1352,14 +1358,13 @@ func isValidSource(s string) bool {
 // changes. oldSource is the metadata source the track had before this save;
 // when it differs from the new source the old group rows are cleaned without
 // a source predicate so no stale (source, external id) rows survive.
-func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldExtID, newExtID, trackID, oldSource string) {
+func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldExtID, newExtID, trackID, oldSource string) error {
 	// The previous source may have been empty on legacy rows; normalize it
 	// the same way the new source is normalized below.
 	oldSource = sourceOrDefaultSource(oldSource)
 	newSource, err := h.trackSource(ctx, trackID)
 	if err != nil {
-		log.Printf("[metadata] reResolveVersions: read source for %s: %v", trackID, err)
-		return
+		return fmt.Errorf("read source for %s: %w", trackID, err)
 	}
 	if oldExtID != "" {
 		ids := h.externalIDGroupIDs(ctx, oldSource, oldExtID, libraryID)
@@ -1371,14 +1376,19 @@ func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldE
 			// group row for the old external id regardless of source.
 			h.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE external_id = $1 AND library_id = $2`, oldExtID, libraryID)
 		} else {
-			h.renumberGroup(ctx, oldSource, ids, oldExtID, libraryID)
+			if err := h.renumberGroup(ctx, oldSource, ids, oldExtID, libraryID); err != nil {
+				return fmt.Errorf("renumber old group %s/%s: %w", oldSource, oldExtID, err)
+			}
 		}
 	}
 
 	ids := h.externalIDGroupIDs(ctx, newSource, newExtID, libraryID)
 	if len(ids) >= 2 {
-		h.renumberGroup(ctx, newSource, ids, newExtID, libraryID)
+		if err := h.renumberGroup(ctx, newSource, ids, newExtID, libraryID); err != nil {
+			return fmt.Errorf("renumber new group %s/%s: %w", newSource, newExtID, err)
+		}
 	}
+	return nil
 }
 
 // trackSource reads the metadata source of a track. A missing track is not
@@ -1412,20 +1422,79 @@ func (h *MetadataHandler) externalIDGroupIDs(ctx context.Context, source, extern
 	return ids
 }
 
-func (h *MetadataHandler) renumberGroup(ctx context.Context, source string, ids []string, externalID, libraryID string) {
+func (h *MetadataHandler) renumberGroup(ctx context.Context, source string, ids []string, externalID, libraryID string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	infoMap, err := h.loadVersionTrackInfos(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("load version track infos: %w", err)
+	}
+
+	updates := make([]scanner.VersionUpdate, 0, len(ids))
+	inserts := make([]scanner.VersionGroupInsert, 0, len(ids))
+
 	for i, id := range ids {
 		version := 1
 		if i > 0 {
 			version = i + 1
 		}
-		var existingLabel string
-		h.db.QueryRowContext(ctx, `SELECT version_label FROM tracks WHERE id = $1`, id).Scan(&existingLabel)
-		if existingLabel == "" {
-			existingLabel = scanner.ExtractVersionLabel(ctx, h.db, id)
+		info, ok := infoMap[id]
+		label := ""
+		if ok {
+			label = info.VersionLabel
 		}
-		h.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, existingLabel, id)
-		h.db.ExecContext(ctx,
-			`INSERT INTO track_version_groups (metadata_source, external_id, library_id, track_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-			source, externalID, libraryID, id)
+		if label == "" {
+			if ok {
+				label = scanner.ExtractVersionLabelFromInfo(info)
+			} else {
+				label, err = scanner.ExtractVersionLabel(ctx, h.db, id)
+				if err != nil {
+					return fmt.Errorf("fallback version label for %s: %w", id, err)
+				}
+			}
+		}
+		updates = append(updates, scanner.VersionUpdate{ID: id, Version: version, Label: label})
+		inserts = append(inserts, scanner.VersionGroupInsert{Source: source, ExternalID: externalID, LibraryID: libraryID, TrackID: id})
 	}
+
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := scanner.BatchUpdateVersionLabels(ctx, tx, updates); err != nil {
+		return fmt.Errorf("batch update version labels: %w", err)
+	}
+	if err := scanner.BatchInsertVersionGroups(ctx, tx, inserts); err != nil {
+		return fmt.Errorf("batch insert version groups: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (h *MetadataHandler) loadVersionTrackInfos(ctx context.Context, ids []string) (map[string]scanner.TrackVersionInfo, error) {
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT t.id, t.file_path, t.file_format, t.bit_rate, t.title, COALESCE(t.version_label, ''),
+		        COALESCE((SELECT string_agg(a2.name, ',' ORDER BY ta2.sort_order)
+		                  FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id
+		                  WHERE ta2.track_id = t.id), ''),
+		        COALESCE((SELECT al.title FROM track_albums tal JOIN albums al ON al.id = tal.album_id WHERE tal.track_id = t.id ORDER BY tal.disc_number, tal.track_number LIMIT 1), '')
+		 FROM tracks t WHERE t.id = ANY($1)`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	infoMap := make(map[string]scanner.TrackVersionInfo, len(ids))
+	for rows.Next() {
+		var info scanner.TrackVersionInfo
+		if err := rows.Scan(&info.ID, &info.FilePath, &info.FileFormat, &info.BitRate, &info.Title, &info.VersionLabel, &info.Artist, &info.Album); err != nil {
+			return nil, fmt.Errorf("scan version track info: %w", err)
+		}
+		infoMap[info.ID] = info
+	}
+	return infoMap, rows.Err()
 }

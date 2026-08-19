@@ -17,6 +17,11 @@ import (
 // resolveVersions groups tracks by (metadata_source, external_id) and sets
 // version/version_label.
 func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
+	infoMap, err := e.loadVersionTrackInfo(ctx, libraryID)
+	if err != nil {
+		return fmt.Errorf("load version track info: %w", err)
+	}
+
 	rows, err := e.db.QueryContext(ctx,
 		`SELECT metadata_source, external_id, array_agg(id ORDER BY
 		 CASE file_format
@@ -34,6 +39,10 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 	}
 	defer rows.Close()
 
+	var updates []VersionUpdate
+	var inserts []VersionGroupInsert
+	var staleGroups []VersionGroupDelete
+
 	for rows.Next() {
 		var externalID string
 		var source string
@@ -43,47 +52,99 @@ func (e *Engine) resolveVersions(ctx context.Context, libraryID string) error {
 		}
 
 		if len(ids) < 2 {
-			if _, err := e.db.ExecContext(ctx, `UPDATE tracks SET version = 0, version_label = '' WHERE id = $1`, ids[0]); err != nil {
-				log.Printf("[scan] reset version for %s: %v", ids[0], err)
-			}
-			if _, err := e.db.ExecContext(ctx, `DELETE FROM track_version_groups WHERE metadata_source = $1 AND external_id = $2 AND library_id = $3`, source, externalID, libraryID); err != nil {
-				log.Printf("[scan] delete stale version group %s/%s: %v", source, externalID, err)
-			}
+			updates = append(updates, VersionUpdate{ID: ids[0], Version: 0, Label: ""})
+			staleGroups = append(staleGroups, VersionGroupDelete{Source: source, ExternalID: externalID, LibraryID: libraryID})
 			continue
 		}
 
 		for i, id := range ids {
-			version := 0
-			if i == 0 {
-				version = 1
-			} else {
-				version = i + 1
+			version := i + 1
+			info, ok := infoMap[id]
+			if !ok {
+				label, err := ExtractVersionLabel(ctx, e.db, id)
+				if err != nil {
+					return fmt.Errorf("fallback version label for %s: %w", id, err)
+				}
+				updates = append(updates, VersionUpdate{ID: id, Version: version, Label: label})
+				inserts = append(inserts, VersionGroupInsert{Source: source, ExternalID: externalID, LibraryID: libraryID, TrackID: id})
+				continue
 			}
-			label := ExtractVersionLabel(ctx, e.db, id)
-			res, err := e.db.ExecContext(ctx, `UPDATE tracks SET version = $1, version_label = $2 WHERE id = $3`, version, label, id)
-			if err != nil {
-				log.Printf("[scan] version update error: source=%s external_id=%s ver=%d id=%s err=%v", source, externalID, version, id, err)
-			} else if n, _ := res.RowsAffected(); n == 0 {
-				log.Printf("[scan] version update affected 0 rows: source=%s external_id=%s ver=%d id=%s", source, externalID, version, id)
-			}
-			if _, err := e.db.ExecContext(ctx,
-				`INSERT INTO track_version_groups (metadata_source, external_id, library_id, track_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-				source, externalID, libraryID, id); err != nil {
-				log.Printf("[scan] insert version group row for %s: %v", id, err)
-			}
+			label := ExtractVersionLabelFromInfo(info)
+			updates = append(updates, VersionUpdate{ID: id, Version: version, Label: label})
+			inserts = append(inserts, VersionGroupInsert{Source: source, ExternalID: externalID, LibraryID: libraryID, TrackID: id})
 		}
-	}
-
-	// Clean up: tracks that used to be in a group but no longer have a group external id
-	if _, err := e.db.ExecContext(ctx,
-		`DELETE FROM track_version_groups WHERE library_id = $1 AND (metadata_source, external_id) NOT IN (SELECT DISTINCT metadata_source, external_id FROM tracks WHERE library_id = $1 AND external_id != '')`, libraryID); err != nil {
-		log.Printf("[scan] delete stale version group rows for %s: %v", libraryID, err)
 	}
 
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate external id groups: %w", err)
 	}
-	return nil
+
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, g := range staleGroups {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM track_version_groups WHERE metadata_source = $1 AND external_id = $2 AND library_id = $3`, g.Source, g.ExternalID, g.LibraryID); err != nil {
+			return fmt.Errorf("delete stale version group %s/%s for library %s: %w", g.Source, g.ExternalID, g.LibraryID, err)
+		}
+	}
+
+	if err := BatchUpdateVersionLabels(ctx, tx, updates); err != nil {
+		return fmt.Errorf("batch update version labels: %w", err)
+	}
+	if err := BatchInsertVersionGroups(ctx, tx, inserts); err != nil {
+		return fmt.Errorf("batch insert version groups: %w", err)
+	}
+
+	// Clean up: tracks that used to be in a group but no longer have a group external id
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM track_version_groups WHERE library_id = $1 AND (metadata_source, external_id) NOT IN (SELECT DISTINCT metadata_source, external_id FROM tracks WHERE library_id = $1 AND external_id != '')`, libraryID); err != nil {
+		return fmt.Errorf("delete stale version group rows: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (e *Engine) loadVersionTrackInfo(ctx context.Context, libraryID string) (map[string]TrackVersionInfo, error) {
+	infoMap := make(map[string]TrackVersionInfo)
+	var lastID string
+	const pageSize = 5000
+
+	for {
+		rows, err := e.db.QueryContext(ctx,
+			`SELECT t.id, t.file_path, t.file_format, t.bit_rate, t.title,
+			        COALESCE((SELECT string_agg(a2.name, ',' ORDER BY ta2.sort_order)
+			                  FROM track_artists ta2 JOIN artists a2 ON a2.id = ta2.artist_id
+			                  WHERE ta2.track_id = t.id), ''),
+			        COALESCE((SELECT al.title FROM track_albums tal JOIN albums al ON al.id = tal.album_id WHERE tal.track_id = t.id ORDER BY tal.disc_number, tal.track_number LIMIT 1), '')
+			 FROM tracks t WHERE t.library_id = $1 AND t.external_id != '' AND t.id > $2
+			 ORDER BY t.id LIMIT $3`, libraryID, lastID, pageSize)
+		if err != nil {
+			return nil, err
+		}
+
+		count := 0
+		for rows.Next() {
+			var info TrackVersionInfo
+			if err := rows.Scan(&info.ID, &info.FilePath, &info.FileFormat, &info.BitRate, &info.Title, &info.Artist, &info.Album); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan version track info: %w", err)
+			}
+			infoMap[info.ID] = info
+			lastID = info.ID
+			count++
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if count < pageSize {
+			break
+		}
+	}
+	return infoMap, nil
 }
 
 // mergeKey builds the normalized comparison key (title, album, artist) for
