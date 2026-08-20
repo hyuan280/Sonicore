@@ -61,6 +61,7 @@ export default function SettingsPage() {
   const [scanOverwrite, setScanOverwrite] = useState(false);
   const [manageLib, setManageLib] = useState<any>(null);
   const [manageTracks, setManageTracks] = useState<any[]>([]);
+  const [availableSources, setAvailableSources] = useState<{ name: string; label: string }[]>([]);
   const [managePage, setManagePage] = useState(1);
   const [managePerPage, setManagePerPage] = usePerPage("manage", 20);
   const [manageTotal, setManageTotal] = useState(0);
@@ -71,6 +72,30 @@ export default function SettingsPage() {
   const [managePerPageOpen, setManagePerPageOpen] = useState(false);
   const [searching, setSearching] = useState("");
   const [searchModal, setSearchModal] = useState<any>(null);
+
+  useEffect(() => {
+    if (!manageLib) return;
+    const controller = new AbortController();
+    const loadSources = async () => {
+      try {
+        const res = await fetch("/api/metadata/sources", {
+          signal: controller.signal,
+          headers: { Authorization: "Bearer " + localStorage.getItem("token") },
+        });
+        if (!res.ok) {
+          console.error("Failed to load metadata sources:", res.status);
+          return;
+        }
+        const d = await res.json();
+        setAvailableSources(d.sources || []);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Failed to load metadata sources:", err);
+      }
+    };
+    loadSources();
+    return () => controller.abort();
+  }, [manageLib]);
 
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchRef = useRef(manageSearch);
@@ -772,10 +797,6 @@ export default function SettingsPage() {
                               },
                               body: JSON.stringify({
                                 track_id: trk.id,
-                                title: trk.title,
-                                artist: performerNames(trk.artists),
-                                album: trk.albums?.[0]?.title || "",
-                                external_id: trk.external_id || "",
                               }),
                             });
                             setSearchModal({ track: trk, result: await res.json(), edit: {} });
@@ -785,7 +806,7 @@ export default function SettingsPage() {
                           setSearching("");
                         }}
                         className="p-1 rounded text-zinc-500 hover:text-green-400 cursor-pointer"
-                        title={t("metadata.identifyMusicBrainz")}
+                        title={t("metadata.viewMetadata")}
                       >
                         {searching === trk.id ? (
                           <Loader2 className="w-4 h-4 animate-spin" />
@@ -824,10 +845,43 @@ export default function SettingsPage() {
           onSaved={() => {
             doLoad();
           }}
+          availableSources={availableSources}
         />
       )}
     </div>
   );
+}
+
+interface SearchResultData {
+  track?: {
+    id?: string;
+    title?: string;
+    external_id?: string;
+    file_name?: string;
+    file_hash?: string;
+    album?: string;
+    metadata_source?: string;
+    version_label?: string;
+    year?: number;
+    genre?: string;
+    artists?: Array<{ name?: string; artist?: { name?: string }; external_id?: string }>;
+  };
+  result?: {
+    matched?: boolean;
+    cached?: boolean;
+    track_external_id?: string;
+    source?: string;
+    title?: string;
+    album?: string;
+    album_external_id?: string;
+    year?: number;
+    genre?: string;
+    file_hash?: string;
+    artists?: Array<{ name?: string; external_id?: string; source?: string }>;
+    albums?: Array<{ id?: string; title?: string; external_id?: string; source?: string }>;
+  };
+  edit?: Record<string, any>;
+  error?: string;
 }
 
 function SearchResultModal({
@@ -835,24 +889,28 @@ function SearchResultModal({
   onClose,
   onUpdate,
   onSaved,
+  availableSources,
 }: {
-  data: any;
+  data: SearchResultData;
   onClose: () => void;
   onUpdate: (e: any) => void;
   onSaved?: () => void;
+  availableSources: { name: string; label: string }[];
 }) {
   const { t: tModal } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [selectedArtists, setSelectedArtists] = useState<SelectedArtist[]>([]);
-  const [localResult, setLocalResult] = useState<any>(null);
   const [extIDValue, setExtIDValue] = useState("");
   const [extIDEditing, setExtIDEditing] = useState(false);
   const [extIDSearching, setExtIDSearching] = useState(false);
   const [extIDError, setExtIDError] = useState(false);
+  const [extIDSource, setExtIDSource] = useState("");
+  const [extIDSearched, setExtIDSearched] = useState("");
+  const [forceUnmatched, setForceUnmatched] = useState(false);
   const [reidentifying, setReidentifying] = useState(false);
   const [selectedAlbums, setSelectedAlbums] = useState<
-    { id?: string; title: string; external_id?: string; artist?: string }[]
+    { id?: string; title: string; external_id?: string; artist?: string; source?: string }[]
   >([]);
   const [albumQuery, setAlbumQuery] = useState("");
   const [albumResults, setAlbumResults] = useState<any[]>([]);
@@ -862,26 +920,47 @@ function SearchResultModal({
     const result = data?.result;
     if (!result?.artists?.length) return;
     setSelectedArtists(
-      result.artists.map((a: any) => ({
-        name: a.name || a.artist?.name,
+      result.artists.map((a) => ({
+        name: a.name || "",
         external_id: a.external_id || "",
       })),
     );
   }, [data?.result?.artists]);
 
   useEffect(() => {
-    setExtIDValue(data?.result?.track_external_id ?? data?.track?.external_id ?? "");
+    const extID = data?.result?.track_external_id ?? data?.track?.external_id ?? "";
+    setExtIDValue(extID);
+    setExtIDSearched(extID);
+    const src = data?.result?.source ?? data?.track?.metadata_source ?? "";
+    setExtIDSource(src || availableSources[0]?.name || "");
+    setForceUnmatched(false);
     setSaveError("");
-  }, [data?.result?.track_external_id, data?.track?.external_id]);
+  }, [
+    data?.result?.track_external_id,
+    data?.track?.external_id,
+    data?.result?.source,
+    data?.track?.metadata_source,
+    availableSources,
+  ]);
 
   useEffect(() => {
-    if (data?.result?.albums?.length > 0) {
+    const albums = data?.result?.albums;
+    if (albums && albums.length > 0) {
       setSelectedAlbums(
-        data.result.albums.map((a: any) => ({ id: a.id, title: a.title, external_id: "" })),
+        albums.map((a) => ({
+          id: a.id,
+          title: a.title || "",
+          external_id: a.external_id || "",
+          source: a.source,
+        })),
       );
     } else if (data?.result?.album) {
       const initial = [
-        { title: data.result.album, external_id: data.result.album_external_id || "" },
+        {
+          title: data.result.album,
+          external_id: data.result.album_external_id || "",
+          source: data.result.source,
+        },
       ];
       if (data.result.album_external_id) {
         setSelectedAlbums(initial);
@@ -909,41 +988,57 @@ function SearchResultModal({
         body: JSON.stringify({
           track_id: data.track?.id || "",
           external_id: extIDValue,
-          // TODO: 支持显式指定源，否则 legacy(空 source) 曲目无法用非 MusicBrainz 源重新匹配
-          source: data.track?.metadata_source || "",
+          source: extIDSource || availableSources[0]?.name || "",
         }),
       });
       const result = await res.json();
+      if (!res.ok) {
+        setExtIDError(true);
+        setSaveError(result.error || "Search failed");
+        setExtIDSearching(false);
+        return;
+      }
       if (result.matched && result.track_external_id) {
+        setExtIDSearched(extIDValue);
+        onUpdate({
+          ...(data.edit ?? {}),
+          title: result.title ?? "",
+          album: result.album ?? "",
+          year: result.year ?? 0,
+          genre: result.genre ?? "",
+          track_external_id: result.track_external_id ?? "",
+          album_external_id: result.album_external_id ?? "",
+        });
         if (isMatched) {
-          setLocalResult(result);
-          setExtIDEditing(false);
-        } else {
-          onUpdate({
-            ...data.edit,
-            title: result.title ?? "",
-            album: result.album ?? "",
-            year: result.year ?? 0,
-            genre: result.genre ?? "",
-            track_external_id: result.track_external_id ?? "",
-            album_external_id: result.album_external_id ?? "",
-          });
+          setForceUnmatched(true);
+        }
+        if (result.album || result.album_external_id) {
+          setSelectedAlbums([
+            {
+              title: result.album || "",
+              external_id: result.album_external_id || "",
+              artist: result.artists?.[0]?.name || "",
+              source: result.source,
+            },
+          ]);
         }
         if (result.artists?.length) {
           setSelectedArtists(
             result.artists.map((a: any) => ({
-              name: a.name || a.artist?.name,
+              name: a.name || "",
               external_id: a.external_id || "",
             })),
           );
         }
       } else {
+        // Design: on search failure, keep the user-entered extIDValue so the
+        // Save button stays disabled (extIDValue !== extIDSearched). This
+        // forces the user to either correct the ID or close the modal — stale
+        // data must not be saved.
         setExtIDError(true);
-        if (!isMatched) setExtIDValue("");
       }
     } catch {
       setExtIDError(true);
-      if (!isMatched) setExtIDValue("");
     }
     setExtIDSearching(false);
   };
@@ -958,7 +1053,7 @@ function SearchResultModal({
           "Content-Type": "application/json",
           Authorization: "Bearer " + localStorage.getItem("token"),
         },
-        body: JSON.stringify({ name: albumQuery.trim() }),
+        body: JSON.stringify({ name: albumQuery.trim(), source: extIDSource }),
       });
       const d = await res.json();
       setAlbumResults(d.releases || []);
@@ -968,7 +1063,12 @@ function SearchResultModal({
     setAlbumSearching(false);
   };
 
-  const addAlbum = (al: { title: string; external_id: string; artist?: string }) => {
+  const addAlbum = (al: {
+    title: string;
+    external_id: string;
+    artist?: string;
+    source?: string;
+  }) => {
     const exists = al.external_id
       ? selectedAlbums.some((a) => a.external_id === al.external_id)
       : selectedAlbums.some((a) => a.title === al.title && !a.external_id);
@@ -983,12 +1083,12 @@ function SearchResultModal({
     setSelectedAlbums(selectedAlbums.filter((_, i) => i !== idx));
   };
 
-  const display = localResult ?? data.result;
+  const display = data.result as any;
   const isMatched = display?.matched && display?.track_external_id;
   const locked = !!data?.result?.track_external_id;
 
   useEffect(() => {
-    if (data?.result && !(data.result.matched && data.result.track_external_id)) {
+    if (data?.result && !(data.result?.matched && data.result?.track_external_id)) {
       setExtIDEditing(true);
     }
   }, [data?.result?.matched, data?.result?.track_external_id]);
@@ -999,11 +1099,11 @@ function SearchResultModal({
       onClick={onClose}
     >
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md"
+        className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold">{tModal("metadata.mbid")}</h3>
+          <h3 className="font-bold">{tModal("metadata.songMetadata")}</h3>
           <button onClick={onClose} className="p-1 rounded hover:bg-zinc-800 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
@@ -1028,7 +1128,12 @@ function SearchResultModal({
                   });
                   onSaved?.();
                   onClose();
-                } catch {}
+                } catch (e) {
+                  console.error("Reidentify failed:", e);
+                  setSaveError(tModal("settings.networkError"));
+                  setReidentifying(false);
+                  return;
+                }
                 setReidentifying(false);
               }}
               disabled={reidentifying}
@@ -1049,31 +1154,31 @@ function SearchResultModal({
               <div className="h-full bg-green-500 animate-pulse rounded-full w-full" />
             </div>
             <p className="text-sm text-zinc-400 text-center">
-              {tModal("settings.searchingMusicBrainz")}
+              {tModal("settings.loadingMetadata")}
             </p>
           </div>
         ) : data.error ? (
           <p className="text-sm text-red-400">{data.error}</p>
-        ) : isMatched ? (
+        ) : isMatched && !forceUnmatched ? (
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">File</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">File</span>
               <span className="text-sm text-zinc-600 truncate flex-1 min-w-0">
                 {data.track?.file_name || ""}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">Title</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">Title</span>
               <span className="text-sm text-zinc-200 flex-1 min-w-0">{display.title || ""}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">Artists</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">Artists</span>
               <span className="text-sm text-zinc-200 flex-1 min-w-0">
                 {performerNames(display.artists)}
               </span>
             </div>
             <div className="flex items-start gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right mt-1">Albums</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right mt-1">Albums</span>
               <div className="flex-1 min-w-0 bg-zinc-800 rounded-lg p-1.5 space-y-1">
                 {selectedAlbums.map((a, i) => (
                   <div key={i} className="flex items-center gap-1 text-sm w-full">
@@ -1129,7 +1234,12 @@ function SearchResultModal({
                           <button
                             key={i}
                             onClick={() => {
-                              addAlbum({ title: r.title, external_id: r.external_id });
+                              addAlbum({
+                                title: r.title,
+                                external_id: r.external_id,
+                                artist: r.artist || "",
+                                source: r.source,
+                              });
                             }}
                             className="w-full flex items-center gap-1 px-2 py-1 text-left text-sm hover:bg-zinc-700 cursor-pointer"
                           >
@@ -1157,88 +1267,123 @@ function SearchResultModal({
             </div>
             {(["year", "genre"] as const).map((f) => (
               <div key={f} className="flex items-center gap-2">
-                <span className="text-zinc-400 w-14 shrink-0 text-right">
+                <span className="text-zinc-400 w-20 shrink-0 text-right">
                   {f.charAt(0).toUpperCase() + f.slice(1)}
                 </span>
                 <input
-                  value={data.edit[f] ?? (display[f] || "")}
-                  onChange={(e) => onUpdate({ ...data.edit, [f]: e.target.value })}
+                  value={data.edit?.[f] ?? (display[f] || "")}
+                  onChange={(e) => onUpdate({ ...(data.edit ?? {}), [f]: e.target.value })}
                   className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </div>
             ))}
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">Label</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">Label</span>
               <input
-                value={data.edit.version_label ?? data.track?.version_label ?? ""}
-                onChange={(e) => onUpdate({ ...data.edit, version_label: e.target.value })}
+                value={data.edit?.version_label ?? data.track?.version_label ?? ""}
+                onChange={(e) => onUpdate({ ...(data.edit ?? {}), version_label: e.target.value })}
                 className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
                 placeholder="e.g. FLAC 900kbps"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">
-                {tModal("metadata.mbid")}
-              </span>
-              {!extIDEditing && !extIDError ? (
-                <>
-                  <span className="text-xs font-mono text-zinc-500 flex-1">{extIDValue}</span>
-                  <button
-                    onClick={() => setExtIDEditing(true)}
-                    className="p-1 rounded hover:bg-zinc-700 cursor-pointer"
-                  >
-                    <Pen className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <input
-                    value={extIDValue}
-                    onChange={(e) => {
-                      setExtIDValue(e.target.value);
-                      setExtIDError(false);
-                    }}
-                    className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${extIDError ? "focus:ring-red-500 border border-red-500" : "focus:ring-green-500"}`}
-                    placeholder={tModal("metadata.mbidPlaceholder")}
-                    onKeyDown={(e) => e.key === "Enter" && handleExtIDSearch()}
-                  />
-                  <button
-                    onClick={handleExtIDSearch}
-                    disabled={extIDSearching || !extIDValue}
-                    className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50"
-                  >
-                    {extIDSearching ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Search className="w-4 h-4" />
-                    )}
-                  </button>
-                </>
-              )}
-            </div>
+            {availableSources.length > 0 && (
+              /* Hide ExternalID row when no sources are available — without a
+               source selector the user cannot search, and changing external_id
+               requires a confirmed search first */
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-400 w-20 shrink-0 text-right">
+                  {tModal("metadata.externalId")}
+                </span>
+                {extIDValue && !extIDEditing && !extIDError ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-sm font-mono text-zinc-400 shrink-0">
+                      {extIDSource || "musicbrainz"}
+                    </span>
+                    <span className="text-zinc-600 shrink-0">|</span>
+                    <span className="text-xs font-mono text-zinc-500 flex-1 min-w-0 truncate">
+                      {extIDValue}
+                    </span>
+                    <button
+                      onClick={() => setExtIDEditing(true)}
+                      className="p-1 rounded hover:bg-zinc-700 cursor-pointer shrink-0"
+                    >
+                      <Pen className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center flex-1 min-w-0">
+                    <select
+                      value={extIDSource || availableSources[0]?.name || ""}
+                      onChange={(e) => {
+                        const orig =
+                          data?.result?.track_external_id ?? data?.track?.external_id ?? "";
+                        if (e.target.value !== extIDSource && extIDValue === orig) {
+                          setExtIDValue("");
+                        }
+                        setExtIDSource(e.target.value);
+                        setExtIDError(false);
+                      }}
+                      className="bg-zinc-800 rounded-l px-2 py-0.5 text-sm border-r border-zinc-700 focus:outline-none focus:ring-1 focus:ring-green-500 shrink-0 min-w-0"
+                    >
+                      {availableSources.map((s) => (
+                        <option key={s.name} value={s.name}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={extIDValue}
+                      onChange={(e) => {
+                        setExtIDValue(e.target.value);
+                        setExtIDError(false);
+                      }}
+                      className={`bg-zinc-800 px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${extIDError ? "focus:ring-red-500 border border-red-500" : "focus:ring-green-500"}`}
+                      placeholder={tModal("metadata.externalIdPlaceholder")}
+                      onKeyDown={(e) => e.key === "Enter" && handleExtIDSearch()}
+                    />
+                    <button
+                      onClick={handleExtIDSearch}
+                      disabled={extIDSearching || !extIDValue}
+                      className="rounded-r px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 cursor-pointer disabled:opacity-50 border-l border-zinc-700 shrink-0"
+                    >
+                      {extIDSearching ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Search className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-2 text-sm">
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">File</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">File</span>
               <span className="text-sm text-zinc-600 truncate flex-1 min-w-0">
                 {data.track?.file_name || ""}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">Title</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">Title</span>
               <input
-                value={data.edit.title ?? data.result?.title ?? (data.track?.title || "")}
-                onChange={(e) => onUpdate({ ...data.edit, title: e.target.value })}
+                value={data.edit?.title ?? data.result?.title ?? (data.track?.title || "")}
+                onChange={(e) => onUpdate({ ...(data.edit ?? {}), title: e.target.value })}
                 className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right text-sm">Artists</span>
-              <ArtistSelector artists={selectedArtists} onChange={setSelectedArtists} showAdd />
+              <span className="text-zinc-400 w-20 shrink-0 text-right text-sm">Artists</span>
+              <ArtistSelector
+                artists={selectedArtists}
+                onChange={setSelectedArtists}
+                showAdd
+                source={extIDSource}
+              />
             </div>
             <div className="flex items-start gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right mt-1">Albums</span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right mt-1">Albums</span>
               <div className="flex-1 min-w-0 bg-zinc-800 rounded-lg p-1.5 space-y-1">
                 {selectedAlbums.map((a, i) => (
                   <div key={i} className="flex items-center gap-1 text-sm w-full">
@@ -1289,7 +1434,12 @@ function SearchResultModal({
                           <button
                             key={i}
                             onClick={() => {
-                              addAlbum({ title: r.title, external_id: r.external_id });
+                              addAlbum({
+                                title: r.title,
+                                external_id: r.external_id,
+                                artist: r.artist || "",
+                                source: r.source,
+                              });
                             }}
                             className="w-full flex items-center gap-1 px-2 py-1 text-left text-sm hover:bg-zinc-700 cursor-pointer"
                           >
@@ -1317,42 +1467,75 @@ function SearchResultModal({
             </div>
             {(["year", "genre"] as const).map((f) => (
               <div key={f} className="flex items-center gap-2">
-                <span className="text-zinc-400 w-14 shrink-0 text-right">
+                <span className="text-zinc-400 w-20 shrink-0 text-right">
                   {f.charAt(0).toUpperCase() + f.slice(1)}
                 </span>
                 <input
-                  value={data.edit[f] ?? data.result?.[f] ?? (data.track?.[f] || "")}
-                  onChange={(e) => onUpdate({ ...data.edit, [f]: e.target.value })}
+                  value={data.edit?.[f] ?? data.result?.[f] ?? (data.track?.[f] || "")}
+                  onChange={(e) => onUpdate({ ...(data.edit ?? {}), [f]: e.target.value })}
                   className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </div>
             ))}
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400 w-14 shrink-0 text-right">
-                {tModal("metadata.mbid")}
-              </span>
+              <span className="text-zinc-400 w-20 shrink-0 text-right">Label</span>
               <input
-                value={extIDValue}
-                onChange={(e) => {
-                  setExtIDValue(e.target.value);
-                  setExtIDError(false);
-                }}
-                className={`bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${extIDError ? "focus:ring-red-500 border border-red-500" : "focus:ring-green-500"}`}
-                placeholder={tModal("metadata.mbidPlaceholder")}
-                onKeyDown={(e) => e.key === "Enter" && handleExtIDSearch()}
+                value={data.edit?.version_label ?? data.track?.version_label ?? ""}
+                onChange={(e) => onUpdate({ ...(data.edit ?? {}), version_label: e.target.value })}
+                className="bg-zinc-800 rounded px-2 py-0.5 text-sm flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-green-500"
+                placeholder="e.g. FLAC 900kbps"
               />
-              <button
-                onClick={handleExtIDSearch}
-                disabled={extIDSearching || !extIDValue}
-                className="p-1 rounded hover:bg-zinc-700 cursor-pointer disabled:opacity-50"
-              >
-                {extIDSearching ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Search className="w-4 h-4" />
-                )}
-              </button>
             </div>
+            {availableSources.length > 0 && (
+              /* Same as above: hide ExternalID when no sources available */
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-400 w-20 shrink-0 text-right">
+                  {tModal("metadata.externalId")}
+                </span>
+                <div className="flex items-center flex-1 min-w-0">
+                  <select
+                    value={extIDSource || availableSources[0]?.name || ""}
+                    onChange={(e) => {
+                      const orig =
+                        data?.result?.track_external_id ?? data?.track?.external_id ?? "";
+                      if (e.target.value !== extIDSource && extIDValue === orig) {
+                        setExtIDValue("");
+                      }
+                      setExtIDSource(e.target.value);
+                      setExtIDError(false);
+                    }}
+                    className="bg-zinc-800 rounded-l px-2 py-0.5 text-sm border-r border-zinc-700 focus:outline-none focus:ring-1 focus:ring-green-500 shrink-0 min-w-0"
+                  >
+                    {availableSources.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={extIDValue}
+                    onChange={(e) => {
+                      setExtIDValue(e.target.value);
+                      setExtIDError(false);
+                    }}
+                    className={`bg-zinc-800 px-2 py-0.5 text-sm flex-1 min-w-0 font-mono focus:outline-none focus:ring-1 ${extIDError ? "focus:ring-red-500 border border-red-500" : "focus:ring-green-500"}`}
+                    placeholder={tModal("metadata.externalIdPlaceholder")}
+                    onKeyDown={(e) => e.key === "Enter" && handleExtIDSearch()}
+                  />
+                  <button
+                    onClick={handleExtIDSearch}
+                    disabled={extIDSearching || !extIDValue}
+                    className="rounded-r px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 cursor-pointer disabled:opacity-50 border-l border-zinc-700 shrink-0"
+                  >
+                    {extIDSearching ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
         {saveError && <p className="text-sm text-red-400 mt-2">{saveError}</p>}
@@ -1362,18 +1545,21 @@ function SearchResultModal({
               setSaving(true);
               setSaveError("");
               try {
-                const saveSource = display?.source || data.track?.metadata_source || "";
-                const artists = isMatched
-                  ? (display.artists?.map((a: any) => ({
-                      name: a.name || a.artist?.name,
-                      external_id: a.external_id || "",
-                      source: saveSource,
-                    })) ?? [])
-                  : selectedArtists.map((a) => ({
-                      name: a.name,
-                      external_id: a.external_id || "",
-                      source: saveSource,
-                    }));
+                // When empty, the backend reuses the track's existing source or defaults to musicbrainz
+                const saveSource =
+                  extIDSource || display?.source || data.track?.metadata_source || "";
+                const artists =
+                  isMatched && !forceUnmatched
+                    ? (display.artists?.map((a: any) => ({
+                        name: a.name || a.artist?.name || "",
+                        external_id: a.external_id || "",
+                        source: a.source || saveSource,
+                      })) ?? [])
+                    : selectedArtists.map((a) => ({
+                        name: a.name,
+                        external_id: a.external_id || "",
+                        source: saveSource,
+                      }));
                 const res = await fetch("/api/metadata/save", {
                   method: "POST",
                   headers: {
@@ -1382,35 +1568,40 @@ function SearchResultModal({
                   },
                   body: JSON.stringify({
                     track_id: data.track?.id || "",
-                    file_hash: data.result.file_hash || data.track?.file_hash || "",
+                    file_hash: data.result?.file_hash || data.track?.file_hash || "",
                     track_external_id:
                       extIDValue ||
-                      (data.edit.track_external_id ??
+                      (data.edit?.track_external_id ??
                         data.result?.track_external_id ??
                         data.track?.external_id ??
                         ""),
                     source: saveSource,
                     album_external_id:
-                      data.edit.album_external_id ??
-                      display?.album_external_id ??
-                      data.result?.album_external_id ??
-                      "",
-                    title: isMatched
-                      ? display.title || ""
-                      : (data.edit.title ?? data.result?.title ?? data.track?.title ?? ""),
-                    album: isMatched
-                      ? display.album || ""
-                      : (data.edit.album ?? data.result?.album ?? data.track?.album ?? ""),
-                    year: parseInt(data.edit.year) || display?.year || 0,
-                    genre: data.edit.genre ?? display?.genre ?? "",
+                      isMatched && !forceUnmatched
+                        ? (display?.album_external_id ?? "")
+                        : selectedAlbums[0]?.external_id || data.edit?.album_external_id || "",
+                    title:
+                      isMatched && !forceUnmatched
+                        ? display.title || ""
+                        : (data.edit?.title ?? data.result?.title ?? data.track?.title ?? ""),
+                    album:
+                      isMatched && !forceUnmatched
+                        ? display.album || ""
+                        : selectedAlbums[0]?.title ||
+                          data.edit?.album ||
+                          data.result?.album ||
+                          data.track?.album ||
+                          "",
+                    year: parseInt(data.edit?.year, 10) || display?.year || 0,
+                    genre: data.edit?.genre ?? display?.genre ?? "",
                     artists,
-                    version_label: data.edit.version_label ?? data.track?.version_label ?? "",
+                    version_label: data.edit?.version_label ?? data.track?.version_label ?? "",
                     albums: selectedAlbums.map((a) => ({
                       id: a.id || "",
                       title: a.title,
                       external_id: a.external_id || "",
                       artist: a.artist || "",
-                      source: saveSource,
+                      source: a.source || saveSource,
                     })),
                   }),
                 });
@@ -1428,7 +1619,7 @@ function SearchResultModal({
               }
               setSaving(false);
             }}
-            disabled={saving || (isMatched && extIDError)}
+            disabled={saving || extIDError || extIDValue !== extIDSearched}
             className="mt-4 w-full py-2 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer"
           >
             {saving ? "Saving..." : "Save"}

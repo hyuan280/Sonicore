@@ -109,6 +109,7 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 	}
 	defer talStmt.Close()
 
+	albumIDs := make(map[string]struct{})
 	for _, t := range tracks {
 		ext, err := externalIDsArg(t.ExternalIDs)
 		if err != nil {
@@ -133,10 +134,21 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 			}
 		}
 		for _, tal := range t.Albums {
+			albumIDs[tal.AlbumID] = struct{}{}
 			_, err = talStmt.ExecContext(ctx, t.ID, tal.AlbumID, tal.TrackNumber, tal.DiscNumber)
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	if len(albumIDs) > 0 {
+		ids := make([]string, 0, len(albumIDs))
+		for id := range albumIDs {
+			ids = append(ids, id)
+		}
+		if err := updateAlbumStats(ctx, tx, ids); err != nil {
+			return err
 		}
 	}
 
@@ -146,7 +158,7 @@ func (r *TrackRepo) BatchCreate(ctx context.Context, tracks []domain.Track) erro
 func (r *TrackRepo) LoadTrackAlbums(ctx context.Context, trackID string) ([]*domain.TrackAlbum, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT ta.track_id, ta.album_id, ta.track_number, ta.disc_number,
-		 al.title, al.cover_image_id
+		 al.title, al.cover_image_id, al.year, al.genre
 		 FROM track_albums ta
 		 JOIN albums al ON al.id = ta.album_id
 		 WHERE ta.track_id = $1
@@ -161,7 +173,7 @@ func (r *TrackRepo) LoadTrackAlbums(ctx context.Context, trackID string) ([]*dom
 		var tal domain.TrackAlbum
 		var album domain.Album
 		if err := rows.Scan(&tal.TrackID, &tal.AlbumID, &tal.TrackNumber, &tal.DiscNumber,
-			&album.Title, &album.CoverImageID); err != nil {
+			&album.Title, &album.CoverImageID, &album.Year, &album.Genre); err != nil {
 			return nil, err
 		}
 		tal.Album = &album
@@ -173,7 +185,7 @@ func (r *TrackRepo) LoadTrackAlbums(ctx context.Context, trackID string) ([]*dom
 func (r *TrackRepo) LoadTrackAlbumsBulk(ctx context.Context, trackIDs []string) (map[string][]*domain.TrackAlbum, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT ta.track_id, ta.album_id, ta.track_number, ta.disc_number,
-		 al.title, al.cover_image_id
+		 al.title, al.cover_image_id, al.year, al.genre
 		 FROM track_albums ta
 		 JOIN albums al ON al.id = ta.album_id
 		 WHERE ta.track_id = ANY($1)
@@ -188,7 +200,7 @@ func (r *TrackRepo) LoadTrackAlbumsBulk(ctx context.Context, trackIDs []string) 
 		var tal domain.TrackAlbum
 		var album domain.Album
 		if err := rows.Scan(&tal.TrackID, &tal.AlbumID, &tal.TrackNumber, &tal.DiscNumber,
-			&album.Title, &album.CoverImageID); err != nil {
+			&album.Title, &album.CoverImageID, &album.Year, &album.Genre); err != nil {
 			return nil, err
 		}
 		tal.Album = &album
@@ -221,6 +233,40 @@ func (r *TrackRepo) FindByID(ctx context.Context, id string) (*domain.Track, err
 		t.Artist = t.Artists[0].Artist
 	}
 	return t, nil
+}
+
+// TrackHasBasicMeta reports whether the track has at least the minimum
+// metadata fields (title, one non-Unknown artist, one non-Unknown album)
+// so callers can skip source lookups when the DB is already complete.
+func (r *TrackRepo) TrackHasBasicMeta(ctx context.Context, trackID string) (bool, error) {
+	track, err := r.FindByID(ctx, trackID)
+	if err != nil {
+		return false, fmt.Errorf("TrackHasBasicMeta: FindByID(%s): %w", trackID, err)
+	}
+	return r.trackHasBasicMeta(track), nil
+}
+
+// trackHasBasicMeta checks an already-loaded track for basic metadata.
+func (r *TrackRepo) trackHasBasicMeta(track *domain.Track) bool {
+	if track.Title == "" {
+		return false
+	}
+	hasArtist := false
+	for _, ta := range track.Artists {
+		if ta.Artist != nil && ta.Artist.Name != "" && ta.Artist.Name != "Unknown Artist" {
+			hasArtist = true
+			break
+		}
+	}
+	if !hasArtist {
+		return false
+	}
+	for _, tal := range track.Albums {
+		if tal.Album != nil && tal.Album.Title != "" && tal.Album.Title != "Unknown Album" {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *TrackRepo) FindByIDs(ctx context.Context, ids []string) ([]*domain.Track, error) {
@@ -468,7 +514,26 @@ func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 	}
 
 	// Replace track_albums
+	allIDs := make(map[string]struct{})
 	if len(track.Albums) > 0 {
+		// Collect old album IDs before DELETE so their stats are recalculated
+		rows, err := tx.QueryContext(ctx, `SELECT album_id FROM track_albums WHERE track_id = $1`, track.ID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			allIDs[id] = struct{}{}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
 		_, err = tx.ExecContext(ctx, `DELETE FROM track_albums WHERE track_id = $1`, track.ID)
 		if err != nil {
 			return err
@@ -481,10 +546,21 @@ func (r *TrackRepo) Update(ctx context.Context, track *domain.Track) error {
 		}
 		defer stmt.Close()
 		for _, tal := range track.Albums {
+			allIDs[tal.AlbumID] = struct{}{}
 			_, err = stmt.ExecContext(ctx, track.ID, tal.AlbumID, tal.TrackNumber, tal.DiscNumber)
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	if len(allIDs) > 0 {
+		ids := make([]string, 0, len(allIDs))
+		for id := range allIDs {
+			ids = append(ids, id)
+		}
+		if err := updateAlbumStats(ctx, tx, ids); err != nil {
+			return err
 		}
 	}
 
@@ -577,6 +653,26 @@ func (r *TrackRepo) ReplaceTrackAlbums(ctx context.Context, trackID string, albu
 	}
 	defer tx.Rollback()
 
+	// Collect old album IDs before DELETE so their stats are recalculated too
+	allIDs := make(map[string]struct{})
+	rows, err := tx.QueryContext(ctx, `SELECT album_id FROM track_albums WHERE track_id = $1`, trackID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		allIDs[id] = struct{}{}
+	}
+	rows.Close()
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
 	_, err = tx.ExecContext(ctx, `DELETE FROM track_albums WHERE track_id = $1`, trackID)
 	if err != nil {
 		return err
@@ -591,8 +687,20 @@ func (r *TrackRepo) ReplaceTrackAlbums(ctx context.Context, trackID string, albu
 	defer stmt.Close()
 
 	for _, tal := range albums {
+		allIDs[tal.AlbumID] = struct{}{}
 		_, err = stmt.ExecContext(ctx, trackID, tal.AlbumID, tal.TrackNumber, tal.DiscNumber)
 		if err != nil {
+			return err
+		}
+	}
+
+	// Update song_count and duration for all affected albums (old + new)
+	if len(allIDs) > 0 {
+		ids := make([]string, 0, len(allIDs))
+		for id := range allIDs {
+			ids = append(ids, id)
+		}
+		if err := updateAlbumStats(ctx, tx, ids); err != nil {
 			return err
 		}
 	}
@@ -904,4 +1012,65 @@ func (r *TrackRepo) UpdateMergeFields(ctx context.Context, id, metadataSource, e
 		`UPDATE tracks SET metadata_source = $1, external_id = $2, external_ids = $3, updated_at = NOW() WHERE id = $4`,
 		sourceOrDefault(metadataSource), externalID, ext, id)
 	return err
+}
+
+// updateAlbumStats refreshes song_count and duration for the given albums.
+// Only main-version tracks (version = 0 or 1) are counted so secondary
+// versions (version > 1) do not inflate the song count or total duration.
+func updateAlbumStats(ctx context.Context, tx *sql.Tx, albumIDs []string) error {
+	if len(albumIDs) == 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE albums al
+		SET song_count = (SELECT COUNT(*)
+		                  FROM track_albums ta
+		                  JOIN tracks t ON t.id = ta.track_id
+		                  WHERE ta.album_id = al.id AND t.version <= 1),
+		    duration   = (SELECT COALESCE(SUM(t.duration), 0)
+		                  FROM track_albums ta
+		                  JOIN tracks t ON t.id = ta.track_id
+		                  WHERE ta.album_id = al.id AND t.version <= 1),
+		    updated_at = NOW()
+		WHERE al.id = ANY($1)`, pq.Array(albumIDs))
+	return err
+}
+
+// UpdateAlbumStats refreshes song_count and duration for the given albums.
+// It creates its own transaction.
+func (r *TrackRepo) UpdateAlbumStats(ctx context.Context, albumIDs []string) error {
+	if len(albumIDs) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateAlbumStats(ctx, tx, albumIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// AlbumIDsByLibrary returns distinct album IDs for all tracks in the given library.
+func (r *TrackRepo) AlbumIDsByLibrary(ctx context.Context, libraryID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT DISTINCT ta.album_id
+		FROM track_albums ta
+		JOIN tracks t ON t.id = ta.track_id
+		WHERE t.library_id = $1`, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

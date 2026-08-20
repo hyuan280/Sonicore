@@ -291,6 +291,12 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			oldExtID = track.ExternalID
 			oldSource = track.MetadataSource
 			if req.TrackExtID != "" {
+				// If the title changed, the track was re-identified as a
+				// different song. Clear all old aliases so stale entries in
+				// external_ids cannot match this track via @> queries.
+				if req.Title != "" && track.Title != "" && track.Title != req.Title {
+					track.ExternalIDs = map[string]string{}
+				}
 				// Adopt the effective source BEFORE SetExternalID so the id
 				// lands under the correct namespace (SetExternalID keys the
 				// alias table on MetadataSource). A new external id for a
@@ -330,7 +336,11 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			if req.VersionLabel != "" {
 				track.VersionLabel = req.VersionLabel
 			}
-			h.trackRepo.Update(r.Context(), track)
+			if err := h.trackRepo.Update(r.Context(), track); err != nil {
+				log.Printf("[metadata] save track update error: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+				return
+			}
 
 			// Update artists association
 			if len(req.Artists) == 0 {
@@ -411,10 +421,19 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+				if al.ExternalID != "" && source == utils.SourceNetease && h.neteaseProvider != nil {
+					if detail, err := h.neteaseProvider.GetAlbum(r.Context(), al.ExternalID); err == nil {
+						if artistID == "" {
+							artistID = resolveArtistID(detail.Artist, "", utils.SourceNetease)
+						}
+						if detail.Year != 0 && year == 0 {
+							year = detail.Year
+						}
+					} else if err != nil {
+						log.Printf("[metadata] resolveAlbum: netease GetAlbum(%s) failed: %v", al.ExternalID, err)
+					}
+				}
 				if artistID == "" {
-					// al.ExternalID is the album's id, not an artist id —
-					// passing it here would corrupt the artist's external id,
-					// so fall back to the name-based lookup/create only.
 					artistID = resolveArtistID(al.Artist, "", al.Source)
 				}
 				if artistID == "" {
@@ -423,7 +442,6 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				if al.ExternalID != "" || al.Title != "" {
 					album, err := h.entities.FindAlbum(r.Context(), source, al.ExternalID, al.Title, artistID)
 					if err == nil && album != nil {
-						// Update missing metadata
 						updated := false
 						if album.Year == 0 && year != 0 {
 							album.Year = year
@@ -446,6 +464,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 					if err == nil {
 						return album.ID, true
 					}
+					log.Printf("[metadata] resolveAlbum: FindOrCreateAlbum failed: %v", err)
 					return "", false
 				}
 				return "", false
@@ -478,6 +497,16 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to save albums: %v", err)})
 					return
 				}
+				// Backfill covers for newly associated albums that lack one
+				if h.covers != nil {
+					for _, tal := range trackAlbums {
+						if album, err := h.albumRepo.FindByID(r.Context(), tal.AlbumID); err == nil && album.CoverImageID == nil && album.Title != "Unknown Album" {
+							if err := h.covers.BackfillAlbumCover(r.Context(), album, false); err != nil {
+								log.Printf("[metadata] save backfill cover for %s: %v", album.ID, err)
+							}
+						}
+					}
+				}
 				// Apply user-edited year/genre to first album
 				if len(trackAlbums) > 0 && (req.Year != 0 || req.Genre != "") {
 					if album, err := h.albumRepo.FindByID(r.Context(), trackAlbums[0].AlbumID); err == nil {
@@ -491,8 +520,14 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 							updated = true
 						}
 						if updated {
-							h.albumRepo.Update(r.Context(), album)
+							if err := h.albumRepo.Update(r.Context(), album); err != nil {
+								log.Printf("[metadata] save year/genre: Update error: %v", err)
+								writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album year/genre"})
+								return
+							}
 						}
+					} else {
+						log.Printf("[metadata] save year/genre: FindByID error: %v", err)
 					}
 				}
 			} else {
@@ -570,18 +605,61 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// Cover management: only when metadata actually changed
+		if h.covers != nil && (oldExtID != track.ExternalID || req.Title != "") {
+			if saved, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
+				if oldExtID != saved.ExternalID && saved.CoverImageID != nil {
+					if err := h.covers.DeleteTrackCovers(r.Context(), saved.LibraryID, saved.ID); err != nil {
+						log.Printf("[metadata] save delete old cover for %s: %v", saved.ID, err)
+						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete old covers"})
+						return
+					}
+					saved.CoverImageID = nil
+				}
+				if saved.CoverImageID == nil {
+					var album *domain.Album
+					if len(saved.Albums) > 0 {
+						if a, err := h.albumRepo.FindByID(r.Context(), saved.Albums[0].AlbumID); err == nil {
+							album = a
+						}
+					}
+					q := port.MetadataQuery{Title: saved.Title}
+					if album != nil && album.Title != "" {
+						q.Album = album.Title
+					}
+					if len(saved.Artists) > 0 && saved.Artists[0].Artist != nil {
+						q.Artist = saved.Artists[0].Artist.Name
+					}
+					candidates, cerr := h.newRegistry(r.Context()).SearchCandidates(r.Context(), q)
+					if cerr != nil {
+						log.Printf("[metadata] save cover search candidates for %s: %v", saved.ID, cerr)
+					}
+					for _, c := range candidates {
+						if c.CoverArtURL != "" && c.Score >= 0.5 {
+							if err := h.covers.ImportTrackCoverURL(r.Context(), saved.LibraryID, saved, album, c.CoverArtURL); err != nil {
+								log.Printf("[metadata] save import cover error for %s: %v", saved.ID, err)
+							}
+							break
+						}
+					}
+					if album != nil && album.CoverImageID == nil {
+						if err := h.covers.BackfillAlbumCover(r.Context(), album, false); err != nil {
+							log.Printf("[metadata] save backfill album cover error for %s: %v", album.ID, err)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
+	// AuthMiddleware on the /api subrouter ensures the request is authenticated.
+	_ = middleware.GetUserID(r.Context())
 	var req struct {
 		TrackID    string `json:"track_id"`
-		Title      string `json:"title"`
-		Artist     string `json:"artist"`
-		Album      string `json:"album"`
 		ExternalID string `json:"external_id"`
 		Source     string `json:"source"`
 	}
@@ -592,81 +670,123 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 
 	var fileHash string
 
-	// If track_id is provided and metadata is already complete, return DB data directly
+	// If track_id is provided, check DB completeness first
 	if req.TrackID != "" {
 		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
 			fileHash = track.Hash
-			if track.ExternalID != "" {
-				trackArtists, err := h.trackRepo.LoadTrackArtists(r.Context(), track.ID)
-				if err == nil && len(trackArtists) > 0 {
-					allComplete := true
-					var artists []map[string]interface{}
-					for _, ta := range trackArtists {
-						artist, err := h.artistRepo.FindByID(r.Context(), ta.ArtistID)
-						if err != nil || artist.ExternalID == "" || artist.Country == "" ||
-							artist.Name == "" || artist.Name == "Unknown Artist" ||
-							!sourceMatches(artist.MetadataSource, track.MetadataSource) {
-							allComplete = false
-							break
-						}
-						artists = append(artists, map[string]interface{}{
-							"name":        ta.Artist.Name,
-							"external_id": ta.Artist.ExternalID,
-							"role":        ta.Role,
-						})
+
+			// If external_id differs from track's current id, skip DB check
+			// and go directly to source lookup.
+			if req.ExternalID == "" || req.ExternalID == track.ExternalID {
+				// Check DB completeness using TrackHasBasicMeta (title, one
+				// non-Unknown artist, one non-Unknown album). External_id and
+				// album_external_id are deliberately excluded: if the DB has
+				// song/artist/album names but no external IDs, querying a source
+				// for those names would produce the same result as the existing
+				// search path, so we skip the round-trip and let the user edit
+				// manually or search via the external ID field.
+				if ok, err := h.trackRepo.TrackHasBasicMeta(r.Context(), track.ID); err != nil {
+					log.Printf("[metadata] SearchTrack TrackHasBasicMeta error for %s: %v", track.ID, err)
+				} else if ok {
+					// DB has all required fields → return directly
+					tals, _ := h.trackRepo.LoadTrackAlbums(r.Context(), track.ID)
+					resp := map[string]interface{}{
+						"matched":           true,
+						"cached":            true,
+						"file_hash":         fileHash,
+						"title":             track.Title,
+						"track_external_id": track.ExternalID,
+						"source":            track.MetadataSource,
+						"artists":           h.buildTrackArtists(r.Context(), track.ID),
+						"albums":            h.buildTrackAlbums(r.Context(), track),
 					}
-					albumID := ""
-					if len(track.Albums) > 0 {
-						albumID = track.Albums[0].AlbumID
+					if len(tals) > 0 && tals[0].Album != nil {
+						resp["year"] = tals[0].Album.Year
+						resp["genre"] = tals[0].Album.Genre
+						resp["album_external_id"] = tals[0].Album.ExternalID
 					}
-					if allComplete && albumID != "" {
-						if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil &&
-							album.ExternalID != "" && album.Country != "" && album.Year != 0 && album.Genre != "" &&
-							album.Title != "" && album.Title != "Unknown Album" &&
-							sourceMatches(album.MetadataSource, track.MetadataSource) {
-							albums := h.buildTrackAlbums(r.Context(), track)
-							writeJSON(w, http.StatusOK, map[string]interface{}{
-								"matched":           true,
-								"cached":            true,
-								"file_hash":         fileHash,
-								"title":             track.Title,
-								"year":              album.Year,
-								"genre":             album.Genre,
-								"track_external_id": track.ExternalID,
-								"album_external_id": album.ExternalID,
-								"source":            track.MetadataSource,
-								"artists":           artists,
-								"albums":            albums,
+					writeJSON(w, http.StatusOK, resp)
+					return
+				}
+
+				// DB not complete → use track's own external_id if available
+				if track.ExternalID != "" && track.MetadataSource != "" {
+					source := utils.SourceOrDefault(track.MetadataSource)
+					result, err := h.lookupEnrichment(r.Context(), source, track.ExternalID)
+					if err != nil {
+						log.Printf("[metadata] SearchTrack lookupEnrichment error: %v", err)
+						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lookup enrichment data"})
+						return
+					}
+					if result != nil {
+						var artists []map[string]interface{}
+						for _, ar := range result.Artists {
+							artists = append(artists, map[string]interface{}{
+								"name":        ar.Name,
+								"external_id": ar.ExternalID,
+								"role":        "performer",
+								"source":      source,
 							})
-							return
 						}
+						writeJSON(w, http.StatusOK, map[string]interface{}{
+							"matched":           true,
+							"file_hash":         fileHash,
+							"title":             result.Title,
+							"album":             result.Album,
+							"year":              result.Year,
+							"genre":             result.Genre,
+							"track_external_id": result.TrackExternalID,
+							"album_external_id": result.AlbumExternalID,
+							"source":            source,
+							"artists":           artists,
+							"albums":            h.buildTrackAlbums(r.Context(), track),
+						})
+						return
 					}
 				}
+
+				// No external_id on track → return current DB data as-is
+				// so the user can see what's there and edit manually or
+				// search via the external ID field.
+				resp := map[string]interface{}{
+					"matched":           true,
+					"cached":            true,
+					"file_hash":         fileHash,
+					"title":             track.Title,
+					"track_external_id": track.ExternalID,
+					"source":            track.MetadataSource,
+					"artists":           h.buildTrackArtists(r.Context(), track.ID),
+					"albums":            h.buildTrackAlbums(r.Context(), track),
+				}
+				tals, _ := h.trackRepo.LoadTrackAlbums(r.Context(), track.ID)
+				if len(tals) > 0 && tals[0].Album != nil {
+					resp["year"] = tals[0].Album.Year
+					resp["genre"] = tals[0].Album.Genre
+					resp["album_external_id"] = tals[0].Album.ExternalID
+				}
+				writeJSON(w, http.StatusOK, resp)
+				return
 			}
 		}
 	}
 
-	// If external_id is provided, resolve it against the explicit request
-	// source, else the track's source when known (a NetEase-sourced track
-	// carries a platform id), else MusicBrainz.
+	// If external_id is provided, source is required to avoid mismatching
+	// the id against the wrong resolver (e.g. a NetEase id hitting MusicBrainz).
 	if req.ExternalID != "" {
-		source := req.Source
-		if source != "" && !isValidSource(utils.NormalizeSource(source)) {
+		if req.Source == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source required when external_id is provided"})
+			return
+		}
+		source := utils.NormalizeSource(req.Source)
+		if !isValidSource(source) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported metadata source"})
 			return
 		}
-		if source == "" && req.TrackID != "" {
-			if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil && track.MetadataSource != "" {
-				source = track.MetadataSource
-			}
-		}
-		if source == "" {
-			source = utils.SourceMusicBrainz
-		}
-		source = utils.SourceOrDefault(utils.NormalizeSource(source))
+		source = utils.SourceOrDefault(source)
 		result, err := h.lookupEnrichment(r.Context(), source, req.ExternalID)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			log.Printf("[metadata] SearchTrack lookupEnrichment error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lookup enrichment data"})
 			return
 		}
 		if result != nil {
@@ -676,6 +796,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 					"name":        ar.Name,
 					"external_id": ar.ExternalID,
 					"role":        "performer",
+					"source":      source,
 				})
 			}
 			writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -687,6 +808,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 				"genre":             result.Genre,
 				"track_external_id": result.TrackExternalID,
 				"album_external_id": result.AlbumExternalID,
+				"source":            source,
 				"artists":           artists,
 			})
 		} else {
@@ -695,194 +817,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check user_metadata cache first
-	var cached *repository.UserMetadata
-	if req.TrackID != "" {
-		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
-			fileHash = track.Hash
-			if um, err := h.umRepo.FindByUserAndHash(r.Context(), userID, track.Hash); err == nil {
-				cached = um
-			}
-		}
-	}
-
-	// If cached data has all key fields, return it directly
-	if cached != nil && cached.Title != "" && cached.Artist != "" && cached.Album != "" {
-		var artists []map[string]interface{}
-		if req.TrackID != "" {
-			if tas, err := h.trackRepo.LoadTrackArtists(r.Context(), req.TrackID); err == nil {
-				for _, ta := range tas {
-					artists = append(artists, map[string]interface{}{
-						"name":        ta.Artist.Name,
-						"artist_id":   ta.ArtistID,
-						"external_id": ta.Artist.ExternalID,
-						"role":        ta.Role,
-					})
-				}
-			}
-		}
-		resp := map[string]interface{}{
-			"matched":           true,
-			"cached":            true,
-			"file_hash":         fileHash,
-			"title":             cached.Title,
-			"source":            utils.SourceOrDefault(cached.MetadataSource),
-			"year":              cached.Year,
-			"genre":             cached.Genre,
-			"track_external_id": cached.ExternalID,
-			"artists":           artists,
-		}
-		if req.TrackID != "" {
-			if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
-				if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
-					resp["albums"] = als
-				}
-			}
-		}
-		writeJSON(w, http.StatusOK, resp)
-		return
-	}
-
-	// Fill search params from cached data if available
-	if cached != nil {
-		if req.Title == "" {
-			req.Title = cached.Title
-		}
-		if req.Artist == "" {
-			req.Artist = cached.Artist
-		}
-		if req.Album == "" {
-			req.Album = cached.Album
-		}
-	}
-
-	if req.Title == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
-		return
-	}
-
-	registry := h.newRegistry(r.Context())
-	candidate, err := registry.Identify(r.Context(), port.MetadataQuery{
-		Title:  req.Title,
-		Artist: req.Artist,
-		Album:  req.Album,
-	})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	result := metadata.CandidateToEnrichment(candidate)
-
-	if result == nil {
-		resp := map[string]interface{}{"matched": false, "file_hash": fileHash}
-		if req.TrackID != "" {
-			if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
-				resp["title"] = track.Title
-				resp["artists"] = h.buildTrackArtists(r.Context(), track.ID)
-				if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
-					resp["albums"] = als
-				}
-				var albumID string
-				if len(track.Albums) > 0 {
-					albumID = track.Albums[0].AlbumID
-				}
-				if albumID != "" {
-					if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
-						resp["year"] = album.Year
-						resp["genre"] = album.Genre
-					}
-				}
-				if cached != nil {
-					if cached.Title != "" {
-						resp["title"] = cached.Title
-					}
-					if cached.Year != 0 {
-						resp["year"] = cached.Year
-					}
-					if cached.Genre != "" {
-						resp["genre"] = cached.Genre
-					}
-				}
-			}
-		}
-		writeJSON(w, http.StatusOK, resp)
-		return
-	}
-
-	t := result.Title
-	if t == "" {
-		t = req.Title
-	}
-	if cached != nil && cached.Title != "" {
-		t = cached.Title
-	}
-	al := result.Album
-	if al == "" {
-		al = req.Album
-	}
-	if cached != nil && cached.Album != "" {
-		al = cached.Album
-	}
-	yr := result.Year
-	if cached != nil && cached.Year != 0 {
-		yr = cached.Year
-	}
-	if yr == 0 && req.TrackID != "" {
-		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
-			var albumID string
-			if len(track.Albums) > 0 {
-				albumID = track.Albums[0].AlbumID
-			}
-			if albumID != "" {
-				if album, err := h.albumRepo.FindByID(r.Context(), albumID); err == nil {
-					yr = album.Year
-				}
-			}
-		}
-	}
-	gen := result.Genre
-	if cached != nil && cached.Genre != "" {
-		gen = cached.Genre
-	}
-	tExtID := result.TrackExternalID
-	extSource := result.Source
-	if cached != nil && cached.ExternalID != "" {
-		// The cached id lives in the cache record's namespace; the source
-		// must follow it or the response would hand back a mismatched
-		// (source, track_external_id) pair that Save would persist under the
-		// wrong namespace.
-		tExtID = cached.ExternalID
-		extSource = utils.SourceOrDefault(cached.MetadataSource)
-	}
-
-	var artists []map[string]interface{}
-	for _, ar := range result.Artists {
-		artists = append(artists, map[string]interface{}{
-			"name":        ar.Name,
-			"external_id": ar.ExternalID,
-			"role":        "performer",
-		})
-	}
-
-	resp := map[string]interface{}{
-		"matched":           true,
-		"file_hash":         fileHash,
-		"title":             t,
-		"year":              yr,
-		"genre":             gen,
-		"track_external_id": tExtID,
-		"album_external_id": result.AlbumExternalID,
-		"artists":           artists,
-		"source":            extSource,
-	}
-	if req.TrackID != "" {
-		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil {
-			if als := h.buildTrackAlbums(r.Context(), track); len(als) > 0 {
-				resp["albums"] = als
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track_id or external_id required"})
 }
 func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
@@ -919,7 +854,8 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.lookupEnrichment(r.Context(), source, req.ExternalID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		log.Printf("[metadata] Identify lookupEnrichment error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lookup enrichment data"})
 		return
 	}
 	if result == nil {
@@ -1060,55 +996,208 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 	}
 	candidate, err := registry.Identify(r.Context(), q)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		log.Printf("[metadata] Reidentify Identify error: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to identify track"})
 		return
 	}
 	enrichment := metadata.CandidateToEnrichment(candidate)
 
 	if enrichment != nil {
-		// A source matched — apply with overwrite. The metadata source
-		// follows the producing source so version grouping and completeness
-		// checks see a consistent (source, external id) pair.
-		scanner.ApplyEnrichment(r.Context(), track, meta, enrichment, true, h.trackRepo, h.artistRepo, h.albumRepo, h.entities)
-		if track.MetadataSource != enrichment.Source && track.ExternalID != "" {
-			track.SetExternalID("")
-		}
-		track.MetadataSource = enrichment.Source
-		if enrichment.TrackExternalID != "" {
-			track.SetExternalID(enrichment.TrackExternalID)
-		}
-		if enrichment.Title != "" {
-			track.Title = enrichment.Title
-		}
-		h.trackRepo.Update(r.Context(), track)
+		oldExtID := track.ExternalID
+		oldSource := track.MetadataSource
+		changed := oldExtID != enrichment.TrackExternalID || !sourceMatches(oldSource, enrichment.Source)
 
-		// Reset track_albums to the enriched album (scoped to the producing
-		// source — a NetEase album id must not be looked up as a MusicBrainz
-		// release).
-		if enrichment.AlbumExternalID != "" {
-			if album, err := h.albumRepo.FindBySourceAndID(r.Context(), enrichment.Source, enrichment.AlbumExternalID); err == nil {
-				h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, []*domain.TrackAlbum{{
-					AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1,
-				}})
+		if changed {
+			// The track was re-identified as a different song (different external
+			// id or source). Clear all old associations and re-apply from scratch.
+			// Reset in-memory fields before re-applying enrichment data.
+			// DB associations are replaced atomically by the ReplaceTrack*
+			// calls below — each does DELETE + INSERT in a single transaction,
+			// so a failure rolls back everything and leaves the old data intact.
+			track.Albums = nil
+			track.Artists = nil
+			track.ExternalID = ""
+			track.ExternalIDs = map[string]string{}
+			track.MetadataSource = ""
+			track.Version = 0
+			track.VersionLabel = ""
+			track.CoverImageID = nil
+
+			// Re-apply artists from enrichment
+			var newArtists []*domain.TrackArtist
+			for i, ar := range enrichment.Artists {
+				a := h.findOrCreateArtist(r.Context(), ar.Name, ar.ExternalID, enrichment.Source)
+				if a == nil {
+					continue
+				}
+				newArtists = append(newArtists, &domain.TrackArtist{
+					ArtistID:  a.ID,
+					Role:      "performer",
+					SortOrder: i,
+					Artist:    a,
+				})
 			}
-		}
-
-		// Restore a deleted cover through the unified ensure flow (embedded
-		// first, then the platform chain via the track's source). This branch
-		// only runs when the chain matched (searchPlatform=true); the
-		// no-match path applies fresh probe data and does not restore covers.
-		if track.CoverImageID == nil && h.covers != nil {
-			var album *domain.Album
-			if len(track.Albums) > 0 {
-				album, err = h.albumRepo.FindByID(r.Context(), track.Albums[0].AlbumID)
-				if err != nil {
-					// A real DB failure must not be hidden behind a nil album.
-					log.Printf("[metadata] reidentify album load error for %s: %v", track.ID, err)
-					album = nil
+			if len(newArtists) == 0 {
+				unknown := h.findOrCreateArtist(r.Context(), "Unknown Artist", "", "")
+				if unknown != nil {
+					newArtists = append(newArtists, &domain.TrackArtist{
+						ArtistID:  unknown.ID,
+						Role:      "performer",
+						SortOrder: 0,
+						Artist:    unknown,
+					})
 				}
 			}
-			if err := h.covers.EnsureTrackCover(r.Context(), track.LibraryID, track, album, true, true); err != nil {
-				log.Printf("[metadata] reidentify cover ensure error for %s: %v", track.ID, err)
+			// ReplaceTrackArtists does DELETE + INSERT atomically.
+			// When newArtists is empty it only deletes; when non-empty it
+			// replaces — either way, a failure rolls back the entire operation.
+			if err := h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, newArtists); err != nil {
+				log.Printf("[metadata] reidentify set artists error: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update artists"})
+				return
+			}
+			track.Artists = nil // prevent Update from duplicating the work
+
+			// Re-apply album from enrichment
+			var trackAlbum []*domain.TrackAlbum
+			if enrichment.AlbumExternalID != "" {
+				if album, err := h.albumRepo.FindBySourceAndID(r.Context(), enrichment.Source, enrichment.AlbumExternalID); err == nil {
+					trackAlbum = []*domain.TrackAlbum{{
+						AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1,
+					}}
+				} else {
+					log.Printf("[metadata] reidentify album: FindBySourceAndID(%q,%q) failed: %v", enrichment.Source, enrichment.AlbumExternalID, err)
+					// Fallback: create album via enrichment data
+					artistID := ""
+					if len(enrichment.Artists) > 0 {
+						if a := h.findOrCreateArtist(r.Context(), enrichment.Artists[0].Name, enrichment.Artists[0].ExternalID, enrichment.Source); a != nil {
+							artistID = a.ID
+						}
+					}
+					if album, err := h.entities.FindOrCreateAlbum(r.Context(), enrichment.Source, enrichment.AlbumExternalID, enrichment.Album, artistID, 0, "", ""); err == nil {
+						trackAlbum = []*domain.TrackAlbum{{
+							AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1,
+						}}
+					}
+				}
+			} else {
+				// enrichment.AlbumExternalID is empty — no album to restore
+			}
+			// ReplaceTrackAlbums does DELETE + INSERT atomically.
+			// When trackAlbum is nil it only deletes; when non-empty it replaces.
+			if err := h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, trackAlbum); err != nil {
+				log.Printf("[metadata] reidentify album: ReplaceTrackAlbums failed: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album"})
+				return
+			}
+			track.Albums = nil // prevent Update from duplicating the work
+
+			// Update track metadata
+			track.MetadataSource = enrichment.Source
+			if enrichment.TrackExternalID != "" {
+				track.SetExternalID(enrichment.TrackExternalID)
+			}
+			if enrichment.Title != "" {
+				track.Title = enrichment.Title
+			}
+			if err := h.trackRepo.Update(r.Context(), track); err != nil {
+				log.Printf("[metadata] reidentify (changed) update error: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+				return
+			}
+
+			// Re-resolve version groups
+			if err := h.reResolveVersions(r.Context(), track.LibraryID, oldExtID, track.ExternalID, track.ID, oldSource); err != nil {
+				log.Printf("[metadata] reidentify reResolveVersions error: %v", err)
+			}
+
+			// Delete old covers before fetching new ones
+			if h.covers != nil {
+				if err := h.covers.DeleteTrackCovers(r.Context(), track.LibraryID, track.ID); err != nil {
+					log.Printf("[metadata] reidentify delete old covers for %s: %v", track.ID, err)
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete old covers"})
+					return
+				}
+			}
+
+			// Fetch cover from platform
+			if h.covers != nil {
+				var album *domain.Album
+				if tals, err := h.trackRepo.LoadTrackAlbums(r.Context(), track.ID); err == nil && len(tals) > 0 {
+					if a, err := h.albumRepo.FindByID(r.Context(), tals[0].AlbumID); err == nil {
+						album = a
+					}
+				}
+				q := port.MetadataQuery{Title: track.Title}
+				if album != nil && album.Title != "" {
+					q.Album = album.Title
+				}
+				if len(track.Artists) > 0 && track.Artists[0].Artist != nil {
+					q.Artist = track.Artists[0].Artist.Name
+				}
+				candidates, cerr := h.newRegistry(r.Context()).SearchCandidates(r.Context(), q)
+				if cerr != nil {
+					log.Printf("[metadata] reidentify cover search candidates for %s: %v", track.ID, cerr)
+				}
+				for _, c := range candidates {
+					if c.CoverArtURL != "" && c.Score >= 0.5 {
+						if err := h.covers.ImportTrackCoverURL(r.Context(), track.LibraryID, track, album, c.CoverArtURL); err != nil {
+							log.Printf("[metadata] reidentify cover import error for %s: %v", track.ID, err)
+						}
+						break
+					}
+				}
+				if album != nil && album.CoverImageID == nil {
+					if err := h.covers.BackfillAlbumCover(r.Context(), album, false); err != nil {
+						log.Printf("[metadata] reidentify backfill album cover for %s: %v", album.ID, err)
+					}
+				}
+			}
+		} else {
+			// Same external id and source — apply enrichment incrementally.
+			scanner.ApplyEnrichment(r.Context(), track, meta, enrichment, true, h.trackRepo, h.artistRepo, h.albumRepo, h.entities)
+			if track.MetadataSource != enrichment.Source && track.ExternalID != "" {
+				track.SetExternalID("")
+			}
+			track.MetadataSource = enrichment.Source
+			if enrichment.TrackExternalID != "" {
+				track.SetExternalID(enrichment.TrackExternalID)
+			}
+			if enrichment.Title != "" {
+				track.Title = enrichment.Title
+			}
+			if err := h.trackRepo.Update(r.Context(), track); err != nil {
+				log.Printf("[metadata] reidentify (incremental) update error: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+				return
+			}
+
+			// Reset track_albums to the enriched album
+			if enrichment.AlbumExternalID != "" {
+				if album, err := h.albumRepo.FindBySourceAndID(r.Context(), enrichment.Source, enrichment.AlbumExternalID); err == nil {
+					if err := h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, []*domain.TrackAlbum{{
+						AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1,
+					}}); err != nil {
+						log.Printf("[metadata] reidentify (incremental) replace albums error: %v", err)
+						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album"})
+						return
+					}
+				}
+			}
+
+			// Restore cover
+			if track.CoverImageID == nil && h.covers != nil {
+				var album *domain.Album
+				if len(track.Albums) > 0 {
+					album, err = h.albumRepo.FindByID(r.Context(), track.Albums[0].AlbumID)
+					if err != nil {
+						log.Printf("[metadata] reidentify album load error for %s: %v", track.ID, err)
+						album = nil
+					}
+				}
+				if err := h.covers.EnsureTrackCover(r.Context(), track.LibraryID, track, album, true, true); err != nil {
+					log.Printf("[metadata] reidentify cover ensure error for %s: %v", track.ID, err)
+				}
 			}
 		}
 	} else {
@@ -1118,11 +1207,15 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 		// and every alias is dropped so no stale id can match later.
 		track.ExternalID = ""
 		track.MetadataSource = metadata.SourceMusicBrainz
-		track.ExternalIDs = nil
+		track.ExternalIDs = map[string]string{}
 		if meta.Title != "" {
 			track.Title = meta.Title
 		}
-		h.trackRepo.Update(r.Context(), track)
+		if err := h.trackRepo.Update(r.Context(), track); err != nil {
+			log.Printf("[metadata] reidentify (no-match) update error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+			return
+		}
 
 		if len(meta.Artists) > 0 {
 			var newArtists []*domain.TrackArtist
@@ -1139,18 +1232,26 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 			if len(newArtists) > 0 {
-				h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, newArtists)
+				if err := h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, newArtists); err != nil {
+					log.Printf("[metadata] reidentify (no-match) set artists error: %v", err)
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update artists"})
+					return
+				}
 			}
 		} else {
 			// No artists from probe either — reset to Unknown Artist
 			unknown := h.findOrCreateArtist(r.Context(), "Unknown Artist", "", "")
 			if unknown != nil {
-				h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, []*domain.TrackArtist{{
+				if err := h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, []*domain.TrackArtist{{
 					ArtistID:  unknown.ID,
 					Role:      "performer",
 					SortOrder: 0,
 					Artist:    unknown,
-				}})
+				}}); err != nil {
+					log.Printf("[metadata] reidentify (no-match) set unknown artist error: %v", err)
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update artists"})
+					return
+				}
 			}
 		}
 
@@ -1175,11 +1276,20 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			h.albumRepo.BatchCreate(r.Context(), []domain.Album{*album})
 		}
 		if album != nil {
-			h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, []*domain.TrackAlbum{{
+			if err := h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, []*domain.TrackAlbum{{
 				AlbumID:     album.ID,
 				TrackNumber: 1,
 				DiscNumber:  1,
-			}})
+			}}); err != nil {
+				log.Printf("[metadata] reidentify (no-match) replace albums error: %v", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album"})
+				return
+			}
+			if album.CoverImageID == nil && album.Title != "Unknown Album" && h.covers != nil {
+				if err := h.covers.BackfillAlbumCover(r.Context(), album, false); err != nil {
+					log.Printf("[metadata] reidentify backfill cover for %s: %v", album.ID, err)
+				}
+			}
 		}
 	}
 
@@ -1188,57 +1298,122 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 
 func (h *MetadataHandler) SearchArtist(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Source string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
 		return
 	}
-	resolver := h.newResolver(r.Context())
-	defer resolver.Close()
-	client := h.newMBClient(r.Context())
-	artists, _ := client.SearchArtists(r.Context(), req.Name)
+	source := utils.SourceOrDefault(utils.NormalizeSource(req.Source))
 	var result []map[string]interface{}
-	for _, a := range artists {
-		result = append(result, map[string]interface{}{
-			"name":        a.Name,
-			"external_id": a.ID,
-			"country":     a.Country,
-			"type":        a.Type,
-		})
+	switch source {
+	case utils.SourceMusicBrainz:
+		client := h.newMBClient(r.Context())
+		artists, err := client.SearchArtists(r.Context(), req.Name)
+		if err != nil {
+			log.Printf("[metadata] SearchArtist musicbrainz error: %v", err)
+		}
+		for _, a := range artists {
+			result = append(result, map[string]interface{}{
+				"name":        a.Name,
+				"external_id": a.ID,
+				"country":     a.Country,
+				"type":        a.Type,
+				"source":      utils.SourceMusicBrainz,
+			})
+		}
+	case utils.SourceNetease:
+		if h.neteaseProvider != nil {
+			artists, _, err := h.neteaseProvider.SearchArtists(r.Context(), req.Name, 1, 20)
+			if err != nil {
+				log.Printf("[metadata] SearchArtist netease error: %v", err)
+			}
+			for _, a := range artists {
+				result = append(result, map[string]interface{}{
+					"name":        a.Name,
+					"external_id": a.ArtistID,
+					"source":      utils.SourceNetease,
+				})
+			}
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported source: %s", source)})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"artists": result})
 }
 
 func (h *MetadataHandler) SearchRelease(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Source string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
 		return
 	}
-	client := h.newMBClient(r.Context())
-	releases, _ := client.SearchReleases(r.Context(), req.Name)
+	source := utils.SourceOrDefault(utils.NormalizeSource(req.Source))
 	var result []map[string]interface{}
-	// Always prepend the query text as an unmatched entry (no external id)
-	result = append(result, map[string]interface{}{
-		"title":       req.Name,
-		"external_id": "",
-		"artist":      "",
-		"status":      "",
-	})
-	for _, rel := range releases {
-		artistName := ""
-		if len(rel.Artists) > 0 {
-			artistName = rel.Artists[0].Name
+	switch source {
+	case utils.SourceMusicBrainz:
+		client := h.newMBClient(r.Context())
+		releases, err := client.SearchReleases(r.Context(), req.Name)
+		if err != nil {
+			log.Printf("[metadata] SearchRelease musicbrainz error: %v", err)
 		}
+		// Always prepend the query text as an unmatched entry (no external id)
 		result = append(result, map[string]interface{}{
-			"title":       rel.Title,
-			"external_id": rel.ID,
-			"artist":      artistName,
-			"status":      rel.Status,
+			"title":       req.Name,
+			"external_id": "",
+			"artist":      "",
+			"status":      "",
+			"source":      utils.SourceMusicBrainz,
 		})
+		for _, rel := range releases {
+			artistName := ""
+			if len(rel.Artists) > 0 {
+				artistName = rel.Artists[0].Name
+			}
+			result = append(result, map[string]interface{}{
+				"title":       rel.Title,
+				"external_id": rel.ID,
+				"artist":      artistName,
+				"status":      rel.Status,
+				"source":      utils.SourceMusicBrainz,
+			})
+		}
+	case utils.SourceNetease:
+		if h.neteaseProvider != nil {
+			albums, _, err := h.neteaseProvider.SearchAlbums(r.Context(), req.Name, 1, 20)
+			if err != nil {
+				log.Printf("[metadata] SearchRelease netease error: %v", err)
+			}
+			for _, a := range albums {
+				title, ok := a["title"].(string)
+				if !ok {
+					continue
+				}
+				extID, ok := a["external_id"].(string)
+				if !ok {
+					continue
+				}
+				artist, ok := a["artist"].(string)
+				if !ok {
+					continue
+				}
+				result = append(result, map[string]interface{}{
+					"title":       title,
+					"external_id": extID,
+					"artist":      artist,
+					"status":      "",
+					"source":      utils.SourceNetease,
+				})
+			}
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported source: %s", source)})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"releases": result})
 }
@@ -1277,6 +1452,12 @@ func (h *MetadataHandler) buildTrackAlbums(ctx context.Context, track *domain.Tr
 		}
 		if tal.Album != nil {
 			entry["title"] = tal.Album.Title
+			entry["external_id"] = tal.Album.ExternalID
+			entry["source"] = tal.Album.MetadataSource
+			entry["year"] = tal.Album.Year
+			if tal.Album.Genre != "" {
+				entry["genre"] = tal.Album.Genre
+			}
 		}
 		result[i] = entry
 	}
@@ -1299,6 +1480,23 @@ func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, e
 		}
 	}
 	return a
+}
+
+func (h *MetadataHandler) ListSources(w http.ResponseWriter, r *http.Request) {
+	mbCfg := h.mbConfig(r.Context())
+	neteaseEnabled := h.neteaseEnabled
+	if enabled, err := h.settingsRepo.Get(r.Context(), "metadata_netease_enabled"); err == nil && enabled != "" {
+		neteaseEnabled = enabled == "true"
+	}
+
+	sources := []map[string]string{}
+	if mbCfg.Enabled {
+		sources = append(sources, map[string]string{"name": utils.SourceMusicBrainz, "label": "MusicBrainz"})
+	}
+	if neteaseEnabled && h.neteaseProvider != nil {
+		sources = append(sources, map[string]string{"name": utils.SourceNetease, "label": "NetEase"})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sources": sources})
 }
 
 func sourceOrDefaultSource(s string) string {
@@ -1386,6 +1584,12 @@ func (h *MetadataHandler) reResolveVersions(ctx context.Context, libraryID, oldE
 	if len(ids) >= 2 {
 		if err := h.renumberGroup(ctx, newSource, ids, newExtID, libraryID); err != nil {
 			return fmt.Errorf("renumber new group %s/%s: %w", newSource, newExtID, err)
+		}
+	} else if len(ids) == 1 {
+		// Single track with this external id: reset version so it shows
+		// in the main list instead of being hidden as a secondary version.
+		if _, err := h.db.ExecContext(ctx, `UPDATE tracks SET version = 0, version_label = '' WHERE id = $1`, ids[0]); err != nil {
+			return fmt.Errorf("reset version for %s: %w", ids[0], err)
 		}
 	}
 	return nil

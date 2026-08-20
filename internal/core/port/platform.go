@@ -40,8 +40,6 @@ type TrackDetail struct {
 	AlbumID     string       `json:"album_id"`
 	Duration    float64      `json:"duration"`
 	CoverURL    string       `json:"cover_url,omitempty"`
-	Year        int          `json:"year,omitempty"`
-	Genre       string       `json:"genre,omitempty"`
 	Lyrics      string       `json:"lyrics,omitempty"`
 	LyricsTrans string       `json:"lyrics_translation,omitempty"`
 	PublishTime string       `json:"publish_time,omitempty"`

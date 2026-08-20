@@ -328,7 +328,7 @@ type AudioDeviceConfig struct {
 // the REST save flow and scanner enrichment).
 func (t *Track) SetExternalID(id string) {
 	t.ExternalID = id
-	if len(t.ExternalIDs) == 0 || t.MetadataSource == "" {
+	if t.ExternalIDs == nil || t.MetadataSource == "" {
 		return
 	}
 	if id == "" {

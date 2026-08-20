@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sonicore/server/internal/core/port"
 )
@@ -18,6 +19,20 @@ const platformName = "netease"
 // no matching track. Sources classify this as a clean "no match" instead of
 // an upstream failure.
 var ErrTrackNotFound = fmt.Errorf("track not found")
+
+// ErrAlbumNotFound is returned when an album detail lookup finds no matching
+// album. It allows callers to distinguish "not found" from network errors.
+var ErrAlbumNotFound = fmt.Errorf("album not found")
+
+// AlbumDetail holds metadata for a single album retrieved from the NetEase
+// API. It is used by the metadata resolution chain to fill in album-level
+// fields (artist, year) when saving a track identified via NetEase.
+type AlbumDetail struct {
+	ID     string
+	Title  string
+	Artist string
+	Year   int
+}
 
 type Provider struct {
 	client *Client
@@ -219,6 +234,45 @@ func (p *Provider) SearchArtists(ctx context.Context, query string, page, limit 
 	return out, total, nil
 }
 
+func (p *Provider) SearchAlbums(ctx context.Context, query string, page, limit int) ([]map[string]any, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	offset := (page - 1) * limit
+	if offset < 0 {
+		offset = 0
+	}
+	body, err := p.request(ctx, "/api/search/get", map[string]any{
+		"s":      query,
+		"type":   10,
+		"limit":  limit,
+		"offset": offset,
+	}, "eapi")
+	if err != nil {
+		return nil, 0, err
+	}
+	result, _ := body["result"].(map[string]any)
+	albums, _ := result["albums"].([]any)
+	out := make([]map[string]any, 0, len(albums))
+	for _, item := range albums {
+		if obj, ok := item.(map[string]any); ok {
+			artistName := ""
+			if artists, ok := obj["artists"].([]any); ok && len(artists) > 0 {
+				if first, ok := artists[0].(map[string]any); ok {
+					artistName = asString(first["name"])
+				}
+			}
+			out = append(out, map[string]any{
+				"title":       asString(obj["name"]),
+				"external_id": idString(obj["id"]),
+				"artist":      artistName,
+			})
+		}
+	}
+	total := int(asFloat64(result["albumCount"]))
+	return out, total, nil
+}
+
 func (p *Provider) GetTrack(ctx context.Context, trackID string) (*port.TrackDetail, error) {
 	tracks, err := p.songDetails(ctx, []string{trackID})
 	if err != nil {
@@ -308,6 +362,34 @@ func (p *Provider) GetArtistTracks(ctx context.Context, artistID string, page, l
 	}
 	total := int(asFloat64(body["total"]))
 	return tracks, total, nil
+}
+
+// GetAlbum retrieves album metadata from the NetEase API. It returns the
+// album title, the first credited artist, and the release year extracted from
+// the album's publishTime.
+func (p *Provider) GetAlbum(ctx context.Context, albumID string) (*AlbumDetail, error) {
+	body, err := p.request(ctx, "/api/album/v3/detail",
+		map[string]any{"id": albumID}, "weapi")
+	if err != nil {
+		return nil, err
+	}
+	album, _ := body["album"].(map[string]any)
+	if album == nil {
+		return nil, fmt.Errorf("%w: %s", ErrAlbumNotFound, albumID)
+	}
+	detail := &AlbumDetail{
+		ID:    albumID,
+		Title: asString(album["name"]),
+	}
+	if artists, ok := album["artists"].([]any); ok && len(artists) > 0 {
+		if first, ok := artists[0].(map[string]any); ok {
+			detail.Artist = asString(first["name"])
+		}
+	}
+	if pt, ok := toFloat64(album["publishTime"]); ok && pt > 0 {
+		detail.Year = time.UnixMilli(int64(pt)).UTC().Year()
+	}
+	return detail, nil
 }
 
 // mapTrack converts a NetEase song object to a PlatformTrack. Search

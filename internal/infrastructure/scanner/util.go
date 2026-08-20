@@ -252,7 +252,11 @@ func BatchUpdateVersionLabels(ctx context.Context, db batchDB, updates []Version
 				sb.WriteString(", ")
 			}
 			n := j * 3
-			fmt.Fprintf(&sb, "($%d, $%d, $%d)", n+1, n+2, n+3)
+			if j == 0 {
+				fmt.Fprintf(&sb, "($%d::varchar, $%d::smallint, $%d::text)", n+1, n+2, n+3)
+			} else {
+				fmt.Fprintf(&sb, "($%d, $%d, $%d)", n+1, n+2, n+3)
+			}
 			args = append(args, u.ID, u.Version, u.Label)
 		}
 		sb.WriteString(") AS v(id, version, label) WHERE tracks.id = v.id")

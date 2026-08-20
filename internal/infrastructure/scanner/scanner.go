@@ -744,6 +744,11 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		log.Printf("[scan] version resolution error for %s: %v", lib.Name, err)
 	}
 
+	// Recalculate album song_count and duration for all albums
+	if err := e.recalcAlbumStats(ctx, lib.ID); err != nil {
+		log.Printf("[scan] album stats recalculation error: %v", err)
+	}
+
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks
 	lib.LastScannedAt = timePtr(time.Now())
 
@@ -751,6 +756,24 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		lib.Name, stats.TotalFiles, stats.NewTracks, stats.UpdatedTracks, stats.DeletedTracks, stats.CoversExtracted, len(stats.Errors))
 
 	return stats, nil
+}
+
+// recalcAlbumStats refreshes song_count and duration for all albums that have
+// tracks in the given library.
+func (e *Engine) recalcAlbumStats(ctx context.Context, libraryID string) error {
+	ids, err := e.trackRepo.AlbumIDsByLibrary(ctx, libraryID)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	n := len(ids)
+	if err := e.trackRepo.UpdateAlbumStats(ctx, ids); err != nil {
+		return err
+	}
+	log.Printf("[scan] recalc album stats: %d albums updated", n)
+	return nil
 }
 
 func (e *Engine) ExtractCovers(ctx context.Context, lib *domain.Library, onProgress func(scanned, total int)) error {
@@ -823,39 +846,25 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 		return false
 	}
 
-	// Non-MusicBrainz sources (e.g. NetEase) do not expose country/genre and
-	// may not carry the source ID in external_id; require only the fields they
-	// actually provide so the track is not re-identified on every scan.
-	// Checked before the external ID guard below.
-	if track.MetadataSource != "" && track.MetadataSource != metadata.SourceMusicBrainz {
-		if track.Title == "" {
-			return false
-		}
-		trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
-		if err != nil || len(trackArtists) == 0 {
-			return false
-		}
-		for _, ta := range trackArtists {
-			artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
-			if err != nil || artist.Name == "" || artist.Name == "Unknown Artist" {
-				return false
-			}
-		}
-		for _, tal := range track.Albums {
-			album, err := e.albumRepo.FindByID(ctx, tal.AlbumID)
-			if err != nil || album.Title == "" || album.Title == "Unknown Album" {
-				return false
-			}
-		}
-		return true
-	}
-
-	if track.ExternalID == "" {
+	// Common basic check: title + at least one non-Unknown artist + album
+	if ok, err := e.trackRepo.TrackHasBasicMeta(ctx, track.ID); err != nil {
+		log.Printf("[scan] metaComplete TrackHasBasicMeta error for %s: %v", track.ID, err)
+		return false
+	} else if !ok {
 		return false
 	}
 
+	// Non-MusicBrainz sources (e.g. NetEase) do not expose country/genre and
+	// may not carry the source ID in external_id; require only the fields they
+	// actually provide so the track is not re-identified on every scan.
+	if track.MetadataSource != "" && track.MetadataSource != metadata.SourceMusicBrainz {
+		return true
+	}
+
 	// MusicBrainz completeness requires the full MB profile.
-	// Check artists via track_artists
+	if track.ExternalID == "" {
+		return false
+	}
 	trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
 	if err != nil || len(trackArtists) == 0 {
 		return false

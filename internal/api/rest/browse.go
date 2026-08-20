@@ -474,6 +474,10 @@ func (h *DataHandler) buildTrackAlbums(ctx context.Context, trackID string) []ma
 		if tal.Album != nil {
 			entry["title"] = tal.Album.Title
 			entry["cover_image_id"] = tal.Album.CoverImageID
+			entry["year"] = tal.Album.Year
+			if tal.Album.Genre != "" {
+				entry["genre"] = tal.Album.Genre
+			}
 		}
 		result[i] = entry
 	}

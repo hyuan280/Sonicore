@@ -11,9 +11,10 @@ interface Props {
   onChange: (artists: SelectedArtist[]) => void;
   showAdd?: boolean;
   onAddToggle?: (open: boolean) => void;
+  source?: string;
 }
 
-export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle }: Props) {
+export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle, source }: Props) {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<SelectedArtist[]>([]);
@@ -34,7 +35,7 @@ export default function ArtistSelector({ artists, onChange, showAdd, onAddToggle
           "Content-Type": "application/json",
           Authorization: "Bearer " + localStorage.getItem("token"),
         },
-        body: JSON.stringify({ name: q }),
+        body: JSON.stringify({ name: q, source: source || "" }),
       });
       const data = await res.json();
       const list = (data.artists || []).filter(

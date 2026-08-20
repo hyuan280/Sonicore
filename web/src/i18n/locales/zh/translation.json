@@ -207,7 +207,7 @@
     "searchFailed": "搜索失败",
     "saveFailed": "保存失败",
     "networkError": "网络错误",
-    "searchingMusicBrainz": "正在搜索 MusicBrainz...",
+    "loadingMetadata": "加载元数据中...",
     "serverUpdated": "服务器已更新：请重新登录以继续播放。",
     "scanErrors": "{{count}} 个扫描错误",
     "failed": "失败",
@@ -279,7 +279,7 @@
   "metadata": {
     "musicbrainzMatch": "MusicBrainz 匹配",
     "restoreDefaults": "恢复默认",
-    "searchingMusicBrainz": "正在搜索 MusicBrainz...",
+    "loadingMetadata": "加载元数据中...",
     "file": "文件",
     "title": "标题",
     "artists": "艺术家",
@@ -290,8 +290,9 @@
     "year": "年份",
     "genre": "流派",
     "label": "标签",
-    "mbid": "外部 ID",
-    "mbidPlaceholder": "MBID 或平台 ID（如网易云）",
+    "songMetadata": "歌曲元数据",
+    "externalId": "外部 ID",
+    "externalIdPlaceholder": "MBID 或平台 ID（如网易云）",
     "save": "保存",
     "saving": "保存中...",
     "saveFailed": "保存失败",
@@ -299,7 +300,7 @@
     "searchFailed": "搜索失败",
     "editLyrics": "编辑歌词",
     "changeCoverArt": "更换封面",
-    "identifyMusicBrainz": "通过 MusicBrainz 识别"
+    "viewMetadata": "查看元数据"
   },
   "history": {
     "removeEntries_one": "移除 {{count}} 条历史记录？",

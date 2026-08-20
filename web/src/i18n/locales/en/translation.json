@@ -207,7 +207,7 @@
     "searchFailed": "Search failed",
     "saveFailed": "Save failed",
     "networkError": "Network error",
-    "searchingMusicBrainz": "Searching MusicBrainz...",
+    "loadingMetadata": "Loading metadata...",
     "serverUpdated": "Server updated: please sign in again to continue playing.",
     "scanErrors": "{{count}} scan error(s)",
     "failed": "Failed",
@@ -279,7 +279,7 @@
   "metadata": {
     "musicbrainzMatch": "MusicBrainz Match",
     "restoreDefaults": "Restore defaults",
-    "searchingMusicBrainz": "Searching MusicBrainz...",
+    "loadingMetadata": "Loading metadata...",
     "file": "File",
     "title": "Title",
     "artists": "Artists",
@@ -290,8 +290,9 @@
     "year": "Year",
     "genre": "Genre",
     "label": "Label",
-    "mbid": "External ID",
-    "mbidPlaceholder": "MBID or platform ID (e.g. NetEase)",
+    "songMetadata": "Song Metadata",
+    "externalId": "External ID",
+    "externalIdPlaceholder": "MBID or platform ID (e.g. NetEase)",
     "save": "Save",
     "saving": "Saving...",
     "saveFailed": "Save failed",
@@ -299,7 +300,7 @@
     "searchFailed": "Search failed",
     "editLyrics": "Edit lyrics",
     "changeCoverArt": "Change cover art",
-    "identifyMusicBrainz": "Identify with MusicBrainz"
+    "viewMetadata": "View Metadata"
   },
   "history": {
     "removeEntries_one": "Remove {{count}} history entry?",
