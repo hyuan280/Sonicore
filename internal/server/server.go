@@ -616,7 +616,7 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 				out[k] = v
 				c.vals[k] = settingsCacheEntry{value: v, at: time.Now()}
 			} else {
-				out[k] = ""
+				// key absent from DB — leave out of map per "no override" contract
 				c.vals[k] = settingsCacheEntry{value: "", at: time.Now()}
 			}
 			continue
