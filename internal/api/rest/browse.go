@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
@@ -538,7 +538,7 @@ func (h *DataHandler) loadVersionMaps(ctx context.Context, keys []repository.Ver
 	}
 	accessibleLibs, err := h.libraryRepo.FindByUserID(ctx, userID)
 	if err != nil {
-		log.Printf("[browse] load accessible libraries for versions: %v", err)
+		logger.Info("[browse] load accessible libraries for versions: %v", err)
 		return nil
 	}
 	var libIDs []string
@@ -549,7 +549,7 @@ func (h *DataHandler) loadVersionMaps(ctx context.Context, keys []repository.Ver
 	if err != nil {
 		// Degrade gracefully (versions silently disappear) but keep the
 		// failure observable.
-		log.Printf("[browse] load version groups: %v", err)
+		logger.Info("[browse] load version groups: %v", err)
 		return nil
 	}
 	return versionsByExternalID

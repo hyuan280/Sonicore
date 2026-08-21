@@ -3,11 +3,11 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"log"
 
 	_ "github.com/lib/pq"
 
 	"github.com/sonicore/server/internal/config"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 func NewDB(cfg config.DatabaseConfig) (*sql.DB, error) {
@@ -23,7 +23,7 @@ func NewDB(cfg config.DatabaseConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	log.Println("[db] connected to PostgreSQL")
+	logger.Info("[db] connected to PostgreSQL")
 	return db, nil
 }
 
@@ -330,6 +330,6 @@ func RunMigrations(db *sql.DB) error {
 		return fmt.Errorf("schema migration failed: %w", err)
 	}
 
-	log.Println("[migrate] database migration completed")
+	logger.Info("[migrate] database migration completed")
 	return nil
 }

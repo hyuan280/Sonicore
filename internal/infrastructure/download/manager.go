@@ -3,12 +3,12 @@ package download
 import (
 	"context"
 	"database/sql"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -36,7 +36,7 @@ func (m *Manager) Register(src port.DownloadSource) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sources = append(m.sources, src)
-	log.Printf("[download] registered source: %s", src.Name())
+	logger.Info("[download] registered source: %s", src.Name())
 }
 
 func (m *Manager) MatchSource(url string) port.DownloadSource {
@@ -88,7 +88,7 @@ func (m *Manager) runJob(jobID string, source port.DownloadSource) {
 
 	job, err := m.jobRepo.FindByID(ctx, jobID)
 	if err != nil {
-		log.Printf("[download] job %s not found: %v", jobID, err)
+		logger.Warn("[download] job %s not found: %v", jobID, err)
 		return
 	}
 
@@ -99,7 +99,7 @@ func (m *Manager) runJob(jobID string, source port.DownloadSource) {
 		job.Status = "failed"
 		job.Error = err.Error()
 		m.jobRepo.Update(ctx, job)
-		log.Printf("[download] job %s failed: %v", jobID, err)
+		logger.Error("[download] job %s failed: %v", jobID, err)
 		return
 	}
 
@@ -107,13 +107,13 @@ func (m *Manager) runJob(jobID string, source port.DownloadSource) {
 	m.jobRepo.Update(ctx, job)
 
 	if err := m.postProcess(ctx, job); err != nil {
-		log.Printf("[download] post-process %s: %v", jobID, err)
+		logger.Info("[download] post-process %s: %v", jobID, err)
 	}
 
 	job.Status = "completed"
 	job.Progress = 100
 	m.jobRepo.Update(ctx, job)
-	log.Printf("[download] job %s completed → %s", jobID, job.TargetPath)
+	logger.Info("[download] job %s completed → %s", jobID, job.TargetPath)
 }
 
 func (m *Manager) postProcess(ctx context.Context, job *domain.DownloadJob) error {

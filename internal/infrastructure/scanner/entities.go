@@ -2,9 +2,9 @@ package scanner
 
 import (
 	"context"
-	"log"
 
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -57,7 +57,7 @@ func findOrCreateArtist(ctx context.Context, er *metadata.EntityResolver, artist
 			// so log, roll back and return the artist.
 			if err := artistRepo.Update(ctx, artist); err != nil {
 				artist.Name, artist.SortName, artist.Country = oldName, oldSortName, oldCountry
-				log.Printf("[scan] artist backfill update error: %v", err)
+				logger.Error("[scan] artist backfill update error: %v", err)
 			}
 		}
 	}
@@ -132,7 +132,7 @@ func findOrCreateAlbum(ctx context.Context, er *metadata.EntityResolver, albumRe
 			// in-memory values are rolled back, and the album is returned.
 			if err := albumRepo.Update(ctx, album); err != nil {
 				album.Title, album.Year, album.Genre, album.Country = oldTitle, oldYear, oldGenre, oldCountry
-				log.Printf("[scan] album backfill update error: %v", err)
+				logger.Error("[scan] album backfill update error: %v", err)
 			}
 		}
 	}

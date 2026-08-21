@@ -13,7 +13,6 @@ import (
 	"image/jpeg"
 	_ "image/png"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
@@ -522,7 +522,7 @@ func (m *CoverManager) EnsureTrackCover(ctx context.Context, libraryID string, t
 			// Surface the platform failure so callers can distinguish a
 			// source outage from a genuinely coverless track.
 			platformErr = rerr
-			log.Printf("[cover] platform lookup error for %s: %v", track.ID, rerr)
+			logger.Error("[cover] platform lookup error for %s: %v", track.ID, rerr)
 		}
 	}
 
@@ -753,7 +753,7 @@ func (m *CoverManager) importTrackCoverLocked(ctx context.Context, libraryID str
 		// Files and pointer are committed; retire the stale row now.
 		if prevImageID != "" {
 			if err := m.images.Delete(ctx, prevImageID); err != nil {
-				log.Printf("[cover] delete stale track image row: %v", err)
+				logger.Info("[cover] delete stale track image row: %v", err)
 			}
 		}
 		track.CoverImageID = &img.ID
@@ -772,9 +772,9 @@ func (m *CoverManager) importTrackCoverLocked(ctx context.Context, libraryID str
 		if id, err := m.createAlbumImage(ctx, album, mainPath, data, w, h, source); err == nil {
 			album.CoverImageID = &id
 			if err := m.albums.Update(ctx, album); err != nil {
-				log.Printf("[cover] album cover update error for %s: %v", album.ID, err)
+				logger.Error("[cover] album cover update error for %s: %v", album.ID, err)
 				if derr := m.images.Delete(ctx, id); derr != nil {
-					log.Printf("[cover] rollback album image row %s: %v", id, derr)
+					logger.Info("[cover] rollback album image row %s: %v", id, derr)
 				}
 				album.CoverImageID = nil
 				m.noteFail("album:" + album.ID)
@@ -782,7 +782,7 @@ func (m *CoverManager) importTrackCoverLocked(ctx context.Context, libraryID str
 				m.clearFail("album:" + album.ID)
 			}
 		} else {
-			log.Printf("[cover] album cover create error for %s: %v", album.ID, err)
+			logger.Error("[cover] album cover create error for %s: %v", album.ID, err)
 			m.noteFail("album:" + album.ID)
 		}
 	}
@@ -848,11 +848,11 @@ func (m *CoverManager) BackfillAlbumCover(ctx context.Context, album *domain.Alb
 			if w > 256 || h > 256 {
 				thumbDir := filepath.Join(m.imagesDir, "album")
 				if err := os.MkdirAll(thumbDir, 0755); err != nil {
-					log.Printf("[cover] album thumbnail dir create error for %s: %v", album.ID, err)
+					logger.Error("[cover] album thumbnail dir create error for %s: %v", album.ID, err)
 				} else {
 					thumbPath := filepath.Join(thumbDir, fmt.Sprintf("album_%s_256.jpg", album.ID))
 					if err := ResizeToThumbnail(data, thumbPath, 256); err != nil {
-						log.Printf("[cover] album thumbnail resize error for %s: %v", album.ID, err)
+						logger.Error("[cover] album thumbnail resize error for %s: %v", album.ID, err)
 					}
 				}
 			}
@@ -879,7 +879,7 @@ func (m *CoverManager) BackfillAlbumCover(ctx context.Context, album *domain.Alb
 		// The new row would be orphaned; drop it and keep the previous row
 		// authoritative so repeated requests do not accumulate rows.
 		if derr := m.images.Delete(ctx, newID); derr != nil {
-			log.Printf("[cover] rollback album image row %s: %v", newID, derr)
+			logger.Info("[cover] rollback album image row %s: %v", newID, derr)
 		}
 		m.noteFail(key)
 		return err
@@ -889,7 +889,7 @@ func (m *CoverManager) BackfillAlbumCover(ctx context.Context, album *domain.Alb
 	// track original).
 	if prevImageID != "" {
 		if err := m.images.Delete(ctx, prevImageID); err != nil {
-			log.Printf("[cover] delete stale album image row: %v", err)
+			logger.Info("[cover] delete stale album image row: %v", err)
 		}
 	}
 	m.clearFail(key)
@@ -912,7 +912,7 @@ func (m *CoverManager) createAlbumImage(ctx context.Context, album *domain.Album
 			return "", err
 		}
 		if err := ResizeToThumbnail(data, thumbPath, 256); err != nil {
-			log.Printf("[cover] album thumbnail resize error for %s: %v", album.ID, err)
+			logger.Error("[cover] album thumbnail resize error for %s: %v", album.ID, err)
 		}
 		if fileSize(thumbPath) > 0 {
 			sw, sh := scaledDims(w, h, 256)
@@ -954,7 +954,7 @@ func (m *CoverManager) createAlbumImage(ctx context.Context, album *domain.Album
 func (m *CoverManager) refreshAlbumsReferencing(ctx context.Context, path string, data []byte, w, h int) {
 	imgs, err := m.images.FindByPath(ctx, "album", path)
 	if err != nil {
-		log.Printf("[cover] find albums referencing %s: %v", path, err)
+		logger.Info("[cover] find albums referencing %s: %v", path, err)
 		return
 	}
 	for i := range imgs {
@@ -969,7 +969,7 @@ func (m *CoverManager) refreshAlbumsReferencing(ctx context.Context, path string
 		thumbPath := filepath.Join(m.imagesDir, "album", fmt.Sprintf("album_%s_256.jpg", img.OwnerID))
 		if w > 256 || h > 256 {
 			if err := ResizeToThumbnail(data, thumbPath, 256); err != nil {
-				log.Printf("[cover] refresh thumbnail resize error for %s: %v", img.OwnerID, err)
+				logger.Error("[cover] refresh thumbnail resize error for %s: %v", img.OwnerID, err)
 			}
 			if fileSize(thumbPath) > 0 {
 				sw, sh := scaledDims(w, h, 256)
@@ -984,7 +984,7 @@ func (m *CoverManager) refreshAlbumsReferencing(ctx context.Context, path string
 			img.Variants = append(img.Variants, domain.ImageVariant{Path: path, Width: w, Height: h, Size: int64(len(data))})
 		}
 		if err := m.images.Update(ctx, img); err != nil {
-			log.Printf("[cover] refresh album row %s: %v", img.ID, err)
+			logger.Info("[cover] refresh album row %s: %v", img.ID, err)
 		}
 	}
 }
@@ -1085,7 +1085,7 @@ func (m *CoverManager) SweepOrphanCovers(ctx context.Context) error {
 			// Uncertain shared state: never remove a file we could not verify
 			// (that would risk deleting a live row's cover). Keep every row;
 			// the next sweep retries.
-			log.Printf("[cover] orphan shared-path check error, sweep deferred: %v", err)
+			logger.Error("[cover] orphan shared-path check error, sweep deferred: %v", err)
 			return nil
 		}
 		shared = s
@@ -1100,7 +1100,7 @@ func (m *CoverManager) SweepOrphanCovers(ctx context.Context) error {
 			// File removal failure keeps the row for a later retry; a row
 			// delete failure leaves the row pointing at already-gone files,
 			// which the next sweep self-heals via idempotent removes.
-			log.Printf("[cover] orphan cover %s kept for retry: %v", img.ID, err)
+			logger.Info("[cover] orphan cover %s kept for retry: %v", img.ID, err)
 		}
 	}
 	return nil
@@ -1148,7 +1148,7 @@ func (m *CoverManager) removeOrphanCoverFiles(ctx context.Context, img domain.Im
 			continue // still referenced by a live row; keep the file
 		}
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			log.Printf("[cover] remove orphan cover file %s: %v", p, err)
+			logger.Info("[cover] remove orphan cover file %s: %v", p, err)
 			retry = true
 		}
 	}

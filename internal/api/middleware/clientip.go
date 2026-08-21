@@ -1,11 +1,12 @@
 package middleware
 
 import (
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 var (
@@ -23,7 +24,7 @@ func SetTrustedProxies(cidrs []string) {
 		if !strings.Contains(c, "/") {
 			ip := net.ParseIP(c)
 			if ip == nil {
-				log.Printf("[middleware] skip invalid IP %q in trusted_proxies", c)
+				logger.Warn("[middleware] skip invalid IP %q in trusted_proxies", c)
 				continue
 			}
 			if ip.To4() != nil {
@@ -34,7 +35,7 @@ func SetTrustedProxies(cidrs []string) {
 		}
 		_, n, err := net.ParseCIDR(c)
 		if err != nil {
-			log.Printf("[middleware] skip invalid CIDR %q in trusted_proxies: %v", c, err)
+			logger.Warn("[middleware] skip invalid CIDR %q in trusted_proxies: %v", c, err)
 			continue
 		}
 		parsed = append(parsed, n)
@@ -98,7 +99,7 @@ func ClientIP(r *http.Request) string {
 		}
 	}
 	if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
-		log.Printf("[clientip] untrusted peer %s forwarded X-Real-IP=%s — add to trusted_proxies", peerHost(r.RemoteAddr), xrip)
+		logger.Info("[clientip] untrusted peer %s forwarded X-Real-IP=%s — add to trusted_proxies", peerHost(r.RemoteAddr), xrip)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

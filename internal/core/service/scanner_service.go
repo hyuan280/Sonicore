@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/external/netease"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/internal/infrastructure/scanner"
@@ -232,7 +232,7 @@ func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) (*metadata.R
 	}
 	if rl, err := read("metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
 		if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
-			log.Printf("[scanner] invalid musicbrainz rate limit %q", rl)
+			logger.Warn("[scanner] invalid musicbrainz rate limit %q", rl)
 		} else {
 			mbCfg.RateLimit = n
 		}
@@ -246,16 +246,16 @@ func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) (*metadata.R
 	}
 
 	if readErr {
-		log.Printf("[scanner] settings read failed for %q: %v", firstKey, firstErr)
+		logger.Error("[scanner] settings read failed for %q: %v", firstKey, firstErr)
 		if last := s.lastGoodRegistry.Load(); last != nil {
 			return last, false, true
 		}
-		log.Printf("[scanner] no last-good registry, falling back to defaults")
+		logger.Info("[scanner] no last-good registry, falling back to defaults")
 	}
 
 	registry := metadata.BuildRegistry(mbCfg, s.neteaseProvider, neteaseEnabled, s.umRepo)
 	if names := sourceNames(registry.Sources()); len(names) > 0 {
-		log.Printf("[scanner] metadata sources: %s", strings.Join(names, ", "))
+		logger.Info("[scanner] metadata sources: %s", strings.Join(names, ", "))
 	}
 	// lastGoodRegistry is refreshed by the caller (buildRegistry) under its
 	// generation check, so a stale-gen build never overwrites new config.
@@ -383,7 +383,7 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, en
 	lib.UpdatedAt = time.Now()
 	s.libRepo.UpdateStats(ctx, lib)
 
-	log.Printf("[scanner] finished library=%s status=%s new=%d updated=%d deleted=%d errors=%d",
+	logger.Info("[scanner] finished library=%s status=%s new=%d updated=%d deleted=%d errors=%d",
 		libraryID, job.Status, job.NewTracks, job.UpdatedTracks, job.DeletedTracks, len(stats.Errors))
 
 	s.mu.Lock()
@@ -400,5 +400,5 @@ func (s *ScannerService) setError(libraryID, msg string) {
 	s.mu.Lock()
 	delete(s.activeScan, libraryID)
 	s.mu.Unlock()
-	log.Printf("[scanner] error library=%s: %s", libraryID, msg)
+	logger.Error("[scanner] error library=%s: %s", libraryID, msg)
 }

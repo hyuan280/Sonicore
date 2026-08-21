@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 // ErrNotFound is returned when the MusicBrainz API answers 404 for a lookup
@@ -161,7 +162,7 @@ func (c *MBClient) get(ctx context.Context, path string, params url.Values, out 
 	params.Set("fmt", "json")
 	u += "?" + params.Encode()
 
-	log.Printf("[mb] GET %s", u)
+	logger.Debug("[mb] GET %s", u)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
@@ -183,7 +184,7 @@ func (c *MBClient) get(ctx context.Context, path string, params url.Values, out 
 		return fmt.Errorf("musicbrainz HTTP %d: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
 	}
 
-	log.Printf("[mb] 200 %s", path)
+	logger.Debug("[mb] 200 %s", path)
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 

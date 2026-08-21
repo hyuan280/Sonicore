@@ -2,10 +2,10 @@ package scanner
 
 import (
 	"context"
-	"log"
 	"strings"
 
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -101,7 +101,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 		if len(enrichment.Artists) > 0 {
 			trackArtists, err := trackRepo.LoadTrackArtists(ctx, track.ID)
 			if err != nil {
-				log.Printf("[scan] load track artists for enrichment %s: %v", track.ID, err)
+				logger.Info("[scan] load track artists for enrichment %s: %v", track.ID, err)
 			} else {
 				allUnknown := true
 				lookupFailed := false
@@ -112,7 +112,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 						// unknown": replacing the artists below would
 						// DELETE the real associations (ReplaceTrackArtists
 						// deletes then re-inserts) and lose data.
-						log.Printf("[scan] artist lookup for enrichment %s: %v", ta.ArtistID, err)
+						logger.Info("[scan] artist lookup for enrichment %s: %v", ta.ArtistID, err)
 						lookupFailed = true
 						continue
 					}
@@ -158,7 +158,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 					}
 					if updated {
 						if err := artistRepo.Update(ctx, artist); err != nil {
-							log.Printf("[scan] artist enrichment update error for %s: %v", artist.ID, err)
+							logger.Error("[scan] artist enrichment update error for %s: %v", artist.ID, err)
 						} else {
 							changed = true
 						}
@@ -178,7 +178,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 						}
 						artist, err := findOrCreateArtist(ctx, er, artistRepo, ar.Name, enrich)
 						if err != nil {
-							log.Printf("[scan] create artist for enrichment %s: %v", ar.Name, err)
+							logger.Info("[scan] create artist for enrichment %s: %v", ar.Name, err)
 							continue
 						}
 						newArtists = append(newArtists, &domain.TrackArtist{
@@ -190,7 +190,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 					}
 					if len(newArtists) > 0 {
 						if err := trackRepo.ReplaceTrackArtists(ctx, track.ID, newArtists); err != nil {
-							log.Printf("[scan] replace track artists error for %s: %v", track.ID, err)
+							logger.Error("[scan] replace track artists error for %s: %v", track.ID, err)
 						} else {
 							changed = true
 						}
@@ -205,7 +205,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 		if len(track.Albums) > 0 {
 			album, err := albumRepo.FindByID(ctx, track.Albums[0].AlbumID)
 			if err != nil {
-				log.Printf("[scan] album lookup for enrichment %s: %v", track.Albums[0].AlbumID, err)
+				logger.Info("[scan] album lookup for enrichment %s: %v", track.Albums[0].AlbumID, err)
 			} else {
 				updated := false
 				if enrichment.AlbumExternalID != "" && (album.ExternalID == "" || overwrite) {
@@ -247,7 +247,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 				}
 				if updated {
 					if err := albumRepo.Update(ctx, album); err != nil {
-						log.Printf("[scan] album enrichment update error for %s: %v", album.ID, err)
+						logger.Error("[scan] album enrichment update error for %s: %v", album.ID, err)
 					} else {
 						changed = true
 					}

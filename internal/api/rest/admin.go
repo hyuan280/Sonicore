@@ -3,7 +3,6 @@ package rest
 import (
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,7 +60,7 @@ func (h *AdminHandler) cookieBroken(raw string) bool {
 		return false
 	}
 	if _, err := h.enc.Decrypt(raw); err != nil {
-		log.Printf("[admin] netease cookie decrypt failed: %v", err)
+		logger.Error("[admin] netease cookie decrypt failed: %v", err)
 		return true
 	}
 	return false
@@ -240,7 +239,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if *req.NeteaseCookie != "" {
 			enc, err := h.encryptSecret(*req.NeteaseCookie)
 			if err != nil {
-				log.Printf("[admin] store platforms_netease_cookie: %v", err)
+				logger.Info("[admin] store platforms_netease_cookie: %v", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store cookie"})
 				return
 			}
@@ -265,7 +264,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.settingsRepo.SetMany(r.Context(), writes); err != nil {
-		log.Printf("[admin] save settings batch: %v", err)
+		logger.Info("[admin] save settings batch: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
 		return
 	}

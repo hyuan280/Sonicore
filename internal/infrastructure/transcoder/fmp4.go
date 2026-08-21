@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 var (
@@ -280,13 +281,13 @@ func startTranscode(filePath, quality, dstPath string, cfg transcodeConfig) {
 			runningMu.Unlock()
 		}()
 		if recoverErr := recover(); recoverErr != nil {
-			log.Printf("[transcoder] panic in background transcode: %v", recoverErr)
+			logger.Error("[transcoder] panic in background transcode: %v", recoverErr)
 		}
 		if cacheValid(dstPath, filePath) {
 			return
 		}
 		if err := transcodeToFile(filePath, quality, dstPath, cfg); err != nil {
-			log.Printf("[transcoder] background transcode error: %v", err)
+			logger.Error("[transcoder] background transcode error: %v", err)
 		}
 	}()
 }

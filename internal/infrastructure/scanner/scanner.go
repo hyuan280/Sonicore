@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"maps"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -192,13 +192,13 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			}
 			candidate, err := e.registry.Identify(ctx, q)
 			if err != nil {
-				log.Printf("[scan] metadata identify error for %s: %v", path, err)
+				logger.Error("[scan] metadata identify error for %s: %v", path, err)
 			} else if candidate != nil {
 				identified = true
 				coverURL = candidate.CoverArtURL
 				enrichment = metadata.CandidateToEnrichment(candidate)
 				if enrichment != nil {
-					log.Printf("[scan] enriched: source=%s artist_ext=%s album_ext=%s track_ext=%s genre=%s year=%d lyrics=%t",
+					logger.Info("[scan] enriched: source=%s artist_ext=%s album_ext=%s track_ext=%s genre=%s year=%d lyrics=%t",
 						enrichment.Source, enrichment.ArtistExternalID, enrichment.AlbumExternalID, enrichment.TrackExternalID, enrichment.Genre, enrichment.Year, enrichment.Lyrics != "")
 				}
 			}
@@ -259,9 +259,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 					// A network import failure must not skip the unified
 					// ensure flow (embedded extraction first, platform chain
 					// as fallback).
-					log.Printf("[scan] cover import error for %s: %v", path, err)
+					logger.Error("[scan] cover import error for %s: %v", path, err)
 					if err := e.covers.EnsureTrackCover(ctx, lib.ID, existing, album, true, identified); err != nil {
-						log.Printf("[scan] cover ensure error for %s: %v", path, err)
+						logger.Error("[scan] cover ensure error for %s: %v", path, err)
 					} else {
 						stats.CoversExtracted++
 						changed = true
@@ -276,14 +276,14 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 				// is false): skip so scans do not spawn a failing ffmpeg
 				// extraction and log an error on every pass.
 				if err := e.covers.EnsureTrackCover(ctx, lib.ID, existing, album, true, identified); err != nil {
-					log.Printf("[scan] cover ensure error for %s: %v", path, err)
+					logger.Error("[scan] cover ensure error for %s: %v", path, err)
 				} else {
 					stats.CoversExtracted++
 					changed = true
 				}
 			} else if album != nil && !e.covers.AlbumCoverComplete(ctx, album, overwrite) {
 				if err := e.covers.BackfillAlbumCover(ctx, album, true); err != nil {
-					log.Printf("[scan] album cover backfill error for %s: %v", path, err)
+					logger.Error("[scan] album cover backfill error for %s: %v", path, err)
 				} else {
 					changed = true
 				}
@@ -292,9 +292,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			if sContent, sFmt := e.findSidecarLyrics(path); sContent != "" {
 				if err := e.lyricsStore.Save(ctx, lib.ID, existing.ID, lyrics.PrioritySidecar, sContent); err != nil {
 					if ctx.Err() != nil {
-						log.Printf("[scan] sidecar lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
+						logger.Info("[scan] sidecar lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
 					} else {
-						log.Printf("[scan] sidecar lyrics save error for %s: %v", path, err)
+						logger.Error("[scan] sidecar lyrics save error for %s: %v", path, err)
 					}
 				} else if existing.LyricsMask&lyrics.PriorityBit(lyrics.PrioritySidecar) == 0 || sFmt == "lrc" {
 					existing.LyricsMask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
@@ -315,7 +315,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			// version must not re-crown the group).
 			if e.tryMergeByIdentifiedID(ctx, lib.ID, existing) {
 				if err := e.trackRepo.UpdateMergeFields(ctx, existing.ID, existing.MetadataSource, existing.ExternalID, existing.ExternalIDs); err != nil {
-					log.Printf("[scan] merge write error for %s: %v", existing.ID, err)
+					logger.Error("[scan] merge write error for %s: %v", existing.ID, err)
 				}
 			}
 			stats.Scanned++
@@ -374,7 +374,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			enrich := matchArtistEnrichment(pn, enrichment)
 			a, err := e.findOrCreateArtist(ctx, pn, enrich)
 			if err != nil {
-				log.Printf("[scan] failed to create artist %q: %v", pn, err)
+				logger.Error("[scan] failed to create artist %q: %v", pn, err)
 				continue
 			}
 			if primaryPerformerID == "" {
@@ -529,9 +529,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 				// Fall back to the unified ensure flow (embedded extraction,
 				// then the platform chain) so a network failure does not leave
 				// the track coverless for this scan.
-				log.Printf("[scan] cover import error for %s: %v", path, err)
+				logger.Error("[scan] cover import error for %s: %v", path, err)
 				if err := e.covers.EnsureTrackCover(ctx, lib.ID, track, album, true, identified); err != nil {
-					log.Printf("[scan] cover ensure error for %s: %v", path, err)
+					logger.Error("[scan] cover ensure error for %s: %v", path, err)
 				} else {
 					stats.CoversExtracted++
 				}
@@ -543,12 +543,12 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			// never gain one here — skip so scans do not spawn a failing
 			// ffmpeg extraction and log an error on every pass.
 			if err := e.covers.EnsureTrackCover(ctx, lib.ID, track, album, true, identified); err != nil {
-				log.Printf("[scan] cover ensure error for %s: %v", path, err)
+				logger.Error("[scan] cover ensure error for %s: %v", path, err)
 			} else {
 				stats.CoversExtracted++
 				if album != nil && !e.covers.AlbumCoverComplete(ctx, album, false) {
 					if err := e.covers.BackfillAlbumCover(ctx, album, true); err != nil {
-						log.Printf("[scan] album cover backfill error for %s: %v", path, err)
+						logger.Error("[scan] album cover backfill error for %s: %v", path, err)
 					}
 				}
 			}
@@ -559,9 +559,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		if meta.Lyrics != "" {
 			if err := e.lyricsStore.Save(ctx, lib.ID, trackID, lyrics.PriorityEmbedded, meta.Lyrics); err != nil {
 				if ctx.Err() != nil {
-					log.Printf("[scan] embedded lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
+					logger.Info("[scan] embedded lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
 				} else {
-					log.Printf("[scan] embedded lyrics save error for %s: %v", path, err)
+					logger.Error("[scan] embedded lyrics save error for %s: %v", path, err)
 				}
 			} else {
 				mask |= lyrics.PriorityBit(lyrics.PriorityEmbedded)
@@ -570,9 +570,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		if sContent, _ := e.findSidecarLyrics(path); sContent != "" {
 			if err := e.lyricsStore.Save(ctx, lib.ID, trackID, lyrics.PrioritySidecar, sContent); err != nil {
 				if ctx.Err() != nil {
-					log.Printf("[scan] sidecar lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
+					logger.Info("[scan] sidecar lyrics save cancelled for %s: %v (original: %v)", path, ctx.Err(), err)
 				} else {
-					log.Printf("[scan] sidecar lyrics save error for %s: %v", path, err)
+					logger.Error("[scan] sidecar lyrics save error for %s: %v", path, err)
 				}
 			} else {
 				mask |= lyrics.PriorityBit(lyrics.PrioritySidecar)
@@ -602,7 +602,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		// Align to that version group and share external ids.
 		if e.tryMergeByIdentifiedID(ctx, lib.ID, track) {
 			if err := e.trackRepo.UpdateMergeFields(ctx, track.ID, track.MetadataSource, track.ExternalID, track.ExternalIDs); err != nil {
-				log.Printf("[scan] merge write error for %s: %v", track.ID, err)
+				logger.Error("[scan] merge write error for %s: %v", track.ID, err)
 			}
 		}
 
@@ -635,7 +635,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			// Lyrics are plain files (no DB rows), so cleanup is best-effort
 			// and never blocks the track deletion.
 			if err := e.lyricsStore.DeleteAll(lib.ID, trackID); err != nil {
-				log.Printf("[scan] lyrics cleanup error for %s: %v", trackID, err)
+				logger.Error("[scan] lyrics cleanup error for %s: %v", trackID, err)
 			}
 			if err := e.trackRepo.DeleteByID(ctx, trackID); err != nil {
 				stats.Errors = append(stats.Errors, fmt.Sprintf("delete error %s: %v", trackID, err))
@@ -674,28 +674,28 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
-				log.Printf("[scan] orphan album scan error: %v", err)
+				logger.Error("[scan] orphan album scan error: %v", err)
 				continue
 			}
 			orphanIDs = append(orphanIDs, id)
 		}
 		if err := rows.Err(); err != nil {
-			log.Printf("[scan] orphan album iteration error: %v", err)
+			logger.Error("[scan] orphan album iteration error: %v", err)
 		}
 		rows.Close()
 		for _, id := range orphanIDs {
 			// Only prune the album row when its cover cleanup succeeded;
 			// otherwise the images row and files would be orphaned forever.
 			if err := e.covers.DeleteAlbumCovers(ctx, id); err != nil {
-				log.Printf("[scan] delete album covers for %s: %v (album row kept)", id, err)
+				logger.Info("[scan] delete album covers for %s: %v (album row kept)", id, err)
 				continue
 			}
 			if _, err := e.db.ExecContext(ctx, `DELETE FROM albums WHERE id = $1`, id); err != nil {
-				log.Printf("[scan] delete album row %s: %v (cover already removed)", id, err)
+				logger.Info("[scan] delete album row %s: %v (cover already removed)", id, err)
 			}
 		}
 	} else {
-		log.Printf("[scan] orphan album query error: %v", err)
+		logger.Error("[scan] orphan album query error: %v", err)
 	}
 	e.db.ExecContext(ctx, `DELETE FROM favorites WHERE item_type = 'album' AND item_id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 
@@ -707,7 +707,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
-				log.Printf("[scan] orphan artist scan error: %v", err)
+				logger.Error("[scan] orphan artist scan error: %v", err)
 				continue
 			}
 			orphanArtistIDs = append(orphanArtistIDs, id)
@@ -715,15 +715,15 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		rows.Close()
 		for _, id := range orphanArtistIDs {
 			if err := e.covers.DeleteArtistCovers(ctx, id); err != nil {
-				log.Printf("[scan] delete artist covers for %s: %v (artist row kept)", id, err)
+				logger.Info("[scan] delete artist covers for %s: %v (artist row kept)", id, err)
 				continue
 			}
 			if _, err := e.db.ExecContext(ctx, `DELETE FROM artists WHERE id = $1`, id); err != nil {
-				log.Printf("[scan] delete artist row %s: %v", id, err)
+				logger.Info("[scan] delete artist row %s: %v", id, err)
 			}
 		}
 	} else {
-		log.Printf("[scan] orphan artist query error: %v", err)
+		logger.Error("[scan] orphan artist query error: %v", err)
 	}
 
 	// Full scans also sweep covers and lyrics orphaned by interrupted
@@ -731,28 +731,28 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 	// this maintenance work.
 	if opts.Mode == "overwrite" {
 		if err := e.covers.SweepOrphanCovers(ctx); err != nil {
-			log.Printf("[scan] orphan cover sweep error: %v", err)
+			logger.Error("[scan] orphan cover sweep error: %v", err)
 		}
 		e.sweepOrphanLyrics(ctx, lib.ID)
 	}
 
 	if err := e.mergeDuplicates(ctx, lib.ID); err != nil {
-		log.Printf("[scan] duplicate merge error for %s: %v", lib.Name, err)
+		logger.Error("[scan] duplicate merge error for %s: %v", lib.Name, err)
 	}
 
 	if err := e.resolveVersions(ctx, lib.ID); err != nil {
-		log.Printf("[scan] version resolution error for %s: %v", lib.Name, err)
+		logger.Error("[scan] version resolution error for %s: %v", lib.Name, err)
 	}
 
 	// Recalculate album song_count and duration for all albums
 	if err := e.recalcAlbumStats(ctx, lib.ID); err != nil {
-		log.Printf("[scan] album stats recalculation error: %v", err)
+		logger.Error("[scan] album stats recalculation error: %v", err)
 	}
 
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks
 	lib.LastScannedAt = timePtr(time.Now())
 
-	log.Printf("[scan] library=%s total=%d new=%d updated=%d deleted=%d covers=%d errors=%d",
+	logger.Info("[scan] library=%s total=%d new=%d updated=%d deleted=%d covers=%d errors=%d",
 		lib.Name, stats.TotalFiles, stats.NewTracks, stats.UpdatedTracks, stats.DeletedTracks, stats.CoversExtracted, len(stats.Errors))
 
 	return stats, nil
@@ -772,7 +772,7 @@ func (e *Engine) recalcAlbumStats(ctx context.Context, libraryID string) error {
 	if err := e.trackRepo.UpdateAlbumStats(ctx, ids); err != nil {
 		return err
 	}
-	log.Printf("[scan] recalc album stats: %d albums updated", n)
+	logger.Info("[scan] recalc album stats: %d albums updated", n)
 	return nil
 }
 
@@ -835,7 +835,7 @@ func (e *Engine) ensureThumbnail(libraryID, trackID string) error {
 			continue
 		}
 		if err := metadata.ResizeToThumbnail(data, thumbPath, size); err != nil {
-			log.Printf("[scan] thumbnail resize error %s: %v", thumbPath, err)
+			logger.Error("[scan] thumbnail resize error %s: %v", thumbPath, err)
 		}
 	}
 	return nil
@@ -848,7 +848,7 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 
 	// Common basic check: title + at least one non-Unknown artist + album
 	if ok, err := e.trackRepo.TrackHasBasicMeta(ctx, track.ID); err != nil {
-		log.Printf("[scan] metaComplete TrackHasBasicMeta error for %s: %v", track.ID, err)
+		logger.Error("[scan] metaComplete TrackHasBasicMeta error for %s: %v", track.ID, err)
 		return false
 	} else if !ok {
 		return false
@@ -905,6 +905,6 @@ func (e *Engine) hasUserCache(ctx context.Context, userID, fileHash string) bool
 	// A DB failure must not silently skip the identify block (which would
 	// also skip platform enrichment and cover recovery): log it and err
 	// toward re-running identification.
-	log.Printf("[scan] user metadata cache lookup error: %v", err)
+	logger.Error("[scan] user metadata cache lookup error: %v", err)
 	return true
 }

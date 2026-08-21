@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/sonicore/server/internal/api/ws"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -57,10 +57,10 @@ func (h *JukeboxHandler) getOrCreateEngine(id, deviceID, driver string) (*player
 	return h.manager.GetOrCreate(id, deviceID, driver, func(trackID string) (*player.TrackInfo, error) {
 		track, err := h.trackRepo.FindByID(context.Background(), trackID)
 		if err != nil {
-			log.Printf("[jukebox] resolve failed: id=%q err=%v", trackID, err)
+			logger.Error("[jukebox] resolve failed: id=%q err=%v", trackID, err)
 			return nil, err
 		}
-		log.Printf("[jukebox] resolved: id=%q path=%q lib=%q", trackID, track.FilePath, track.LibraryID)
+		logger.Info("[jukebox] resolved: id=%q path=%q lib=%q", trackID, track.FilePath, track.LibraryID)
 		info := &player.TrackInfo{
 			ID:        track.ID,
 			Title:     track.Title,
@@ -86,7 +86,7 @@ func (h *JukeboxHandler) wireEngine(eng *player.Engine) {
 			if err := h.jukeboxRepo.SaveState(context.Background(), eng.ID(),
 				s.Queue, s.QueueIdx, s.ShuffleOrder, s.ShuffleIdx,
 				string(s.PlayMode), s.Volume); err != nil {
-				log.Printf("[jukebox] save state error: %v", err)
+				logger.Error("[jukebox] save state error: %v", err)
 			}
 		}()
 	})
@@ -112,7 +112,7 @@ func (h *JukeboxHandler) ensureEngine(ctx context.Context, id string) (*player.E
 func (h *JukeboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	list, err := h.jukeboxRepo.List(r.Context())
 	if err != nil {
-		log.Printf("[jukebox] List failed: %v", err)
+		logger.Error("[jukebox] List failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

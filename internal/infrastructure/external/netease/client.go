@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 const (
@@ -298,7 +299,7 @@ func (c *Client) ensureAnon() {
 			c.anonErr = nil
 		} else {
 			c.anonRetryAt = time.Now().Add(5 * time.Minute)
-			log.Printf("[netease] anonymous registration failed (will retry): %v", err)
+			logger.Error("[netease] anonymous registration failed (will retry): %v", err)
 		}
 		return
 	}
@@ -443,13 +444,13 @@ func (c *Client) request(ctx context.Context, uri string, data map[string]any, m
 	if i := strings.IndexByte(logURL, '?'); i >= 0 {
 		logURL = logURL[:i]
 	}
-	log.Printf("[netease] POST %s [%s]", logURL, mode)
+	logger.Info("[netease] POST %s [%s]", logURL, mode)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("netease request %s: %w", uri, err)
 	}
 	defer resp.Body.Close()
-	log.Printf("[netease] %d %s", resp.StatusCode, logURL)
+	logger.Info("[netease] %d %s", resp.StatusCode, logURL)
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

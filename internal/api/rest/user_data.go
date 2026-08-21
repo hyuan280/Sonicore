@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
@@ -135,7 +135,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			var version int
 			var versionLabel, extID, metaSource string
 			if err := rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &extID, &metaSource); err != nil {
-				log.Printf("[favorites] scan row error: %v", err)
+				logger.Error("[favorites] scan row error: %v", err)
 				continue
 			}
 			item := map[string]interface{}{

@@ -7,7 +7,6 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 type Quality string
@@ -257,7 +258,7 @@ func ServeTranscoded(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	cPath := cachePath(filePath, string(quality), cfg.ext)
 	if cacheValid(cPath, filePath) {
-		log.Printf("[transcoder] cache hit: %s", cPath)
+		logger.Debug("[transcoder] cache hit: %s", cPath)
 		serveCacheFile(w, r, cPath, cfg)
 		return
 	}
@@ -271,15 +272,15 @@ func ServeTranscoded(ctx context.Context, w http.ResponseWriter, r *http.Request
 	defer release()
 
 	if cacheValid(cPath, filePath) {
-		log.Printf("[transcoder] cache hit (concurrent): %s", cPath)
+		logger.Debug("[transcoder] cache hit (concurrent): %s", cPath)
 		serveCacheFile(w, r, cPath, cfg)
 		return
 	}
 
 	if wantFull {
-		log.Printf("[transcoder] waiting for transcode: %s", cPath)
+		logger.Info("[transcoder] waiting for transcode: %s", cPath)
 		if err := transcodeToFile(filePath, string(quality), cPath, cfg); err != nil {
-			log.Printf("[transcoder] transcode error: %v", err)
+			logger.Error("[transcoder] transcode error: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -287,7 +288,7 @@ func ServeTranscoded(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	log.Printf("[transcoder] transcoding (stream) %s → %s (%s)", filePath, cPath, quality)
+	logger.Info("[transcoder] transcoding (stream) %s → %s (%s)", filePath, cPath, quality)
 	transcodeAndStream(w, filePath, string(quality), cPath, cfg)
 }
 
@@ -340,11 +341,11 @@ func transcodeToFile(filePath, quality, dstPath string, cfg transcodeConfig) err
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	log.Printf("[transcoder] ffmpeg start → %s (%s)", dstPath, quality)
+	logger.Info("[transcoder] ffmpeg start → %s (%s)", dstPath, quality)
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
-			log.Printf("[transcoder] ffmpeg stderr:\n%s", msg)
+			logger.Debug("[transcoder] ffmpeg stderr:\n%s", msg)
 		}
 		return fmt.Errorf("ffmpeg failed: %s", takeLast(msg, 500))
 	}
@@ -354,7 +355,7 @@ func transcodeToFile(filePath, quality, dstPath string, cfg transcodeConfig) err
 	if err := os.Rename(tmpPath, dstPath); err != nil {
 		return fmt.Errorf("cache rename: %w", err)
 	}
-	log.Printf("[transcoder] cache written: %s", dstPath)
+	logger.Info("[transcoder] cache written: %s", dstPath)
 	return nil
 }
 
@@ -391,7 +392,7 @@ func transcodeAndStream(w http.ResponseWriter, filePath, quality, dstPath string
 		return
 	}
 
-	log.Printf("[transcoder] ffmpeg start → %s (%s)", dstPath, quality)
+	logger.Info("[transcoder] ffmpeg start → %s (%s)", dstPath, quality)
 
 	stderrDone := readStderr(stderr)
 	bufReader := bufio.NewReader(stdout)
@@ -410,7 +411,7 @@ func transcodeAndStream(w http.ResponseWriter, filePath, quality, dstPath string
 		n, rerr := bufReader.Read(buf)
 		if n > 0 {
 			if _, werr := tmpFile.Write(buf[:n]); werr != nil {
-				log.Printf("[transcoder] cache write error: %v", werr)
+				logger.Error("[transcoder] cache write error: %v", werr)
 				cancel()
 				break
 			}
@@ -430,18 +431,18 @@ func transcodeAndStream(w http.ResponseWriter, filePath, quality, dstPath string
 	cancel()
 
 	if runErr != nil {
-		log.Printf("[transcoder] ffmpeg failed: %s", takeLast(stderrText, 500))
+		logger.Error("[transcoder] ffmpeg failed: %s", takeLast(stderrText, 500))
 		return
 	}
 	if err := tmpFile.Close(); err != nil {
-		log.Printf("[transcoder] cache close error: %v", err)
+		logger.Error("[transcoder] cache close error: %v", err)
 		return
 	}
 	if err := os.Rename(tmpPath, dstPath); err != nil {
-		log.Printf("[transcoder] cache rename error: %v", err)
+		logger.Error("[transcoder] cache rename error: %v", err)
 		return
 	}
-	log.Printf("[transcoder] cache written: %s", dstPath)
+	logger.Info("[transcoder] cache written: %s", dstPath)
 }
 
 func transcodeStream(ctx context.Context, w http.ResponseWriter, filePath, quality string, cfg transcodeConfig) {
@@ -455,13 +456,13 @@ func transcodeStream(ctx context.Context, w http.ResponseWriter, filePath, quali
 
 	stdout, stderr, err := setupCmdPipes(cmd)
 	if err != nil {
-		log.Printf("[transcoder] pipe error: %v", err)
+		logger.Error("[transcoder] pipe error: %v", err)
 		http.Error(w, "transcoding error", http.StatusInternalServerError)
 		return
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[transcoder] ffmpeg start error: %v", err)
+		logger.Error("[transcoder] ffmpeg start error: %v", err)
 		http.Error(w, "transcoding error", http.StatusInternalServerError)
 		return
 	}
@@ -472,7 +473,7 @@ func transcodeStream(ctx context.Context, w http.ResponseWriter, filePath, quali
 	if err := waitForOutput(bufReader); err != nil {
 		stderrText := <-stderrDone
 		if stderrText != "" {
-			log.Printf("[transcoder] ffmpeg error: %s", stderrText)
+			logger.Error("[transcoder] ffmpeg error: %s", stderrText)
 		}
 		http.Error(w, fmt.Sprintf("ffmpeg failed: %s", takeLast(stderrText, 200)), http.StatusInternalServerError)
 		return
@@ -486,11 +487,11 @@ func transcodeStream(ctx context.Context, w http.ResponseWriter, filePath, quali
 	stderrText := <-stderrDone
 	cancel()
 	if err := cmd.Wait(); err != nil {
-		log.Printf("[transcoder] ffmpeg failed: %s", takeLast(stderrText, 500))
+		logger.Error("[transcoder] ffmpeg failed: %s", takeLast(stderrText, 500))
 	}
 
 	if copyErr != nil {
-		log.Printf("[transcoder] write error: %v", copyErr)
+		logger.Error("[transcoder] write error: %v", copyErr)
 	}
 }
 

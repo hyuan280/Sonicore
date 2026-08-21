@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -22,6 +21,7 @@ import (
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/auth"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -69,7 +69,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.authenticate(r, q)
 	if err != nil {
-		log.Printf("[subsonic] auth failed: %v", err)
+		logger.Error("[subsonic] auth failed: %v", err)
 		code := 40
 		message := "Wrong username or password"
 		if errors.Is(err, errTokenNotSupported) {
@@ -118,7 +118,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		libs, _ := h.libRepo.FindByUserID(ctx, user.ID)
 		for _, lib := range libs {
 			if err := h.scanner.StartScan(ctx, lib.ID, "missing"); err != nil {
-				log.Printf("[subsonic] start scan error: %v", err)
+				logger.Error("[subsonic] start scan error: %v", err)
 			}
 		}
 		body = map[string]interface{}{
@@ -1172,7 +1172,7 @@ func (h *Handler) getStarred(ctx context.Context, user *domain.User) map[string]
 		}
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[subsonic] starred query error: %v", err)
+		logger.Error("[subsonic] starred query error: %v", err)
 	}
 
 	if songs == nil {
@@ -1232,7 +1232,7 @@ func (h *Handler) getGenres(ctx context.Context, user *domain.User) map[string]i
 		})
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[subsonic] genres query error: %v", err)
+		logger.Error("[subsonic] genres query error: %v", err)
 	}
 	if genres == nil {
 		genres = []map[string]interface{}{}
@@ -1309,13 +1309,13 @@ func (h *Handler) handleStar(ctx context.Context, w http.ResponseWriter, r *http
 				if _, err := h.db.ExecContext(ctx,
 					"INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT DO NOTHING",
 					user.ID, itemType, itemID, libID); err != nil {
-					log.Printf("[subsonic] star insert error: %v", err)
+					logger.Error("[subsonic] star insert error: %v", err)
 				}
 			} else {
 				if _, err := h.db.ExecContext(ctx,
 					"DELETE FROM favorites WHERE user_id = $1 AND item_type = $2 AND item_id = $3",
 					user.ID, itemType, itemID); err != nil {
-					log.Printf("[subsonic] unstar delete error: %v", err)
+					logger.Error("[subsonic] unstar delete error: %v", err)
 				}
 			}
 		}
@@ -1365,7 +1365,7 @@ func (h *Handler) serveCoverArt(w http.ResponseWriter, r *http.Request, q url.Va
 		return
 	}
 	if err != nil {
-		log.Printf("[subsonic] cover art lookup error: %v", err)
+		logger.Error("[subsonic] cover art lookup error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

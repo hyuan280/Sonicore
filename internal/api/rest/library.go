@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -216,7 +216,7 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err := h.libraryRepo.Delete(r.Context(), libID); err != nil {
-		log.Printf("[library] delete %s failed: %v", libID, err)
+		logger.Error("[library] delete %s failed: %v", libID, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete library"})
 		return
 	}
@@ -229,11 +229,11 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	var prunedAlbumIDs []string
 	for _, id := range orphanAlbums {
 		if err := h.covers.DeleteAlbumCovers(r.Context(), id); err != nil {
-			log.Printf("[library] delete album covers for %s: %v (album row kept)", id, err)
+			logger.Info("[library] delete album covers for %s: %v (album row kept)", id, err)
 			continue
 		}
 		if _, err := h.db.ExecContext(r.Context(), `DELETE FROM albums WHERE id = $1`, id); err != nil {
-			log.Printf("[library] delete album row %s: %v (cover already removed)", id, err)
+			logger.Info("[library] delete album row %s: %v (cover already removed)", id, err)
 			continue
 		}
 		prunedAlbumIDs = append(prunedAlbumIDs, id)
@@ -264,7 +264,7 @@ func (h *LibraryHandler) orphanAlbumIDs(ctx context.Context) []string {
 	rows, err := h.db.QueryContext(ctx,
 		`SELECT id FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`)
 	if err != nil {
-		log.Printf("[library] orphan album query error: %v", err)
+		logger.Error("[library] orphan album query error: %v", err)
 		return nil
 	}
 	defer rows.Close()
@@ -272,13 +272,13 @@ func (h *LibraryHandler) orphanAlbumIDs(ctx context.Context) []string {
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			log.Printf("[library] orphan album scan error: %v", err)
+			logger.Error("[library] orphan album scan error: %v", err)
 			continue
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[library] orphan album iteration error: %v", err)
+		logger.Error("[library] orphan album iteration error: %v", err)
 	}
 	return ids
 }

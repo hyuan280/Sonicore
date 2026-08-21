@@ -3,11 +3,12 @@ package metadata
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 // andWordRe matches the word "and" (lowercased input) so only the standalone
@@ -70,7 +71,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	}
 
 	if looksGarbled(title) || looksGarbled(artist) || looksGarbled(album) {
-		log.Printf("[mb] skip garbled input: title=%q artist=%q album=%q", title, artist, album)
+		logger.Debug("[mb] skip garbled input: title=%q artist=%q album=%q", title, artist, album)
 		return nil, nil
 	}
 
@@ -79,7 +80,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 		return nil, nil
 	}
 
-	log.Printf("[mb] search returned %d results for %q", len(recordings), title)
+	logger.Debug("[mb] search returned %d results for %q", len(recordings), title)
 
 	var recording *MBRecording
 	if meta.TitleFromFilename {
@@ -93,11 +94,11 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 	}
 
 	if recording == nil {
-		log.Printf("[mb] no match found for %q", title)
+		logger.Debug("[mb] no match found for %q", title)
 		return nil, nil
 	}
 
-	log.Printf("[mb] recording matched: %q (MBID=%s)", recording.Title, recording.ID)
+	logger.Debug("[mb] recording matched: %q (MBID=%s)", recording.Title, recording.ID)
 
 	result := &EnrichmentResult{
 		TrackExternalID: recording.ID,
@@ -208,7 +209,7 @@ func (r *Resolver) enrichMainArtist(ctx context.Context, result *EnrichmentResul
 	}
 	full, err := r.lookupArtist(ctx, result.ArtistExternalID)
 	if err != nil {
-		log.Printf("[mb] artist lookup failed for %s: %v", result.ArtistExternalID, err)
+		logger.Error("[mb] artist lookup failed for %s: %v", result.ArtistExternalID, err)
 		return
 	}
 	if full == nil {
@@ -246,7 +247,7 @@ func (r *Resolver) fillArtistCountries(ctx context.Context, result *EnrichmentRe
 			// A failure is not cached, so it is retried on the next
 			// occurrence; log it so a flaky upstream is distinguishable from
 			// an artist that genuinely has no country.
-			log.Printf("[mb] artist lookup failed for %s: %v", ar.ExternalID, err)
+			logger.Error("[mb] artist lookup failed for %s: %v", ar.ExternalID, err)
 			continue
 		}
 		if full == nil || full.Country == "" {

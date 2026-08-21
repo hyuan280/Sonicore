@@ -3,13 +3,14 @@ package player
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 var (
@@ -28,16 +29,16 @@ func detectAudioDriver() string {
 
 	if tryPactl() {
 		audioDriver = "pulseaudio"
-		log.Printf("[audio] detected driver: pulseaudio")
+		logger.Info("[audio] detected driver: pulseaudio")
 		return audioDriver
 	}
 	if _, err := os.Stat("/proc/asound/cards"); err == nil {
 		audioDriver = "alsa"
-		log.Printf("[audio] detected driver: alsa")
+		logger.Info("[audio] detected driver: alsa")
 		return audioDriver
 	}
 	audioDriver = "default"
-	log.Printf("[audio] no audio driver detected, using sdl default")
+	logger.Info("[audio] no audio driver detected, using sdl default")
 	return audioDriver
 }
 
@@ -214,7 +215,7 @@ func (e *Engine) Play(id string, info *TrackInfo) error {
 	dev := e.deviceID
 	e.mu.Unlock()
 
-	log.Printf("[engine] Play: id=%s title=%q path=%q mapped=%q dev=%q vol=%.0f%%",
+	logger.Info("[engine] Play: id=%s title=%q path=%q mapped=%q dev=%q vol=%.0f%%",
 		id, info.Title, info.FilePath, mappedPath, dev, volPct)
 
 	cmd := exec.CommandContext(ctx, "ffplay",
@@ -226,12 +227,12 @@ func (e *Engine) Play(id string, info *TrackInfo) error {
 		switch detectAudioDriver() {
 		case "pulseaudio":
 			cmd.Env = append(os.Environ(), "SDL_AUDIODRIVER=pulseaudio", "PULSE_SINK="+dev)
-			log.Printf("[engine] using pulseaudio sink: %s", dev)
+			logger.Info("[engine] using pulseaudio sink: %s", dev)
 		case "alsa":
 			cmd.Env = append(os.Environ(), "SDL_AUDIODRIVER=alsa", "AUDIODEV="+dev)
-			log.Printf("[engine] using alsa device: %s", dev)
+			logger.Info("[engine] using alsa device: %s", dev)
 		default:
-			log.Printf("[engine] unknown driver, passing device=%s", dev)
+			logger.Info("[engine] unknown driver, passing device=%s", dev)
 		}
 	} else {
 		// ensure non-alsa driver when no device specified
@@ -244,7 +245,7 @@ func (e *Engine) Play(id string, info *TrackInfo) error {
 	e.emit()
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[engine] ffplay start error: %v", err)
+		logger.Error("[engine] ffplay start error: %v", err)
 		e.mu.Lock()
 		e.state = StateStopped
 		e.mu.Unlock()
@@ -255,11 +256,11 @@ func (e *Engine) Play(id string, info *TrackInfo) error {
 	e.mu.Lock()
 	e.pid = myPid
 	e.mu.Unlock()
-	log.Printf("[engine] ffplay started: pid=%d", myPid)
+	logger.Info("[engine] ffplay started: pid=%d", myPid)
 
 	go func(myTrack string, myPid int) {
 		err := cmd.Wait()
-		log.Printf("[engine] ffplay exited: id=%s pid=%d err=%v", myTrack, myPid, err)
+		logger.Info("[engine] ffplay exited: id=%s pid=%d err=%v", myTrack, myPid, err)
 		time.Sleep(300 * time.Millisecond)
 
 		e.mu.Lock()
@@ -381,7 +382,7 @@ func (e *Engine) playPrev() {
 	}
 	e.mu.Unlock()
 
-	log.Printf("[engine] playPrev: mode=%s queueLen=%d prevID=%q", mode, queueLen, prevID)
+	logger.Info("[engine] playPrev: mode=%s queueLen=%d prevID=%q", mode, queueLen, prevID)
 	if prevID == "" {
 		e.mu.Lock()
 		e.state = StateStopped
@@ -440,7 +441,7 @@ func (e *Engine) playNext() {
 	}
 	e.mu.Unlock()
 
-	log.Printf("[engine] playNext: mode=%s queueLen=%d nextID=%q", mode, queueLen, nextID)
+	logger.Info("[engine] playNext: mode=%s queueLen=%d nextID=%q", mode, queueLen, nextID)
 	if nextID == "" {
 		e.mu.Lock()
 		e.state = StateStopped
@@ -506,9 +507,9 @@ func setPulseSinkVolume(sink string, vol float64) {
 	if s := pulseSocket(); s != "" {
 		cmd.Env = append(cmd.Env, "PULSE_SERVER="+s)
 	}
-	log.Printf("[engine] set-sink-volume: %s %s", sink, pct)
+	logger.Info("[engine] set-sink-volume: %s %s", sink, pct)
 	if err := cmd.Run(); err != nil {
-		log.Printf("[engine] set-sink-volume: %s %s error: %v", sink, pct, err)
+		logger.Error("[engine] set-sink-volume: %s %s error: %v", sink, pct, err)
 	}
 }
 

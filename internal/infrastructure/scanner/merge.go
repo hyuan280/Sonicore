@@ -3,13 +3,13 @@ package scanner
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 
 	"github.com/lib/pq"
 
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -252,7 +252,7 @@ func (e *Engine) tryMergeByIdentifiedID(ctx context.Context, libraryID string, t
 	}
 	existing, err := e.trackRepo.FindByExternalID(ctx, libraryID, source, track.ExternalID, track.ID)
 	if err != nil {
-		log.Printf("[scan] merge lookup error for %s: %v", track.ID, err)
+		logger.Error("[scan] merge lookup error for %s: %v", track.ID, err)
 		return false
 	}
 	if existing == nil {
@@ -408,7 +408,7 @@ func (e *Engine) alignGroup(ctx context.Context, members []mergeCandidate) {
 	for _, c := range members {
 		if c.mt.MetadataSource != mainSource || c.mt.ExternalID != mainID || !externalIDsEqual(c.mt.ExternalIDs, ids) {
 			if err := e.trackRepo.UpdateMergeFields(ctx, c.mt.ID, mainSource, mainID, ids); err != nil {
-				log.Printf("[scan] merge align error for %s: %v", c.mt.ID, err)
+				logger.Error("[scan] merge align error for %s: %v", c.mt.ID, err)
 			}
 		}
 	}
@@ -421,7 +421,7 @@ func (e *Engine) alignGroup(ctx context.Context, members []mergeCandidate) {
 func (e *Engine) syncVersionGroups(ctx context.Context, libraryID string) {
 	rows, err := e.trackRepo.LoadVersionGroupMembers(ctx, libraryID)
 	if err != nil {
-		log.Printf("[scan] load version group members: %v", err)
+		logger.Info("[scan] load version group members: %v", err)
 		return
 	}
 	byKey := make(map[string][]repository.VersionGroupMember)
@@ -509,13 +509,13 @@ func (e *Engine) syncVersionGroups(ctx context.Context, libraryID string) {
 			// Propagate the main version's current source to this member.
 			if m.Source != mainSource || m.ExternalID != mainExternalID {
 				if err := e.trackRepo.UpdateMergeFields(ctx, m.TrackID, mainSource, mainExternalID, merged); err != nil {
-					log.Printf("[scan] version group sync error for %s: %v", m.TrackID, err)
+					logger.Error("[scan] version group sync error for %s: %v", m.TrackID, err)
 				}
 				continue
 			}
 			if !externalIDsEqual(m.ExternalIDs, merged) {
 				if err := e.trackRepo.UpdateMergeFields(ctx, m.TrackID, mainSource, mainExternalID, merged); err != nil {
-					log.Printf("[scan] version group sync error for %s: %v", m.TrackID, err)
+					logger.Error("[scan] version group sync error for %s: %v", m.TrackID, err)
 				}
 			}
 		}
@@ -528,7 +528,7 @@ func (e *Engine) syncVersionGroups(ctx context.Context, libraryID string) {
 		}
 		if !externalIDsEqual(mainTrack.ExternalIDs, union) {
 			if err := e.trackRepo.UpdateMergeFields(ctx, mainID, mainSource, mainExternalID, union); err != nil {
-				log.Printf("[scan] version group sync error for %s: %v", mainID, err)
+				logger.Error("[scan] version group sync error for %s: %v", mainID, err)
 			}
 		}
 	}

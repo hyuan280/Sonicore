@@ -3,7 +3,6 @@ package rest
 import (
 	"database/sql"
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/cache"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -83,7 +83,7 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("[cover] image lookup error: %v", err)
+		logger.Error("[cover] image lookup error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -108,17 +108,17 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 				if len(track.Albums) > 0 {
 					a, aerr := h.albumRepo.FindByID(ctx, track.Albums[0].AlbumID)
 					if aerr != nil && !errors.Is(aerr, sql.ErrNoRows) {
-						log.Printf("[cover] album lookup for %s: %v", track.Albums[0].AlbumID, aerr)
+						logger.Info("[cover] album lookup for %s: %v", track.Albums[0].AlbumID, aerr)
 					} else {
 						album = a
 					}
 				}
 				if err := h.covers.EnsureTrackCover(ctx, track.LibraryID, track, album, false, true); err != nil {
-					log.Printf("[cover] on-demand restoration for %s failed: %v", track.ID, err)
+					logger.Error("[cover] on-demand restoration for %s failed: %v", track.ID, err)
 				} else if track.CoverImageID != nil {
 					nimg, nerr := h.images.FindByID(ctx, *track.CoverImageID)
 					if nerr != nil {
-						log.Printf("[cover] re-resolve track image %s: %v", *track.CoverImageID, nerr)
+						logger.Info("[cover] re-resolve track image %s: %v", *track.CoverImageID, nerr)
 					} else {
 						img = nimg
 						p = metadata.ImageVariantPath(img, size)
@@ -129,11 +129,11 @@ func (h *CoverHandler) Serve(w http.ResponseWriter, r *http.Request) {
 			// Restore from the first cover-bearing track of the album.
 			if album, aerr := h.albumRepo.FindByID(ctx, img.OwnerID); aerr == nil {
 				if err := h.covers.BackfillAlbumCover(ctx, album, false); err != nil {
-					log.Printf("[cover] on-demand album cover restore for %s failed: %v", album.ID, err)
+					logger.Error("[cover] on-demand album cover restore for %s failed: %v", album.ID, err)
 				} else if album.CoverImageID != nil {
 					nimg, nerr := h.images.FindByID(ctx, *album.CoverImageID)
 					if nerr != nil {
-						log.Printf("[cover] re-resolve album image %s: %v", *album.CoverImageID, nerr)
+						logger.Info("[cover] re-resolve album image %s: %v", *album.CoverImageID, nerr)
 					} else {
 						img = nimg
 						p = metadata.ImageVariantPath(img, size)

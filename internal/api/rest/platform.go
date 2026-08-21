@@ -2,7 +2,6 @@ package rest
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 // PlatformHandler exposes external music platform data (charts, search,
@@ -32,7 +32,7 @@ func (h *PlatformHandler) provider(name string) (port.PlatformProvider, bool) {
 // upstreamError logs the full provider error server-side and returns a
 // generic coded message so provider internals never leak to clients.
 func (h *PlatformHandler) upstreamError(w http.ResponseWriter, platform, op string, err error) {
-	log.Printf("[platform] %s %s failed: %v", platform, op, err)
+	logger.Error("[platform] %s %s failed: %v", platform, op, err)
 	writeCodedError(w, http.StatusBadGateway, domain.ErrPlatUpstream)
 }
 
@@ -128,7 +128,7 @@ func (h *PlatformHandler) Search(w http.ResponseWriter, r *http.Request) {
 			enriched, err := enr.EnrichTracks(enrichCtx, tracks)
 			cancel()
 			if err != nil {
-				log.Printf("[platform] %s enrich tracks failed: %v", name, err)
+				logger.Error("[platform] %s enrich tracks failed: %v", name, err)
 			} else {
 				tracks = enriched
 			}

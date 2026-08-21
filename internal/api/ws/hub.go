@@ -2,12 +2,13 @@ package ws
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 var upgrader = websocket.Upgrader{
@@ -32,7 +33,7 @@ func NewHub() *Hub {
 func (h *Hub) Handle(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[ws] upgrade error: %v", err)
+		logger.Error("[ws] upgrade error: %v", err)
 		return
 	}
 
@@ -62,7 +63,7 @@ func (h *Hub) Handle(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.clients[channel] = append(h.clients[channel], c)
 	h.mu.Unlock()
-	log.Printf("[ws] connected: channel=%s (%d clients)", channel, len(h.clients[channel]))
+	logger.Info("[ws] connected: channel=%s (%d clients)", channel, len(h.clients[channel]))
 
 	defer func() {
 		h.mu.Lock()
@@ -75,13 +76,13 @@ func (h *Hub) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 		h.mu.Unlock()
 		conn.Close()
-		log.Printf("[ws] disconnected: channel=%s", channel)
+		logger.Info("[ws] disconnected: channel=%s", channel)
 	}()
 
 	for {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("[ws] read error: channel=%s err=%v", channel, err)
+			logger.Error("[ws] read error: channel=%s err=%v", channel, err)
 			return
 		}
 	}

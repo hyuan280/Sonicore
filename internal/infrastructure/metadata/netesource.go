@@ -3,12 +3,12 @@ package metadata
 import (
 	"context"
 	"errors"
-	"log"
 	"sort"
 	"strings"
 
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/external/netease"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 // neteaseProvider is the slice of the platform provider the source needs;
@@ -94,10 +94,10 @@ func (s *neteaseSource) Identify(ctx context.Context, q port.MetadataQuery) (*po
 	}
 	best := bestScored(q, tracks)
 	if best == nil {
-		log.Printf("[netease] no match found for %q", query)
+		logger.Debug("[netease] no match found for %q", query)
 		return nil, nil
 	}
-	log.Printf("[netease] track matched: %q (id=%s score=%.2f)", best.Title, best.ExternalID, best.Score)
+	logger.Debug("[netease] track matched: %q (id=%s score=%.2f)", best.Title, best.ExternalID, best.Score)
 	return best, nil
 }
 

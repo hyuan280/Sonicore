@@ -65,7 +65,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if err := vk.Ping(context.Background()); err != nil {
 		return nil, fmt.Errorf("valkey ping failed: %w", err)
 	}
-	log.Println("[cache] connected to Valkey")
+	logger.Info("[cache] connected to Valkey")
 
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiration)
 	tokenStore := cache.NewTokenStore(vk)
@@ -84,7 +84,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	if pulseServer != "" {
 		os.Setenv("PULSE_SERVER", pulseServer)
-		log.Printf("[audio] pulse server: %s", pulseServer)
+		logger.Info("[audio] pulse server: %s", pulseServer)
 	}
 
 	mbCfg := metadata.MBConfig{
@@ -124,7 +124,7 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		dec, err := enc.Decrypt(raw)
 		if err != nil {
-			log.Printf("[server] decrypt netease cookie: %v", err)
+			logger.Info("[server] decrypt netease cookie: %v", err)
 			return ""
 		}
 		return dec
@@ -142,7 +142,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// Runtime log level override from admin settings.
 	if lvl := cachedSettings.get(settingsRepo, "log_level"); lvl != "" {
 		if _, ok := logger.ParseLevelOk(lvl); !ok {
-			log.Printf("[server] invalid log_level %q in settings, ignoring", lvl)
+			logger.Warn("[server] invalid log_level %q in settings, ignoring", lvl)
 		} else {
 			logger.SetLevel(lvl)
 		}
@@ -168,7 +168,7 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		if rl := vals["metadata_musicbrainz_rate_limit"]; rl != "" {
 			if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
-				log.Printf("[server] invalid musicbrainz rate limit %q", rl)
+				logger.Warn("[server] invalid musicbrainz rate limit %q", rl)
 			} else {
 				mbCfg.RateLimit = n
 			}
@@ -444,7 +444,7 @@ func buildPlatformProviders(cfg *config.Config) (map[string]port.PlatformProvide
 		providers["netease"] = neteaseProvider
 	}
 	if platformEnabled {
-		log.Println("[platform] enabled: netease")
+		logger.Info("[platform] enabled: netease")
 	}
 
 	return providers, neteaseProvider
@@ -470,13 +470,13 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("[%s] %s %s %v", r.Method, r.URL.Path, middleware.ClientIP(r), time.Since(start))
+		logger.Info("[%s] %s %s %v", r.Method, r.URL.Path, middleware.ClientIP(r), time.Since(start))
 	})
 }
 
 func (s *Server) Start() error {
 	go func() {
-		log.Printf("[server] listening on %s", s.http.Addr)
+		logger.Info("[server] listening on %s", s.http.Addr)
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[server] listen error: %v", err)
 		}
@@ -486,7 +486,7 @@ func (s *Server) Start() error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Print("[server] shutting down...")
+	logger.Info("[server] shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -558,7 +558,7 @@ func (c *cachedSettings) get(repo *repository.SettingsRepo, key string) string {
 			// 2s) synchronous query path on each call.
 			c.vals[key] = settingsCacheEntry{value: old.value, at: time.Now()}
 			c.mu.Unlock()
-			log.Printf("[server] settings %q read failed: %v (using cached value)", key, err)
+			logger.Error("[server] settings %q read failed: %v (using cached value)", key, err)
 			return old.value
 		}
 		// Back off on the empty value too (cold start / never-set keys): an
@@ -567,7 +567,7 @@ func (c *cachedSettings) get(repo *repository.SettingsRepo, key string) string {
 		// during a DB outage.
 		c.vals[key] = settingsCacheEntry{value: "", at: time.Now()}
 		c.mu.Unlock()
-		log.Printf("[server] settings %q read failed: %v", key, err)
+		logger.Error("[server] settings %q read failed: %v", key, err)
 		return ""
 	}
 	c.vals[key] = settingsCacheEntry{value: value, at: time.Now()}
@@ -640,7 +640,7 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 	}
 	c.mu.Unlock()
 	if err != nil {
-		log.Printf("[server] settings batch read failed for %d key(s): %v", len(toQuery), err)
+		logger.Error("[server] settings batch read failed for %d key(s): %v", len(toQuery), err)
 	}
 	return out
 }

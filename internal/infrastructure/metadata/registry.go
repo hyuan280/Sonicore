@@ -2,11 +2,11 @@ package metadata
 
 import (
 	"context"
-	"log"
 	"sort"
 
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/external/netease"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
@@ -86,7 +86,7 @@ func (r *Registry) Identify(ctx context.Context, q port.MetadataQuery) (*port.Me
 		}
 		cand, err := s.Identify(ctx, q)
 		if err != nil {
-			log.Printf("[metadata] source %s identify error: %v", s.Name(), err)
+			logger.Error("[metadata] source %s identify error: %v", s.Name(), err)
 			lastErr = err
 			continue
 		}
@@ -111,7 +111,7 @@ func (r *Registry) Identify(ctx context.Context, q port.MetadataQuery) (*port.Me
 				// disagrees with the identity cannot leak unrelated fields in.
 				mergeCandidate(full, cand, needed)
 			} else if ler != nil {
-				log.Printf("[metadata] source %s lookup error: %v", s.Name(), ler)
+				logger.Error("[metadata] source %s lookup error: %v", s.Name(), ler)
 			}
 		}
 
@@ -292,7 +292,7 @@ func (r *Registry) SearchCandidates(ctx context.Context, q port.MetadataQuery) (
 	for _, s := range r.sources {
 		candidates, err := s.SearchCandidates(ctx, q)
 		if err != nil {
-			log.Printf("[metadata] source %s search error: %v", s.Name(), err)
+			logger.Error("[metadata] source %s search error: %v", s.Name(), err)
 			lastErr = err
 			continue
 		}

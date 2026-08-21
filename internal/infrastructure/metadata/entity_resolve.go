@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
 	"time"
 
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/pkg/utils"
 )
@@ -69,7 +69,7 @@ func (e *EntityResolver) FindArtist(ctx context.Context, source, externalID, nam
 		return nil, nil
 	}
 	if err := mergeArtistID(ctx, e.artists, a, source, externalID); err != nil {
-		log.Printf("[metadata] merge artist id error: %v", err)
+		logger.Error("[metadata] merge artist id error: %v", err)
 	}
 	return a, nil
 }
@@ -141,7 +141,7 @@ func (e *EntityResolver) FindAlbum(ctx context.Context, source, externalID, titl
 		return nil, nil
 	}
 	if err := mergeAlbumID(ctx, e.albums, a, source, externalID); err != nil {
-		log.Printf("[metadata] merge album id error: %v", err)
+		logger.Error("[metadata] merge album id error: %v", err)
 	}
 	return a, nil
 }

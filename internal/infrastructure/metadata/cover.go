@@ -8,7 +8,6 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/image/draw"
+
+	"github.com/sonicore/server/internal/infrastructure/logger"
 )
 
 type CoverExtractor struct {
@@ -94,7 +95,7 @@ func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte
 	for _, size := range sizes {
 		thumbPath := filepath.Join(dir, fmt.Sprintf("%s_%s_%d.jpg", ownerType, ownerID, size))
 		if err := ResizeToThumbnail(data, thumbPath, size); err != nil {
-			log.Printf("[cover] thumbnail error %s: %v", thumbPath, err)
+			logger.Error("[cover] thumbnail error %s: %v", thumbPath, err)
 		}
 	}
 	return path, nil
@@ -153,7 +154,7 @@ func ResizeToThumbnail(data []byte, outputPath string, maxSize int) error {
 		// platforms that refuse to delete open files.
 		out.Close()
 		if rerr := os.Remove(outputPath); rerr != nil && !os.IsNotExist(rerr) {
-			log.Printf("[cover] remove partial thumbnail %s: %v", outputPath, rerr)
+			logger.Info("[cover] remove partial thumbnail %s: %v", outputPath, rerr)
 		}
 		return fmt.Errorf("encode thumbnail: %w", err)
 	}
@@ -182,7 +183,7 @@ func RemoveAlbumCover(imagesDir, albumID string) {
 	for _, suffix := range []string{"", "_64", "_256"} {
 		p := CoverPathWithSuffix(imagesDir, "album", "album", albumID, suffix, "jpg")
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			log.Printf("[cover] remove album cover error: %v", err)
+			logger.Error("[cover] remove album cover error: %v", err)
 		}
 	}
 }
@@ -200,6 +201,6 @@ func CoverFileExists(path string) bool {
 	if os.IsNotExist(err) {
 		return false
 	}
-	log.Printf("[cover] stat error %s: %v", path, err)
+	logger.Error("[cover] stat error %s: %v", path, err)
 	return true
 }
