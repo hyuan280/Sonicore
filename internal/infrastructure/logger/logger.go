@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -12,6 +13,9 @@ import (
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// Infof, Errorf, Warnf, Debugf format messages with fmt.Sprintf
+// before passing them to slog. Use these when migrating from log.Printf.
 
 type Config struct {
 	Level      string
@@ -28,6 +32,12 @@ var (
 	levelVar = new(slog.LevelVar)
 	mu       sync.Mutex
 	logFile  *lumberjack.Logger
+	bufPool  = sync.Pool{
+		New: func() any {
+			b := make([]byte, 0, 256)
+			return &b
+		},
+	}
 )
 
 const timeFormat = "2006-01-02T15:04:05.000Z07:00"
@@ -44,7 +54,11 @@ func (h *consoleHandler) Enabled(_ context.Context, l slog.Level) bool {
 }
 
 func (h *consoleHandler) Handle(_ context.Context, r slog.Record) error {
-	buf := make([]byte, 0, 256)
+	bp := bufPool.Get().(*[]byte)
+	*bp = (*bp)[:0]
+	buf := *bp
+	defer func() { *bp = buf }()
+	defer bufPool.Put(bp)
 	buf = r.Time.AppendFormat(buf, timeFormat)
 	level := levelChar(r.Level)
 	buf = append(buf, ' ')
@@ -77,7 +91,7 @@ func appendAttr(buf []byte, prefix string, a slog.Attr) []byte {
 			if i > 0 {
 				buf = append(buf, ' ')
 			}
-			buf = appendAttr(buf, "", ga)
+			buf = appendAttr(buf, key, ga)
 		}
 		buf = append(buf, '}')
 	} else {
@@ -117,11 +131,15 @@ func levelChar(l slog.Level) byte {
 	}
 }
 
-func Init(cfg Config) {
+func Init(cfg Config) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	levelVar.Set(parseLevel(cfg.Level))
+	lvl, ok := ParseLevelOk(cfg.Level)
+	if !ok {
+		return fmt.Errorf("invalid log level %q, must be one of: debug, info, warn, warning, error", cfg.Level)
+	}
+	levelVar.Set(lvl)
 
 	if !cfg.FileOutput && logFile != nil {
 		logFile.Close()
@@ -170,6 +188,7 @@ func Init(cfg Config) {
 	slog.SetDefault(slog.New(handler))
 	log.SetFlags(0)
 	log.SetOutput(slog.NewLogLogger(handler, slog.LevelInfo).Writer())
+	return nil
 }
 
 var _ slog.Handler = (*consoleHandler)(nil)
@@ -208,17 +227,33 @@ func parseLevel(level string) slog.Level {
 }
 
 func Debug(msg string, args ...any) {
-	slog.Debug(msg, args...)
+	if len(args) > 0 {
+		slog.Debug(fmt.Sprintf(msg, args...))
+	} else {
+		slog.Debug(msg)
+	}
 }
 
 func Info(msg string, args ...any) {
-	slog.Info(msg, args...)
+	if len(args) > 0 {
+		slog.Info(fmt.Sprintf(msg, args...))
+	} else {
+		slog.Info(msg)
+	}
 }
 
 func Warn(msg string, args ...any) {
-	slog.Warn(msg, args...)
+	if len(args) > 0 {
+		slog.Warn(fmt.Sprintf(msg, args...))
+	} else {
+		slog.Warn(msg)
+	}
 }
 
 func Error(msg string, args ...any) {
-	slog.Error(msg, args...)
+	if len(args) > 0 {
+		slog.Error(fmt.Sprintf(msg, args...))
+	} else {
+		slog.Error(msg)
+	}
 }
