@@ -27,6 +27,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/download"
 	"github.com/sonicore/server/internal/infrastructure/external/netease"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
@@ -138,6 +139,14 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		return cfg.Platforms.Netease.RateLimit
 	})
+	// Runtime log level override from admin settings.
+	if lvl := cachedSettings.get(settingsRepo, "log_level"); lvl != "" {
+		if _, ok := logger.ParseLevelOk(lvl); !ok {
+			log.Printf("[server] invalid log_level %q in settings, ignoring", lvl)
+		} else {
+			logger.SetLevel(lvl)
+		}
+	}
 	// One cover manager shared by the scanner and the HTTP cover handlers so
 	// extraction is serialized across both paths. Its platform lookup builds
 	// the registry from the same switches the scanner uses.
@@ -482,7 +491,9 @@ func (s *Server) Start() error {
 	defer cancel()
 
 	s.vk.Close()
-	return s.http.Shutdown(ctx)
+	err := s.http.Shutdown(ctx)
+	logger.Close()
+	return err
 }
 
 // settingsCacheTTL bounds how stale a cached server setting may be. Runtime

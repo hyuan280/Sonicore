@@ -242,7 +242,10 @@
     "neteaseCookieConfigured": "Configured (leave empty to keep)",
     "neteaseCookieDiscard": "Discard current cookies",
     "neteaseCookieDiscardConfirm": "Discard the saved NetEase cookie?",
-    "neteaseCookieShow": "Show or hide cookie"
+    "neteaseCookieShow": "Show or hide cookie",
+    "logging": "Logging",
+    "logLevel": "Log Level",
+    "logLevelDesc": "Change the log output level at runtime"
   },
   "album": {
     "label": "Album",

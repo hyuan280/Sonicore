@@ -79,5 +79,16 @@ enabled = false
 # rate_limit = 1
 
 [log]
+# 日志级别：debug / info / warn / error
 level = "info"
+# 输出格式：console（自定义文本格式）或 json
 format = "console"
+# 文件输出，默认启用。不设置 file_path 时默认路径为 {data_dir}/log/sonicore.log
+file_output = true
+# file_path = "/opt/sonicore/data/log/sonicore.log"
+# 单文件最大体积（MB），超限后自动轮转
+max_size = 100
+# 日志文件保留天数
+max_age = 30
+# 保留的旧文件数，超限自动删除最早备份
+max_backups = 7

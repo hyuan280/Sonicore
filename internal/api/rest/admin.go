@@ -16,6 +16,7 @@ import (
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
+	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/internal/infrastructure/secrets"
 )
@@ -151,6 +152,7 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	neCookie, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_cookie")
 	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
+	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
 	// A stored cookie that no longer decrypts (secret rotation, corruption)
 	// is reported so ops can distinguish "not configured" from "configured
 	// but unreadable" — the provider silently degrades to anonymous in the
@@ -168,6 +170,7 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_cookie_set":   neCookie != "" && !cookieBroken,
 		"platforms_netease_cookie_error": cookieBroken,
 		"subsonic_jukebox_id":            subJukebox,
+		"log_level":                      logLevel,
 	})
 }
 
@@ -181,6 +184,7 @@ type updateSettingsRequest struct {
 	NeteaseCookieClear   *bool   `json:"platforms_netease_cookie_clear,omitempty"`
 	NeteaseRateLimit     *string `json:"platforms_netease_rate_limit,omitempty"`
 	SubsonicJukeboxID    *string `json:"subsonic_jukebox_id,omitempty"`
+	LogLevel             *string `json:"log_level,omitempty"`
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -252,11 +256,22 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.SubsonicJukeboxID != nil {
 		writes["subsonic_jukebox_id"] = *req.SubsonicJukeboxID
 	}
+	if req.LogLevel != nil {
+		if _, ok := logger.ParseLevelOk(*req.LogLevel); !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid log level, must be one of: debug, info, warn, warning, error"})
+			return
+		}
+		writes["log_level"] = *req.LogLevel
+	}
 
 	if err := h.settingsRepo.SetMany(r.Context(), writes); err != nil {
 		log.Printf("[admin] save settings batch: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
 		return
+	}
+
+	if req.LogLevel != nil {
+		logger.SetLevel(*req.LogLevel)
 	}
 
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
@@ -267,6 +282,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
+	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
 	cookieBroken := h.cookieBroken(neCookie)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"allow_registration":              allowReg == "true",
@@ -278,6 +294,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
 		"platforms_netease_cookie_error":  cookieBroken,
 		"subsonic_jukebox_id":             subJukebox,
+		"log_level":                       logLevel,
 	})
 }
 

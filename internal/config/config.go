@@ -94,8 +94,13 @@ type AudioConfig struct {
 }
 
 type LogConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"`
+	Level      string `mapstructure:"level"`
+	Format     string `mapstructure:"format"`
+	FileOutput bool   `mapstructure:"file_output"`
+	FilePath   string `mapstructure:"file_path"`
+	MaxSize    int    `mapstructure:"max_size"`
+	MaxAge     int    `mapstructure:"max_age"`
+	MaxBackups int    `mapstructure:"max_backups"`
 }
 
 func (d DatabaseConfig) DSN() string {
@@ -144,6 +149,11 @@ func Load() *Config {
 	v.SetDefault("jwt.refresh_expiration", "720h")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "console")
+	v.SetDefault("log.file_output", true)
+	v.SetDefault("log.file_path", "")
+	v.SetDefault("log.max_size", 100)
+	v.SetDefault("log.max_age", 30)
+	v.SetDefault("log.max_backups", 7)
 
 	v.SetDefault("metadata.musicbrainz_enabled", false)
 	v.SetDefault("metadata.musicbrainz_api_url", "https://musicbrainz.org/ws/2")

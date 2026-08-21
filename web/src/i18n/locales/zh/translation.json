@@ -242,7 +242,10 @@
     "neteaseCookieConfigured": "已配置（留空保留原值）",
     "neteaseCookieDiscard": "废弃当前 cookies",
     "neteaseCookieDiscardConfirm": "确定要废弃当前保存的网易云 Cookie 吗？",
-    "neteaseCookieShow": "显示或隐藏 Cookie"
+    "neteaseCookieShow": "显示或隐藏 Cookie",
+    "logging": "日志管理",
+    "logLevel": "日志级别",
+    "logLevelDesc": "运行时修改日志输出级别"
   },
   "album": {
     "label": "专辑",

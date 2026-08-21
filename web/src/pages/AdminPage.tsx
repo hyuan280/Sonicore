@@ -34,6 +34,10 @@ export default function AdminPage() {
   const [neInit, setNeInit] = useState({ enabled: false, cookieSet: false, rateLimit: "1" });
   const [neError, setNeError] = useState("");
   const [neShowCookie, setNeShowCookie] = useState(false);
+  const [logLevel, setLogLevel] = useState("info");
+  const [logLevelInit, setLogLevelInit] = useState("info");
+  const [logLevelSaving, setLogLevelSaving] = useState(false);
+  const [logLevelError, setLogLevelError] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -65,6 +69,8 @@ export default function AdminPage() {
         cookieSet: !!s.platforms_netease_cookie_set,
         rateLimit: s.platforms_netease_rate_limit || "1",
       });
+      setLogLevel(s.log_level || "info");
+      setLogLevelInit(s.log_level || "info");
     } catch (err: any) {
       setError(translateApiError(t, err));
     }
@@ -140,6 +146,37 @@ export default function AdminPage() {
             />
           </button>
         </div>
+        <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50">
+          <div>
+            <p className="text-sm font-medium">{t("admin.logLevel")}</p>
+            <p className="text-xs text-zinc-400">{t("admin.logLevelDesc")}</p>
+          </div>
+          <select
+            value={logLevel}
+            disabled={logLevelSaving}
+            onChange={async (e) => {
+              const next = e.target.value;
+              setLogLevel(next);
+              setLogLevelSaving(true);
+              setLogLevelError("");
+              try {
+                await api.admin.updateSettings({ log_level: next });
+                setLogLevelInit(next);
+              } catch (err) {
+                setLogLevel(logLevelInit);
+                setLogLevelError(translateApiError(t, err));
+              }
+              setLogLevelSaving(false);
+            }}
+            className="rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm focus:outline-none focus:border-green-500 disabled:opacity-50"
+          >
+            <option value="debug">DEBUG</option>
+            <option value="info">INFO</option>
+            <option value="warn">WARN</option>
+            <option value="error">ERROR</option>
+          </select>
+        </div>
+        {logLevelError && <p className="text-sm text-red-400">{logLevelError}</p>}
       </Card>
 
       <MetadataProviderCard
