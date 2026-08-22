@@ -19,6 +19,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/pkg/utils"
 )
 
 type Engine struct {
@@ -341,9 +342,7 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		year := meta.Year
 		genre := meta.Genre
 
-		// Record the producing source (MusicBrainz stays the implicit
-		// default for legacy and non-enriched tracks).
-		metadataSource := metadata.SourceMusicBrainz
+		metadataSource := ""
 		if enrichment != nil && enrichment.Source != "" {
 			metadataSource = enrichment.Source
 		}
@@ -477,10 +476,12 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			// an alias under its old source, mirroring ApplyEnrichment's track
 			// branch — otherwise the previous (source, external_id) identity
 			// is lost and the track leaves its old version group for good.
+			// Legacy records with empty source are treated as the default
+			// namespace for alias storage.
 			if existing.ExternalID != "" {
 				oldSrc := existing.MetadataSource
 				if oldSrc == "" {
-					oldSrc = metadata.SourceMusicBrainz
+					oldSrc = utils.DefaultSource
 				}
 				if oldSrc != metadataSource {
 					if track.ExternalIDs == nil {
@@ -495,20 +496,20 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			track.SetExternalID(enrichment.TrackExternalID)
 		}
 		if meta.MBID != "" {
-			if metadataSource == metadata.SourceMusicBrainz {
+			// File MBID is always a MusicBrainz identifier. When no platform
+			// source has been assigned, adopt it as the primary ID under the
+			// musicbrainz namespace. When a non-MB source is active, store
+			// it as an alias so the MBID is reachable via external_ids.
+			if metadataSource == "" || metadataSource == "musicbrainz" {
+				metadataSource = "musicbrainz"
+				track.MetadataSource = "musicbrainz"
 				track.SetExternalID(meta.MBID)
 			} else if track.ExternalID != "" {
-				// The file's MBID is an alias of the non-MB primary (e.g. a
-				// NetEase-sourced track), not a replacement: recording it
-				// under musicbrainz keeps the (source, external_id) pair
-				// consistent and makes the MBID reachable via aliases.
 				if track.ExternalIDs == nil {
 					track.ExternalIDs = map[string]string{}
 				}
-				track.ExternalIDs[metadata.SourceMusicBrainz] = meta.MBID
+				track.ExternalIDs["musicbrainz"] = meta.MBID
 			}
-			// No primary id and source is not MB: leave the MBID out of the
-			// primary slot rather than write a (non-MB, mbid) mismatch.
 		}
 
 		if existing != nil {
@@ -854,37 +855,47 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 		return false
 	}
 
-	// Non-MusicBrainz sources (e.g. NetEase) do not expose country/genre and
-	// may not carry the source ID in external_id; require only the fields they
-	// actually provide so the track is not re-identified on every scan.
-	if track.MetadataSource != "" && track.MetadataSource != metadata.SourceMusicBrainz {
+	// No source assigned — only basic metadata is required.
+	if track.MetadataSource == "" {
 		return true
 	}
 
-	// MusicBrainz completeness requires the full MB profile.
-	if track.ExternalID == "" {
-		return false
-	}
-	trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
-	if err != nil || len(trackArtists) == 0 {
-		return false
-	}
-	for _, ta := range trackArtists {
-		artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
-		if err != nil || artist.Name == "" || artist.Name == "Unknown Artist" ||
-			artist.ExternalID == "" || artist.Country == "" {
+	// Find the source's capabilities and check that its identity fields
+	// are present. Year, Genre, and AlbumCountry are not completion goals.
+	for _, s := range e.registry.Sources() {
+		if s.Name() != track.MetadataSource {
+			continue
+		}
+		caps := s.Capabilities()
+		if caps&port.FieldTrackID != 0 && track.ExternalID == "" {
 			return false
 		}
-	}
-	for _, tal := range track.Albums {
-		album, err := e.albumRepo.FindByID(ctx, tal.AlbumID)
-		if err != nil || album.Title == "" || album.Title == "Unknown Album" ||
-			album.ExternalID == "" || album.Country == "" ||
-			album.Year == 0 || album.Genre == "" {
-			return false
+		if caps&port.FieldArtists != 0 {
+			trackArtists, err := e.trackRepo.LoadTrackArtists(ctx, track.ID)
+			if err != nil || len(trackArtists) == 0 {
+				return false
+			}
+			for _, ta := range trackArtists {
+				artist, err := e.artistRepo.FindByID(ctx, ta.ArtistID)
+				if err != nil || artist.Name == "" || artist.Name == domain.UnknownArtistName {
+					return false
+				}
+			}
 		}
+		if caps&port.FieldAlbum != 0 {
+			for _, tal := range track.Albums {
+				album, err := e.albumRepo.FindByID(ctx, tal.AlbumID)
+				if err != nil || album.Title == "" || album.Title == domain.UnknownAlbumName {
+					return false
+				}
+			}
+		}
+		return true
 	}
-	return true
+
+	// Source not found in registry (e.g. disabled) — consider incomplete
+	// so the next scan re-identifies it.
+	return false
 }
 
 // hasUserCache reports whether a saved user metadata row exists for the

@@ -177,7 +177,13 @@ func New(cfg *config.Config) (*Server, error) {
 		if enabled := vals["metadata_netease_enabled"]; enabled != "" {
 			neEnabled = enabled == "true"
 		}
-		return metadata.BuildRegistry(mbCfg, neteaseProvider, neEnabled, umRepo)
+		var sources []port.MetadataSource
+		sources = append(sources, metadata.NewMBSource(mbCfg))
+		if neEnabled && neteaseProvider != nil {
+			sources = append(sources, metadata.NewNeteaseSource(neteaseProvider, true))
+		}
+		sources = append(sources, metadata.NewUserSource(umRepo))
+		return metadata.BuildRegistry(sources...)
 	}
 	covers := metadata.NewCoverManager(cfg.Data.ImagesDir, db, buildRegistry)
 	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers)

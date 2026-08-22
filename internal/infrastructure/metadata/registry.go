@@ -5,23 +5,13 @@ import (
 	"sort"
 
 	"github.com/sonicore/server/internal/core/port"
-	"github.com/sonicore/server/internal/infrastructure/external/netease"
 	"github.com/sonicore/server/internal/infrastructure/logger"
-	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
-// BuildRegistry assembles the standard source chain from its configured
-// switches: the user metadata cache first (priority 0, authoritative user
-// corrections), MusicBrainz next (priority 10), NetEase as the fallback
-// (priority 20) when both the metadata switch and a platform provider are
-// available. Callers resolve runtime settings (e.g. server_settings
-// overrides) before calling. A nil umRepo omits the user source.
-func BuildRegistry(mbCfg MBConfig, neProvider *netease.Provider, neEnabled bool, umRepo *repository.UserMetadataRepo) *Registry {
-	sources := []port.MetadataSource{NewMBSource(mbCfg)}
-	if neEnabled && neProvider != nil {
-		sources = append(sources, NewNeteaseSource(neProvider, true))
-	}
-	sources = append(sources, NewUserSource(umRepo))
+// BuildRegistry assembles a registry from the given sources. The caller is
+// responsible for passing only enabled sources; NewRegistry filters by
+// Enabled() and sorts by ascending Priority().
+func BuildRegistry(sources ...port.MetadataSource) *Registry {
 	return NewRegistry(sources...)
 }
 
@@ -65,6 +55,12 @@ func (r *Registry) Sources() []port.MetadataSource {
 // skipped entirely. A source whose capabilities include a field that only a
 // Lookup provides (e.g. NetEase lyrics) gets one extra Lookup call.
 //
+// When the query carries an ExternalID / ExternalSource (e.g. an MBID from
+// file tags), the matching source is tried first via Lookup before the
+// text-based search chain. This gives exact identity priority over fuzzy
+// text matching. If the Lookup fails (source disabled, ID not found, or
+// network error) the chain falls through to the normal text search.
+//
 // Year and Genre are not completion goals: their absence never triggers the
 // next source, but candidates that carry them still fill them.
 //
@@ -77,6 +73,29 @@ func (r *Registry) Identify(ctx context.Context, q port.MetadataQuery) (*port.Me
 	// lyrics, embedded cover) count as present and are not completion goals.
 	missing := port.TargetFields() &^ q.FileFields.Targets()
 	var lastErr error
+
+	// File tags provide an exact identity — try it via Lookup before the
+	// text-based search chain. A failure (source disabled, ID not found,
+	// network error) falls through to the normal text search.
+	if q.ExternalID != "" && q.ExternalSource != "" {
+		cand, err := r.Lookup(ctx, q.ExternalSource, q.ExternalID)
+		if err != nil {
+			logger.Error("[metadata] external ID lookup error for source %s: %v", q.ExternalSource, err)
+		}
+		if err == nil && cand != nil {
+			if q.FileFields&port.FileFieldCover != 0 {
+				cand.CoverArtURL = ""
+			}
+			if q.FileFields&port.FileFieldLyrics != 0 {
+				cand.Lyrics = ""
+			}
+			merged = cand
+			missing &= ^(port.FieldsPresent(merged) & port.TargetFields())
+			if missing == 0 {
+				return merged, nil
+			}
+		}
+	}
 
 	for _, s := range r.sources {
 		// After the identity source matched, only consult sources whose

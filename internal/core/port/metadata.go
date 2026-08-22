@@ -30,6 +30,13 @@ type MetadataQuery struct {
 	// presence (FieldsPresent), whose bits carry the opposite meaning for
 	// FieldCoverURL.
 	FileFields FileFields
+
+	// ExternalID is an exact external identifier from file tags (e.g. MBID).
+	// When set together with ExternalSource, the registry's Identify chain
+	// tries a Lookup before the text-based search chain.
+	ExternalID string
+	// ExternalSource is the metadata source namespace for ExternalID.
+	ExternalSource string
 }
 
 // FileFields is a bitmask of fields a song already gets from its own file.
@@ -150,6 +157,45 @@ type MetadataCandidate struct {
 	Score           float64 // local confidence in [0,1], higher is better
 }
 
+// ArtistSearchResult is a single artist search hit from a metadata source.
+// Source is always set to the producing source's Name().
+type ArtistSearchResult struct {
+	Name       string `json:"name"`
+	ExternalID string `json:"external_id"`
+	Country    string `json:"country,omitempty"`
+	Type       string `json:"type,omitempty"`
+	Source     string `json:"source"`
+}
+
+// ReleaseSearchResult is a single release/album search hit from a metadata
+// source. Source is always set to the producing source's Name().
+type ReleaseSearchResult struct {
+	Title      string `json:"title"`
+	ExternalID string `json:"external_id"`
+	Artist     string `json:"artist,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Source     string `json:"source"`
+}
+
+// ArtistLookupDetail is the result of a platform artist lookup by external ID.
+type ArtistLookupDetail struct {
+	ExternalID string `json:"external_id"`
+	Name       string `json:"name"`
+	Country    string `json:"country,omitempty"`
+	Type       string `json:"type,omitempty"`
+}
+
+// AlbumDetail is the result of a platform album lookup by external ID.
+type AlbumDetail struct {
+	ExternalID string `json:"external_id"`
+	Title      string `json:"title"`
+	ArtistName string `json:"artist_name,omitempty"`
+	ArtistID   string `json:"artist_id,omitempty"`
+	Year       int    `json:"year,omitempty"`
+	Genre      string `json:"genre,omitempty"`
+	Country    string `json:"country,omitempty"`
+}
+
 // MetadataSource is a pluggable source of track metadata identification
 // (user metadata cache, MusicBrainz, NetEase Cloud Music, ...).
 //
@@ -158,6 +204,7 @@ type MetadataCandidate struct {
 // source should be consulted at all (config-dependent).
 type MetadataSource interface {
 	Name() string
+	Label() string
 	Enabled() bool
 	Priority() int
 
@@ -181,4 +228,26 @@ type MetadataSource interface {
 	// yields (nil, nil) — indistinguishable from a source that has never
 	// seen the ID; an error signals the source is temporarily unavailable.
 	Lookup(ctx context.Context, externalID string) (*MetadataCandidate, error)
+
+	// SearchArtists searches for artists by name. The source that does not
+	// support artist search returns (nil, nil). Errors signal the source is
+	// temporarily unavailable.
+	SearchArtists(ctx context.Context, query string) ([]ArtistSearchResult, error)
+
+	// SearchReleases searches for releases/albums by name. The source that
+	// does not support release search returns (nil, nil). Errors signal the
+	// source is temporarily unavailable.
+	SearchReleases(ctx context.Context, query string) ([]ReleaseSearchResult, error)
+
+	// LookupAlbum fetches album details (year, genre, country, artist) by
+	// the platform's external album ID. A source that does not support album
+	// lookup returns (nil, nil). Errors signal the source is temporarily
+	// unavailable.
+	LookupAlbum(ctx context.Context, externalID string) (*AlbumDetail, error)
+
+	// LookupArtist fetches artist details (name, country, type) by the
+	// platform's external artist ID. A source that does not support artist
+	// lookup returns (nil, nil). Errors signal the source is temporarily
+	// unavailable.
+	LookupArtist(ctx context.Context, externalID string) (*ArtistLookupDetail, error)
 }

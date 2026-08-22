@@ -40,6 +40,18 @@ func (f *fakeNeteaseProvider) GetTrack(ctx context.Context, trackID string) (*po
 	return f.track(ctx, trackID)
 }
 
+func (f *fakeNeteaseProvider) SearchArtists(ctx context.Context, query string, page, limit int) ([]port.ArtistDetail, int, error) {
+	return nil, 0, errors.New("unexpected SearchArtists")
+}
+
+func (f *fakeNeteaseProvider) SearchAlbums(ctx context.Context, query string, page, limit int) ([]map[string]any, int, error) {
+	return nil, 0, errors.New("unexpected SearchAlbums")
+}
+
+func (f *fakeNeteaseProvider) GetAlbum(ctx context.Context, albumID string) (*netease.AlbumDetail, error) {
+	return nil, errors.New("unexpected GetAlbum")
+}
+
 func neTrack(id, title, artist, album string) port.PlatformTrack {
 	t := port.PlatformTrack{
 		Platform: "netease",

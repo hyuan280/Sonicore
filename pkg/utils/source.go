@@ -2,23 +2,10 @@ package utils
 
 import "strings"
 
-// SourceMusicBrainz is the canonical name of the legacy metadata source.
-// Every pre-existing record and every path that predates multi-source
-// metadata lives under it.
-const SourceMusicBrainz = "musicbrainz"
-
-// SourceNetease is the canonical name of the NetEase Cloud Music metadata
-// source.
-const SourceNetease = "netease"
-
-// SourceOrDefault maps an empty metadata source to the legacy default so
-// callers that predate multi-source metadata keep working.
-func SourceOrDefault(s string) string {
-	if s == "" {
-		return SourceMusicBrainz
-	}
-	return s
-}
+// DefaultSource is the fallback metadata source namespace when no other
+// source is available. The user cache is always accessible, making it the
+// safe default for new records that lack a platform source.
+const DefaultSource = "user"
 
 // NormalizeSource canonicalizes a client-supplied metadata source value
 // (trimmed, lowercased) before it is persisted or compared.

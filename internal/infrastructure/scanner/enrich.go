@@ -8,6 +8,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/pkg/utils"
 )
 
 func matchArtistEnrichment(name string, enrichment *metadata.EnrichmentResult) *metadata.EnrichmentResult {
@@ -32,13 +33,13 @@ func matchArtistEnrichment(name string, enrichment *metadata.EnrichmentResult) *
 // overwrite is true, all fields are replaced; when false, only empty/unknown
 // fields are filled.
 func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.AudioMeta, enrichment *metadata.EnrichmentResult, overwrite bool, trackRepo *repository.TrackRepo, artistRepo *repository.ArtistRepo, albumRepo *repository.AlbumRepo, er *metadata.EntityResolver) (changed bool) {
-	// A file MBID only makes sense as the primary id under the MusicBrainz
+	// A file MBID only makes sense as the primary id under the musicbrainz
 	// namespace. When the track is already keyed by another source (and this
 	// scan did not re-identify it), adopting the MBID would mix namespaces
 	// into (netease, MBID); the scanner records such MBIDs as a musicbrainz
 	// alias instead.
 	if meta.MBID != "" && (track.ExternalID == "" || overwrite) &&
-		(track.MetadataSource == "" || track.MetadataSource == metadata.SourceMusicBrainz) {
+		(track.MetadataSource == "" || track.MetadataSource == "musicbrainz") {
 		track.SetExternalID(meta.MBID)
 		changed = true
 	}
@@ -51,7 +52,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 		// group once MB matches them. In missing mode only empty or the
 		// legacy default source is written.
 		if enrichment.Source != "" && track.MetadataSource != enrichment.Source {
-			if overwrite || track.MetadataSource == "" || track.MetadataSource == metadata.SourceMusicBrainz {
+			if overwrite || track.MetadataSource == "" || track.MetadataSource == "musicbrainz" {
 				// Source switch: the current external id belongs to the old
 				// namespace. Record it as an alias under the OLD source BEFORE
 				// switching, so it survives the new primary id replacing the
@@ -59,21 +60,21 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 				// MetadataSource). The external_ids map is then persisted with
 				// the same row update, keeping (source, external_id) consistent
 				// and the old id reachable via aliases. An empty source means
-				// the id is file-tag data (a MusicBrainz MBID) — preserve it
-				// under musicbrainz instead of a garbage empty-key entry.
+				// a legacy record — preserve the id under the default namespace
+				// instead of a garbage empty-key entry.
 				if track.ExternalID != "" {
 					if track.ExternalIDs == nil {
 						track.ExternalIDs = map[string]string{}
 					}
 					src := track.MetadataSource
 					if src == "" {
-						src = metadata.SourceMusicBrainz
+						src = utils.DefaultSource
 					}
 					track.ExternalIDs[src] = track.ExternalID
 				}
 				oldSrc := track.MetadataSource
 				if oldSrc == "" {
-					oldSrc = metadata.SourceMusicBrainz
+					oldSrc = utils.DefaultSource
 				}
 				track.MetadataSource = enrichment.Source
 				if enrichment.TrackExternalID != "" {
@@ -138,7 +139,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 								}
 								src := artist.MetadataSource
 								if src == "" {
-									src = metadata.SourceMusicBrainz
+									src = utils.DefaultSource
 								}
 								artist.ExternalIDs[src] = artist.ExternalID
 							}
@@ -220,7 +221,7 @@ func ApplyEnrichment(ctx context.Context, track *domain.Track, meta *metadata.Au
 							}
 							src := album.MetadataSource
 							if src == "" {
-								src = metadata.SourceMusicBrainz
+								src = utils.DefaultSource
 							}
 							album.ExternalIDs[src] = album.ExternalID
 						}

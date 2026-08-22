@@ -12,10 +12,6 @@ import (
 	"github.com/sonicore/server/pkg/utils"
 )
 
-// SourceMusicBrainz is the canonical MusicBrainz metadata source name,
-// kept in sync with the shared constant in pkg/utils.
-const SourceMusicBrainz = utils.SourceMusicBrainz
-
 // EntityResolver centralizes the cross-source lookup/merge chain for artists
 // and albums, shared by the scanner and the metadata handlers. It is the
 // single place that knows how external IDs and names map onto the entity
@@ -43,8 +39,6 @@ func NewEntityResolver(db *sql.DB) *EntityResolver {
 // Returns nil when no record matches. A name that normalizes to empty never
 // matches.
 func (e *EntityResolver) FindArtist(ctx context.Context, source, externalID, name string) (*domain.Artist, error) {
-	source = utils.SourceOrDefault(source)
-
 	if externalID != "" {
 		if a, err := e.artists.FindBySourceAndID(ctx, source, externalID); err == nil {
 			return a, nil
@@ -80,7 +74,6 @@ func (e *EntityResolver) FindArtist(ctx context.Context, source, externalID, nam
 // artist is created with its final values (avoiding an INSERT followed by an
 // UPDATE from the scanner's backfill, which then only serves existing rows).
 func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externalID, name, country string) (*domain.Artist, error) {
-	source = utils.SourceOrDefault(source)
 	// Apply the placeholder before lookup so an existing "Unknown Artist"
 	// row is found by its normalized name and reused instead of creating one
 	// row per call.
@@ -115,8 +108,6 @@ func (e *EntityResolver) FindOrCreateArtist(ctx context.Context, source, externa
 //
 // Returns nil when no record matches.
 func (e *EntityResolver) FindAlbum(ctx context.Context, source, externalID, title, artistID string) (*domain.Album, error) {
-	source = utils.SourceOrDefault(source)
-
 	if externalID != "" {
 		if a, err := e.albums.FindBySourceAndID(ctx, source, externalID); err == nil {
 			return a, nil
@@ -149,7 +140,6 @@ func (e *EntityResolver) FindAlbum(ctx context.Context, source, externalID, titl
 // FindOrCreateAlbum resolves like FindAlbum and creates a new record when
 // nothing matched.
 func (e *EntityResolver) FindOrCreateAlbum(ctx context.Context, source, externalID, title, artistID string, year int, genre, country string) (*domain.Album, error) {
-	source = utils.SourceOrDefault(source)
 	// Apply the placeholder before lookup so existing "Unknown Album" rows
 	// are reused instead of creating one per track.
 	if title == "" {
@@ -187,6 +177,9 @@ func mergeArtistID(ctx context.Context, repo *repository.ArtistRepo, a *domain.A
 	if externalID == "" {
 		return nil
 	}
+	if source == "" {
+		source = utils.DefaultSource
+	}
 	changed := false
 	if a.MetadataSource == source {
 		if a.ExternalID == "" {
@@ -220,6 +213,9 @@ func mergeArtistID(ctx context.Context, repo *repository.ArtistRepo, a *domain.A
 func mergeAlbumID(ctx context.Context, repo *repository.AlbumRepo, a *domain.Album, source, externalID string) error {
 	if externalID == "" {
 		return nil
+	}
+	if source == "" {
+		source = utils.DefaultSource
 	}
 	changed := false
 	if a.MetadataSource == source {

@@ -102,7 +102,7 @@ func (r *Resolver) Enrich(ctx context.Context, meta *AudioMeta) (*EnrichmentResu
 
 	result := &EnrichmentResult{
 		TrackExternalID: recording.ID,
-		Source:          SourceMusicBrainz,
+		Source:          "musicbrainz",
 	}
 
 	result.Title = TrimParenSuffix(recording.Title)
@@ -509,7 +509,7 @@ func (r *Resolver) IdentifyTrack(ctx context.Context, mbid string) (*EnrichmentR
 
 	result := &EnrichmentResult{
 		TrackExternalID: rec.ID,
-		Source:          SourceMusicBrainz,
+		Source:          "musicbrainz",
 		Title:           TrimParenSuffix(rec.Title),
 	}
 

@@ -376,6 +376,7 @@ type fakePrioSource struct {
 }
 
 func (f *fakePrioSource) Name() string                      { return f.name }
+func (f *fakePrioSource) Label() string                     { return f.name }
 func (f *fakePrioSource) Enabled() bool                     { return f.enabled }
 func (f *fakePrioSource) Priority() int                     { return f.priority }
 func (f *fakePrioSource) Capabilities() port.MetadataFields { return 0 }
@@ -386,6 +387,18 @@ func (f *fakePrioSource) Identify(context.Context, port.MetadataQuery) (*port.Me
 	return nil, nil
 }
 func (f *fakePrioSource) Lookup(context.Context, string) (*port.MetadataCandidate, error) {
+	return nil, nil
+}
+func (f *fakePrioSource) SearchArtists(context.Context, string) ([]port.ArtistSearchResult, error) {
+	return nil, nil
+}
+func (f *fakePrioSource) SearchReleases(context.Context, string) ([]port.ReleaseSearchResult, error) {
+	return nil, nil
+}
+func (f *fakePrioSource) LookupAlbum(context.Context, string) (*port.AlbumDetail, error) {
+	return nil, nil
+}
+func (f *fakePrioSource) LookupArtist(context.Context, string) (*port.ArtistLookupDetail, error) {
 	return nil, nil
 }
 

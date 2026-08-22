@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sonicore/server/internal/core/port"
@@ -35,6 +36,7 @@ func NewMBSource(cfg MBConfig) *mbSource {
 }
 
 func (s *mbSource) Name() string  { return s.name }
+func (s *mbSource) Label() string { return "MusicBrainz" }
 func (s *mbSource) Enabled() bool { return s.enabled }
 func (s *mbSource) Priority() int { return s.priority }
 
@@ -98,6 +100,94 @@ func (s *mbSource) SearchCandidates(ctx context.Context, q port.MetadataQuery) (
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Score > out[j].Score
 	})
+	return out, nil
+}
+
+// SearchArtists searches MusicBrainz for artists by name.
+func (s *mbSource) SearchArtists(ctx context.Context, query string) ([]port.ArtistSearchResult, error) {
+	artists, err := s.mb.SearchArtists(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]port.ArtistSearchResult, 0, len(artists))
+	for _, a := range artists {
+		out = append(out, port.ArtistSearchResult{
+			Name:       a.Name,
+			ExternalID: a.ID,
+			Country:    a.Country,
+			Type:       a.Type,
+			Source:     s.name,
+		})
+	}
+	return out, nil
+}
+
+// LookupAlbum fetches release details from MusicBrainz by MBID.
+func (s *mbSource) LookupAlbum(ctx context.Context, externalID string) (*port.AlbumDetail, error) {
+	release, err := s.mb.LookupRelease(ctx, externalID)
+	if err != nil {
+		return nil, err
+	}
+	if release == nil {
+		return nil, nil
+	}
+	d := &port.AlbumDetail{
+		ExternalID: release.ID,
+		Title:      release.Title,
+		Country:    release.Country,
+		Genre:      GenreFromTags(release.Tags),
+	}
+	if len(release.Date) >= 4 {
+		if year, err := strconv.Atoi(release.Date[:4]); err == nil {
+			d.Year = year
+		}
+	}
+	if len(release.Artists) > 0 {
+		d.ArtistName = release.Artists[0].Name
+		if release.Artists[0].Artist != nil {
+			d.ArtistID = release.Artists[0].Artist.ID
+		}
+	}
+	return d, nil
+}
+
+// LookupArtist fetches artist details from MusicBrainz by MBID.
+func (s *mbSource) LookupArtist(ctx context.Context, externalID string) (*port.ArtistLookupDetail, error) {
+	full, err := s.mb.LookupArtist(ctx, externalID)
+	if err != nil {
+		return nil, err
+	}
+	if full == nil {
+		return nil, nil
+	}
+	return &port.ArtistLookupDetail{
+		ExternalID: full.ID,
+		Name:       full.Name,
+		Country:    full.Country,
+		Type:       full.Type,
+	}, nil
+}
+
+// SearchReleases searches MusicBrainz for releases by name.
+func (s *mbSource) SearchReleases(ctx context.Context, query string) ([]port.ReleaseSearchResult, error) {
+	releases, err := s.mb.SearchReleases(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]port.ReleaseSearchResult, 0, len(releases))
+	for _, rel := range releases {
+		artistName := ""
+		if len(rel.Artists) > 0 {
+			artistName = rel.Artists[0].Name
+		}
+		out = append(out, port.ReleaseSearchResult{
+			Title:      rel.Title,
+			ExternalID: rel.ID,
+			Artist:     artistName,
+			Status:     rel.Status,
+			Source:     s.name,
+		})
+	}
 	return out, nil
 }
 

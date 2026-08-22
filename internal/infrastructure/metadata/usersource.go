@@ -37,6 +37,7 @@ func NewUserSource(repo *repository.UserMetadataRepo) *userSource {
 }
 
 func (s *userSource) Name() string  { return s.name }
+func (s *userSource) Label() string { return "User" }
 func (s *userSource) Enabled() bool { return s.enabled }
 func (s *userSource) Priority() int { return s.priority }
 
@@ -68,8 +69,12 @@ func (s *userSource) Identify(ctx context.Context, q port.MetadataQuery) (*port.
 		um.Album == "" && um.Year == 0 && um.Genre == "" {
 		return nil, nil
 	}
+	src := um.MetadataSource
+	if src == "" {
+		src = utils.DefaultSource
+	}
 	c := &port.MetadataCandidate{
-		Source:     utils.SourceOrDefault(um.MetadataSource),
+		Source:     src,
 		ExternalID: um.ExternalID,
 		Title:      um.Title,
 		Album:      um.Album,
@@ -99,5 +104,21 @@ func (s *userSource) SearchCandidates(ctx context.Context, q port.MetadataQuery)
 }
 
 func (s *userSource) Lookup(ctx context.Context, externalID string) (*port.MetadataCandidate, error) {
+	return nil, nil
+}
+
+func (s *userSource) SearchArtists(ctx context.Context, query string) ([]port.ArtistSearchResult, error) {
+	return nil, nil
+}
+
+func (s *userSource) SearchReleases(ctx context.Context, query string) ([]port.ReleaseSearchResult, error) {
+	return nil, nil
+}
+
+func (s *userSource) LookupAlbum(ctx context.Context, externalID string) (*port.AlbumDetail, error) {
+	return nil, nil
+}
+
+func (s *userSource) LookupArtist(ctx context.Context, externalID string) (*port.ArtistLookupDetail, error) {
 	return nil, nil
 }

@@ -87,26 +87,32 @@ func (h *MetadataHandler) newMBClient(ctx context.Context) *metadata.MBClient {
 	return metadata.NewMBClient(h.mbConfig(ctx))
 }
 
-// newRegistry assembles the recognition chain from the latest settings:
-// MusicBrainz first, NetEase as the fallback when both the metadata switch
-// and the platform provider are available.
+// newRegistry assembles the recognition chain from the latest settings.
 func (h *MetadataHandler) newRegistry(ctx context.Context) *metadata.Registry {
 	mbCfg := h.mbConfig(ctx)
 
 	neteaseEnabled := h.neteaseEnabled
-	// Get returns ("", nil) for missing keys; only override when a value
-	// is actually stored.
 	if enabled, err := h.settingsRepo.Get(ctx, "metadata_netease_enabled"); err == nil && enabled != "" {
 		neteaseEnabled = enabled == "true"
 	}
-	return metadata.BuildRegistry(mbCfg, h.neteaseProvider, neteaseEnabled, h.umRepo)
+	var sources []port.MetadataSource
+	sources = append(sources, metadata.NewMBSource(mbCfg))
+	if neteaseEnabled && h.neteaseProvider != nil {
+		sources = append(sources, metadata.NewNeteaseSource(h.neteaseProvider, true))
+	}
+	sources = append(sources, metadata.NewUserSource(h.umRepo))
+	return metadata.BuildRegistry(sources...)
 }
 
-// lookupEnrichment resolves an external ID through the registry, using the
-// track's own metadata source so NetEase-sourced tracks look up NetEase ids
-// (and legacy rows default to MusicBrainz).
+// lookupEnrichment resolves an external ID through the registry. The caller
+// must provide the source that owns the ID; an empty source falls back to the
+// default source (user cache) rather than MusicBrainz, so callers that expect
+// external identification must pass an explicit source.
 func (h *MetadataHandler) lookupEnrichment(ctx context.Context, source, externalID string) (*metadata.EnrichmentResult, error) {
-	c, err := h.newRegistry(ctx).Lookup(ctx, utils.SourceOrDefault(source), externalID)
+	if source == "" {
+		source = utils.DefaultSource
+	}
+	c, err := h.newRegistry(ctx).Lookup(ctx, source, externalID)
 	if err != nil || c == nil {
 		return nil, err
 	}
@@ -147,14 +153,15 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// Reject unknown metadata sources up front so no code path (track update
 	// or user-metadata cache) accepts a value that breaks equality checks
 	// and version grouping.
-	if req.Source != "" && !isValidSource(utils.NormalizeSource(req.Source)) {
+	reg := h.newRegistry(r.Context())
+	if req.Source != "" && !isValidSource(utils.NormalizeSource(req.Source), reg) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported metadata source"})
 		return
 	}
 	for i := range req.Artists {
 		if req.Artists[i].Source != "" {
 			src := utils.NormalizeSource(req.Artists[i].Source)
-			if !isValidSource(src) {
+			if !isValidSource(src, reg) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported artist metadata source"})
 				return
 			}
@@ -164,7 +171,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 	for i := range req.Albums {
 		if req.Albums[i].Source != "" {
 			src := utils.NormalizeSource(req.Albums[i].Source)
-			if !isValidSource(src) {
+			if !isValidSource(src, reg) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported album metadata source"})
 				return
 			}
@@ -173,10 +180,11 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The effective source for this save: an explicit request source wins,
-	// else the track's current source, else the MusicBrainz default. It is
-	// used consistently by the enrichment lookup, the user-metadata cache and
-	// the track row update so (source, external_id) pairs never mismatch.
-	effSource := utils.SourceOrDefault(utils.NormalizeSource(req.Source))
+	// else the track's current source, else the default source.
+	effSource := utils.NormalizeSource(req.Source)
+	if effSource == "" {
+		effSource = utils.DefaultSource
+	}
 	if req.Source == "" && req.TrackID != "" {
 		if track, err := h.trackRepo.FindByID(r.Context(), req.TrackID); err == nil && track.MetadataSource != "" {
 			effSource = track.MetadataSource
@@ -387,7 +395,9 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				}
 				return ""
 			}
-			// Resolve or create album from request entry
+			// Resolve or create album from request entry.
+			// When source is empty the album has no platform source — skip
+			// LookupAlbum and save directly with the default source.
 			resolveAlbum := func(al struct {
 				ID         string `json:"id"`
 				Title      string `json:"title"`
@@ -400,37 +410,37 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				}
 				source := al.Source
 				if source == "" {
-					source = metadata.SourceMusicBrainz
+					source = utils.DefaultSource
 				}
 				artistID := ""
 				var year int
 				var country, genre string
-				if al.ExternalID != "" && source == metadata.SourceMusicBrainz {
-					if release, err := h.newMBClient(r.Context()).LookupRelease(r.Context(), al.ExternalID); err == nil {
-						if len(release.Date) >= 4 {
-							fmt.Sscanf(release.Date[:4], "%d", &year)
+				// Look up album details from the platform source when an
+				// external ID and a source are both provided.
+				if al.ExternalID != "" && source != "" {
+					for _, s := range reg.Sources() {
+						if s.Name() != source {
+							continue
 						}
-						country = release.Country
-						genre = metadata.GenreFromTags(release.Tags)
-						if len(release.Artists) > 0 {
-							extID := ""
-							if release.Artists[0].Artist != nil {
-								extID = release.Artists[0].Artist.ID
+						detail, err := s.LookupAlbum(r.Context(), al.ExternalID)
+						if err != nil {
+							logger.Error("[metadata] resolveAlbum: %s LookupAlbum(%s) failed: %v", s.Name(), al.ExternalID, err)
+						}
+						if detail != nil {
+							if detail.Year != 0 && year == 0 {
+								year = detail.Year
 							}
-							artistID = resolveArtistID(release.Artists[0].Name, extID, metadata.SourceMusicBrainz)
+							if detail.Genre != "" {
+								genre = detail.Genre
+							}
+							if detail.Country != "" {
+								country = detail.Country
+							}
+							if detail.ArtistName != "" && artistID == "" {
+								artistID = resolveArtistID(detail.ArtistName, detail.ArtistID, source)
+							}
 						}
-					}
-				}
-				if al.ExternalID != "" && source == utils.SourceNetease && h.neteaseProvider != nil {
-					if detail, err := h.neteaseProvider.GetAlbum(r.Context(), al.ExternalID); err == nil {
-						if artistID == "" {
-							artistID = resolveArtistID(detail.Artist, "", utils.SourceNetease)
-						}
-						if detail.Year != 0 && year == 0 {
-							year = detail.Year
-						}
-					} else if err != nil {
-						logger.Error("[metadata] resolveAlbum: netease GetAlbum(%s) failed: %v", al.ExternalID, err)
+						break
 					}
 				}
 				if artistID == "" {
@@ -711,7 +721,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 
 				// DB not complete → use track's own external_id if available
 				if track.ExternalID != "" && track.MetadataSource != "" {
-					source := utils.SourceOrDefault(track.MetadataSource)
+					source := sourceOrDefaultSource(track.MetadataSource)
 					result, err := h.lookupEnrichment(r.Context(), source, track.ExternalID)
 					if err != nil {
 						logger.Error("[metadata] SearchTrack lookupEnrichment error: %v", err)
@@ -777,12 +787,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source required when external_id is provided"})
 			return
 		}
-		source := utils.NormalizeSource(req.Source)
-		if !isValidSource(source) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported metadata source"})
-			return
-		}
-		source = utils.SourceOrDefault(source)
+		source := sourceOrDefaultSource(utils.NormalizeSource(req.Source))
 		result, err := h.lookupEnrichment(r.Context(), source, req.ExternalID)
 		if err != nil {
 			logger.Error("[metadata] SearchTrack lookupEnrichment error: %v", err)
@@ -835,22 +840,17 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "need track_id and external_id"})
 		return
 	}
-	if req.Source != "" && !isValidSource(utils.NormalizeSource(req.Source)) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported metadata source"})
-		return
-	}
-
 	track, err := h.trackRepo.FindByID(r.Context(), req.TrackID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "track not found"})
 		return
 	}
 
-	// An explicit request source (e.g. a NetEase id on a legacy/empty track)
-	// wins; otherwise the id is resolved against the track's current source.
-	source := utils.SourceOrDefault(utils.NormalizeSource(req.Source))
-	if req.Source == "" {
-		source = utils.SourceOrDefault(track.MetadataSource)
+	// An explicit request source wins; otherwise the id is resolved against
+	// the track's current source.
+	source := utils.NormalizeSource(req.Source)
+	if source == "" {
+		source = sourceOrDefaultSource(track.MetadataSource)
 	}
 	result, err := h.lookupEnrichment(r.Context(), source, req.ExternalID)
 	if err != nil {
@@ -1206,7 +1206,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 		// a degenerate (source, "") pair that pollutes source-inferred lookups,
 		// and every alias is dropped so no stale id can match later.
 		track.ExternalID = ""
-		track.MetadataSource = metadata.SourceMusicBrainz
+		track.MetadataSource = ""
 		track.ExternalIDs = map[string]string{}
 		if meta.Title != "" {
 			track.Title = meta.Title
@@ -1305,41 +1305,20 @@ func (h *MetadataHandler) SearchArtist(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
 		return
 	}
-	source := utils.SourceOrDefault(utils.NormalizeSource(req.Source))
-	var result []map[string]interface{}
-	switch source {
-	case utils.SourceMusicBrainz:
-		client := h.newMBClient(r.Context())
-		artists, err := client.SearchArtists(r.Context(), req.Name)
+	source := utils.NormalizeSource(req.Source)
+	reg := h.newRegistry(r.Context())
+
+	var result []port.ArtistSearchResult
+	for _, s := range reg.Sources() {
+		if source != "" && s.Name() != source {
+			continue
+		}
+		artists, err := s.SearchArtists(r.Context(), req.Name)
 		if err != nil {
-			logger.Error("[metadata] SearchArtist musicbrainz error: %v", err)
+			logger.Error("[metadata] SearchArtist %s error: %v", s.Name(), err)
+			continue
 		}
-		for _, a := range artists {
-			result = append(result, map[string]interface{}{
-				"name":        a.Name,
-				"external_id": a.ID,
-				"country":     a.Country,
-				"type":        a.Type,
-				"source":      utils.SourceMusicBrainz,
-			})
-		}
-	case utils.SourceNetease:
-		if h.neteaseProvider != nil {
-			artists, _, err := h.neteaseProvider.SearchArtists(r.Context(), req.Name, 1, 20)
-			if err != nil {
-				logger.Error("[metadata] SearchArtist netease error: %v", err)
-			}
-			for _, a := range artists {
-				result = append(result, map[string]interface{}{
-					"name":        a.Name,
-					"external_id": a.ArtistID,
-					"source":      utils.SourceNetease,
-				})
-			}
-		}
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported source: %s", source)})
-		return
+		result = append(result, artists...)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"artists": result})
 }
@@ -1353,67 +1332,23 @@ func (h *MetadataHandler) SearchRelease(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
 		return
 	}
-	source := utils.SourceOrDefault(utils.NormalizeSource(req.Source))
-	var result []map[string]interface{}
-	switch source {
-	case utils.SourceMusicBrainz:
-		client := h.newMBClient(r.Context())
-		releases, err := client.SearchReleases(r.Context(), req.Name)
+	source := utils.NormalizeSource(req.Source)
+	reg := h.newRegistry(r.Context())
+
+	result := []port.ReleaseSearchResult{{
+		Title:  req.Name,
+		Source: "",
+	}}
+	for _, s := range reg.Sources() {
+		if source != "" && s.Name() != source {
+			continue
+		}
+		releases, err := s.SearchReleases(r.Context(), req.Name)
 		if err != nil {
-			logger.Error("[metadata] SearchRelease musicbrainz error: %v", err)
+			logger.Error("[metadata] SearchRelease %s error: %v", s.Name(), err)
+			continue
 		}
-		// Always prepend the query text as an unmatched entry (no external id)
-		result = append(result, map[string]interface{}{
-			"title":       req.Name,
-			"external_id": "",
-			"artist":      "",
-			"status":      "",
-			"source":      utils.SourceMusicBrainz,
-		})
-		for _, rel := range releases {
-			artistName := ""
-			if len(rel.Artists) > 0 {
-				artistName = rel.Artists[0].Name
-			}
-			result = append(result, map[string]interface{}{
-				"title":       rel.Title,
-				"external_id": rel.ID,
-				"artist":      artistName,
-				"status":      rel.Status,
-				"source":      utils.SourceMusicBrainz,
-			})
-		}
-	case utils.SourceNetease:
-		if h.neteaseProvider != nil {
-			albums, _, err := h.neteaseProvider.SearchAlbums(r.Context(), req.Name, 1, 20)
-			if err != nil {
-				logger.Error("[metadata] SearchRelease netease error: %v", err)
-			}
-			for _, a := range albums {
-				title, ok := a["title"].(string)
-				if !ok {
-					continue
-				}
-				extID, ok := a["external_id"].(string)
-				if !ok {
-					continue
-				}
-				artist, ok := a["artist"].(string)
-				if !ok {
-					continue
-				}
-				result = append(result, map[string]interface{}{
-					"title":       title,
-					"external_id": extID,
-					"artist":      artist,
-					"status":      "",
-					"source":      utils.SourceNetease,
-				})
-			}
-		}
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported source: %s", source)})
-		return
+		result = append(result, releases...)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"releases": result})
 }
@@ -1472,42 +1407,48 @@ func (h *MetadataHandler) findOrCreateArtist(ctx context.Context, name string, e
 		return nil
 	}
 
-	// Backfill country from MusicBrainz when the external ID is a MBID.
-	if externalID != "" && a.Country == "" && sourceOrDefaultSource(source) == metadata.SourceMusicBrainz {
-		if full, err := h.newMBClient(ctx).LookupArtist(ctx, externalID); err == nil && full.Country != "" {
-			a.Country = full.Country
-			h.artistRepo.Update(ctx, a)
+	// Backfill country from the source when the artist has an external ID
+	// but no country yet.
+	if externalID != "" && a.Country == "" && source != "" {
+		for _, s := range h.newRegistry(ctx).Sources() {
+			if s.Name() != source {
+				continue
+			}
+			detail, err := s.LookupArtist(ctx, externalID)
+			if err != nil {
+				logger.Error("[metadata] LookupArtist %s error: %v", source, err)
+				break
+			}
+			if detail != nil && detail.Country != "" {
+				a.Country = detail.Country
+				h.artistRepo.Update(ctx, a)
+			}
+			break
 		}
 	}
 	return a
 }
 
 func (h *MetadataHandler) ListSources(w http.ResponseWriter, r *http.Request) {
-	mbCfg := h.mbConfig(r.Context())
-	neteaseEnabled := h.neteaseEnabled
-	if enabled, err := h.settingsRepo.Get(r.Context(), "metadata_netease_enabled"); err == nil && enabled != "" {
-		neteaseEnabled = enabled == "true"
-	}
-
-	sources := []map[string]string{}
-	if mbCfg.Enabled {
-		sources = append(sources, map[string]string{"name": utils.SourceMusicBrainz, "label": "MusicBrainz"})
-	}
-	if neteaseEnabled && h.neteaseProvider != nil {
-		sources = append(sources, map[string]string{"name": utils.SourceNetease, "label": "NetEase"})
+	reg := h.newRegistry(r.Context())
+	var sources []map[string]string
+	for _, s := range reg.Sources() {
+		sources = append(sources, map[string]string{"name": s.Name(), "label": s.Label()})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sources": sources})
 }
 
 func sourceOrDefaultSource(s string) string {
-	return utils.SourceOrDefault(s)
+	if s == "" {
+		return utils.DefaultSource
+	}
+	return s
 }
 
 // sourceMatches reports whether two metadata source values are the same,
-// treating an empty value as the musicbrainz default (legacy rows carry no
-// source).
+// treating an empty value as the default source.
 func sourceMatches(a, b string) bool {
-	return utils.SourceOrDefault(a) == utils.SourceOrDefault(b)
+	return sourceOrDefaultSource(a) == sourceOrDefaultSource(b)
 }
 
 // alignAssociatesToSource rewrites the (MetadataSource, ExternalID) pair of
@@ -1541,15 +1482,16 @@ func (h *MetadataHandler) alignAssociatesToSource(ctx context.Context, track *do
 	}
 }
 
-// validSources lists the metadata sources the Save endpoint accepts. Extend
-// when a new source joins the recognition chain.
-var validSources = map[string]bool{
-	utils.SourceMusicBrainz: true,
-	utils.SourceNetease:     true,
-}
-
-func isValidSource(s string) bool {
-	return validSources[s]
+func isValidSource(s string, reg *metadata.Registry) bool {
+	if s == "" {
+		return false
+	}
+	for _, src := range reg.Sources() {
+		if src.Name() == s {
+			return true
+		}
+	}
+	return false
 }
 
 // reResolveVersions handles version grouping after a track's external id

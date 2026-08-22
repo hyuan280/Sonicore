@@ -58,6 +58,11 @@ type LibraryMember struct {
 	JoinedAt  time.Time `json:"joined_at"`
 }
 
+const (
+	UnknownArtistName = "Unknown Artist"
+	UnknownAlbumName  = "Unknown Album"
+)
+
 type Artist struct {
 	ID             string            `json:"id"`
 	Name           string            `json:"name"`

@@ -1257,10 +1257,10 @@ func (h *Handler) getArtistInfo(r *http.Request, ctx context.Context, q url.Valu
 	// MusicBrainz-sourced (or legacy source-less) artists. For other sources
 	// fall back to a MusicBrainz alias in external_ids when present.
 	musicBrainzID := ""
-	if artist.MetadataSource == "" || artist.MetadataSource == metadata.SourceMusicBrainz {
+	if artist.MetadataSource == "" || artist.MetadataSource == "musicbrainz" {
 		musicBrainzID = artist.ExternalID
 	} else if artist.ExternalIDs != nil {
-		musicBrainzID = artist.ExternalIDs[metadata.SourceMusicBrainz]
+		musicBrainzID = artist.ExternalIDs["musicbrainz"]
 	}
 	if musicBrainzID != "" {
 		mbid = map[string]interface{}{"#text": musicBrainzID}

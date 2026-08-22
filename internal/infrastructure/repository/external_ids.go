@@ -15,8 +15,10 @@ func marshalExternalIDs(m map[string]string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// sourceOrDefault maps an empty metadata source to the legacy "musicbrainz"
-// default so existing callers that predate multi-source metadata keep working.
+// sourceOrDefault maps an empty metadata source to the default source.
 func sourceOrDefault(s string) string {
-	return utils.SourceOrDefault(s)
+	if s == "" {
+		return utils.DefaultSource
+	}
+	return s
 }

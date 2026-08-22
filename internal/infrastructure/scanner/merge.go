@@ -247,9 +247,6 @@ func (e *Engine) tryMergeByIdentifiedID(ctx context.Context, libraryID string, t
 		return false
 	}
 	source := track.MetadataSource
-	if source == "" {
-		source = "musicbrainz"
-	}
 	existing, err := e.trackRepo.FindByExternalID(ctx, libraryID, source, track.ExternalID, track.ID)
 	if err != nil {
 		logger.Error("[scan] merge lookup error for %s: %v", track.ID, err)
@@ -266,9 +263,6 @@ func (e *Engine) tryMergeByIdentifiedID(ctx context.Context, libraryID string, t
 		return false
 	}
 	mainSource := existing.MetadataSource
-	if mainSource == "" {
-		mainSource = "musicbrainz"
-	}
 	ids := mergeExternalIDs(existing.ExternalIDs, track.ExternalIDs)
 	ids[source] = track.ExternalID
 	ids[mainSource] = existing.ExternalID

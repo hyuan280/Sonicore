@@ -65,13 +65,20 @@ type AudioMeta struct {
 
 // QueryFromAudioMeta builds a metadata identification query from ffprobe
 // audio tags, mirroring the Resolver's artist fallback (album artist when
-// the performer tag is empty).
+// the performer tag is empty). When the file carries a MusicBrainz ID it is
+// passed as ExternalID / ExternalSource so the registry can attempt a direct
+// Lookup before the text-based search chain.
 func QueryFromAudioMeta(meta *AudioMeta) port.MetadataQuery {
 	artist := meta.Artist
 	if artist == "" {
 		artist = meta.AlbumArtist
 	}
-	return port.MetadataQuery{Title: meta.Title, Artist: artist, Album: meta.Album, TitleFromFilename: meta.TitleFromFilename}
+	q := port.MetadataQuery{Title: meta.Title, Artist: artist, Album: meta.Album, TitleFromFilename: meta.TitleFromFilename}
+	if meta.MBID != "" {
+		q.ExternalID = meta.MBID
+		q.ExternalSource = "musicbrainz"
+	}
+	return q
 }
 
 // lyricsTag picks the lyrics value from lower-cased ffprobe tags. The ID3

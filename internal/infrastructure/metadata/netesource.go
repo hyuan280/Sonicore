@@ -17,6 +17,9 @@ type neteaseProvider interface {
 	SearchTracks(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error)
 	EnrichTracks(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error)
 	GetTrack(ctx context.Context, trackID string) (*port.TrackDetail, error)
+	SearchArtists(ctx context.Context, query string, page, limit int) ([]port.ArtistDetail, int, error)
+	SearchAlbums(ctx context.Context, query string, page, limit int) ([]map[string]any, int, error)
+	GetAlbum(ctx context.Context, albumID string) (*netease.AlbumDetail, error)
 }
 
 // neteaseSource adapts the NetEase platform provider to the
@@ -53,6 +56,7 @@ const (
 )
 
 func (s *neteaseSource) Name() string  { return s.name }
+func (s *neteaseSource) Label() string { return "NetEase" }
 func (s *neteaseSource) Enabled() bool { return s.enabled }
 func (s *neteaseSource) Priority() int { return s.priority }
 
@@ -163,6 +167,68 @@ func (s *neteaseSource) Lookup(ctx context.Context, externalID string) (*port.Me
 		}
 	}
 	return c, nil
+}
+
+// SearchArtists searches NetEase for artists by name.
+func (s *neteaseSource) SearchArtists(ctx context.Context, query string) ([]port.ArtistSearchResult, error) {
+	artists, _, err := s.provider.SearchArtists(ctx, query, 1, 20)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]port.ArtistSearchResult, 0, len(artists))
+	for _, a := range artists {
+		out = append(out, port.ArtistSearchResult{
+			Name:       a.Name,
+			ExternalID: a.ArtistID,
+			Source:     s.name,
+		})
+	}
+	return out, nil
+}
+
+// LookupAlbum fetches album details from NetEase by platform album ID.
+func (s *neteaseSource) LookupAlbum(ctx context.Context, externalID string) (*port.AlbumDetail, error) {
+	detail, err := s.provider.GetAlbum(ctx, externalID)
+	if err != nil {
+		return nil, err
+	}
+	if detail == nil {
+		return nil, nil
+	}
+	return &port.AlbumDetail{
+		ExternalID: detail.ID,
+		Title:      detail.Title,
+		ArtistName: detail.Artist,
+		Year:       detail.Year,
+	}, nil
+}
+
+func (s *neteaseSource) LookupArtist(ctx context.Context, externalID string) (*port.ArtistLookupDetail, error) {
+	return nil, nil
+}
+
+// SearchReleases searches NetEase for albums by name.
+func (s *neteaseSource) SearchReleases(ctx context.Context, query string) ([]port.ReleaseSearchResult, error) {
+	albums, _, err := s.provider.SearchAlbums(ctx, query, 1, 20)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]port.ReleaseSearchResult, 0, len(albums))
+	for _, a := range albums {
+		title, _ := a["title"].(string)
+		extID, _ := a["external_id"].(string)
+		artist, _ := a["artist"].(string)
+		if title == "" {
+			continue
+		}
+		out = append(out, port.ReleaseSearchResult{
+			Title:      title,
+			ExternalID: extID,
+			Artist:     artist,
+			Source:     s.name,
+		})
+	}
+	return out, nil
 }
 
 // searchQuery composes the platform search string from the query fields.

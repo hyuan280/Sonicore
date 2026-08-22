@@ -247,22 +247,22 @@ func (r *TrackRepo) TrackHasBasicMeta(ctx context.Context, trackID string) (bool
 }
 
 // trackHasBasicMeta checks an already-loaded track for basic metadata.
+// All associated artists must be non-Unknown; at least one album must be
+// non-Unknown.
 func (r *TrackRepo) trackHasBasicMeta(track *domain.Track) bool {
 	if track.Title == "" {
 		return false
 	}
-	hasArtist := false
-	for _, ta := range track.Artists {
-		if ta.Artist != nil && ta.Artist.Name != "" && ta.Artist.Name != "Unknown Artist" {
-			hasArtist = true
-			break
-		}
-	}
-	if !hasArtist {
+	if len(track.Artists) == 0 {
 		return false
 	}
+	for _, ta := range track.Artists {
+		if ta.Artist == nil || ta.Artist.Name == "" || ta.Artist.Name == domain.UnknownArtistName {
+			return false
+		}
+	}
 	for _, tal := range track.Albums {
-		if tal.Album != nil && tal.Album.Title != "" && tal.Album.Title != "Unknown Album" {
+		if tal.Album != nil && tal.Album.Title != "" && tal.Album.Title != domain.UnknownAlbumName {
 			return true
 		}
 	}

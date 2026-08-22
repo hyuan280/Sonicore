@@ -20,14 +20,11 @@ func (e *Engine) findOrCreateArtist(ctx context.Context, name string, enrichment
 // dimension), matching KNOWN_ISSUES #5 where cross-library merging is not
 // implemented.
 func findOrCreateArtist(ctx context.Context, er *metadata.EntityResolver, artistRepo *repository.ArtistRepo, name string, enrichment *metadata.EnrichmentResult) (*domain.Artist, error) {
-	source := metadata.SourceMusicBrainz
+	source := ""
 	externalID := ""
 	if enrichment != nil {
 		source = enrichment.Source
 		externalID = enrichment.ArtistExternalID
-	}
-	if source == "" {
-		source = metadata.SourceMusicBrainz
 	}
 
 	artist, err := er.FindOrCreateArtist(ctx, source, externalID, name, artistCountry(enrichment))
@@ -74,14 +71,11 @@ func (e *Engine) findOrCreateAlbum(ctx context.Context, title, artistID string, 
 // across libraries, like artists.
 
 func findOrCreateAlbum(ctx context.Context, er *metadata.EntityResolver, albumRepo *repository.AlbumRepo, title, artistID string, year int, genre string, enrichment *metadata.EnrichmentResult) (*domain.Album, error) {
-	source := metadata.SourceMusicBrainz
+	source := ""
 	externalID := ""
 	if enrichment != nil {
 		source = enrichment.Source
 		externalID = enrichment.AlbumExternalID
-	}
-	if source == "" {
-		source = metadata.SourceMusicBrainz
 	}
 
 	// Pre-fill year/genre from the enrichment so a brand-new album is created

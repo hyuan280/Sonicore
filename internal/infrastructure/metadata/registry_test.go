@@ -25,6 +25,7 @@ type fakeSource struct {
 }
 
 func (f *fakeSource) Name() string  { return f.name }
+func (f *fakeSource) Label() string { return f.name }
 func (f *fakeSource) Enabled() bool { return f.enabled }
 func (f *fakeSource) Priority() int { return f.priority }
 func (f *fakeSource) Capabilities() port.MetadataFields {
@@ -53,6 +54,18 @@ func (f *fakeSource) Lookup(ctx context.Context, id string) (*port.MetadataCandi
 		return nil, nil
 	}
 	return f.lookup(ctx, id)
+}
+func (f *fakeSource) SearchArtists(context.Context, string) ([]port.ArtistSearchResult, error) {
+	return nil, nil
+}
+func (f *fakeSource) SearchReleases(context.Context, string) ([]port.ReleaseSearchResult, error) {
+	return nil, nil
+}
+func (f *fakeSource) LookupAlbum(context.Context, string) (*port.AlbumDetail, error) {
+	return nil, nil
+}
+func (f *fakeSource) LookupArtist(context.Context, string) (*port.ArtistLookupDetail, error) {
+	return nil, nil
 }
 
 // fullCand builds a candidate carrying every field.

@@ -253,7 +253,13 @@ func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) (*metadata.R
 		logger.Info("[scanner] no last-good registry, falling back to defaults")
 	}
 
-	registry := metadata.BuildRegistry(mbCfg, s.neteaseProvider, neteaseEnabled, s.umRepo)
+	var sources []port.MetadataSource
+	sources = append(sources, metadata.NewMBSource(mbCfg))
+	if neteaseEnabled && s.neteaseProvider != nil {
+		sources = append(sources, metadata.NewNeteaseSource(s.neteaseProvider, true))
+	}
+	sources = append(sources, metadata.NewUserSource(s.umRepo))
+	registry := metadata.BuildRegistry(sources...)
 	if names := sourceNames(registry.Sources()); len(names) > 0 {
 		logger.Info("[scanner] metadata sources: %s", strings.Join(names, ", "))
 	}
