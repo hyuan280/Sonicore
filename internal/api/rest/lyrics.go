@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/lyrics"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
@@ -27,13 +28,13 @@ func NewLyricsHandler(db *sql.DB, lyricsStore *lyrics.Store) *LyricsHandler {
 func (h *LyricsHandler) GetLyrics(w http.ResponseWriter, r *http.Request) {
 	trackID := r.URL.Query().Get("trackid")
 	if trackID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing trackid parameter"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLyricsTrackIDRequired)
 		return
 	}
 
 	track, err := h.trackRepo.FindByID(r.Context(), trackID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "track not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrMetaTrackNotFound)
 		return
 	}
 
@@ -69,26 +70,26 @@ type updateLyricsReq struct {
 func (h *LyricsHandler) UpdateLyrics(w http.ResponseWriter, r *http.Request) {
 	var req updateLyricsReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 	if req.TrackID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing trackid"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLyricsTrackIDRequired)
 		return
 	}
 
 	_, err := h.trackRepo.FindByID(r.Context(), req.TrackID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "track not found"})
+			writeCodedError(w, http.StatusNotFound, domain.ErrMetaTrackNotFound)
 		} else {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load track"})
+			writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		}
 		return
 	}
 
 	if err := h.trackRepo.UpdateLyricsOffset(r.Context(), req.TrackID, req.Offset); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update lyrics offset"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLyricsUpdateOffsetFailed)
 		return
 	}
 

@@ -64,18 +64,18 @@ type addMemberRequest struct {
 func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req createLibraryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLibNameRequired)
 		return
 	}
 
@@ -83,7 +83,7 @@ func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = "database"
 	} else if mode != "database" && mode != "sidecar" && mode != "both" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata_storage_mode must be database, sidecar, or both"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLibInvalidStorageMode)
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.libraryRepo.Create(r.Context(), lib); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create library"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibCreateFailed)
 		return
 	}
 
@@ -117,13 +117,13 @@ func (h *LibraryHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *LibraryHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	libraries, err := h.libraryRepo.FindByUserID(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list libraries"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibListFailed)
 		return
 	}
 	if libraries == nil {
@@ -138,7 +138,7 @@ func (h *LibraryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	libID := mux.Vars(r)["id"]
 
 	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibAccessDenied)
 		return
 	}
 
@@ -151,7 +151,7 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	libID := mux.Vars(r)["id"]
 
 	if !h.perm.IsOwner(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the owner can delete a library"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNotOwner)
 		return
 	}
 
@@ -217,7 +217,7 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.libraryRepo.Delete(r.Context(), libID); err != nil {
 		logger.Error("[library] delete %s failed: %v", libID, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete library"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibDeleteFailed)
 		return
 	}
 
@@ -288,13 +288,13 @@ func (h *LibraryHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	libID := mux.Vars(r)["id"]
 
 	if !h.perm.IsOwner(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the owner can manage members"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNotOwner)
 		return
 	}
 
 	var req addMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -303,7 +303,7 @@ func (h *LibraryHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 	validRoles := map[string]bool{"admin": true, "contributor": true, "viewer": true}
 	if !validRoles[req.Role] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role must be admin, contributor, or viewer"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLibInvalidRole)
 		return
 	}
 
@@ -315,7 +315,7 @@ func (h *LibraryHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.libraryRepo.AddMember(r.Context(), member); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to add member"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibAddMemberFailed)
 		return
 	}
 
@@ -328,18 +328,18 @@ func (h *LibraryHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	targetID := mux.Vars(r)["userId"]
 
 	if !h.perm.IsOwner(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the owner can manage members"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNotOwner)
 		return
 	}
 
 	lib, _ := h.libraryRepo.FindByID(r.Context(), libID)
 	if lib != nil && targetID == lib.OwnerID {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot remove the owner"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLibCannotRemoveOwner)
 		return
 	}
 
 	if err := h.libraryRepo.RemoveMember(r.Context(), libID, targetID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to remove member"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibRemoveMemberFailed)
 		return
 	}
 
@@ -352,13 +352,13 @@ func (h *LibraryHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request
 	targetID := mux.Vars(r)["userId"]
 
 	if !h.perm.IsOwner(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the owner can manage members"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNotOwner)
 		return
 	}
 
 	lib, _ := h.libraryRepo.FindByID(r.Context(), libID)
 	if lib != nil && targetID == lib.OwnerID {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot change the owner's role"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLibChangeOwnerRole)
 		return
 	}
 
@@ -366,17 +366,17 @@ func (h *LibraryHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request
 		Role string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 	validRoles := map[string]bool{"admin": true, "contributor": true, "viewer": true}
 	if !validRoles[req.Role] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role must be admin, contributor, or viewer"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrLibInvalidRole)
 		return
 	}
 
 	if err := h.libraryRepo.UpdateMemberRole(r.Context(), libID, targetID, req.Role); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update role"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibUpdateRoleFailed)
 		return
 	}
 
@@ -388,13 +388,13 @@ func (h *LibraryHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	libID := mux.Vars(r)["id"]
 
 	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibAccessDenied)
 		return
 	}
 
 	members, err := h.libraryRepo.GetMembers(r.Context(), libID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list members"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrLibListMembersFailed)
 		return
 	}
 	if members == nil {

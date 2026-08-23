@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/sonicore/server/internal/api/middleware"
+	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/download"
 )
 
@@ -31,29 +32,29 @@ type createDownloadRequest struct {
 func (h *DownloadHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req createDownloadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	if req.URL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrDownloadURLRequired)
 		return
 	}
 
 	if req.LibraryID != "" && !h.perm.HasRole(r.Context(), req.LibraryID, userID, middleware.RoleContributor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "need contributor role or higher"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNeedContributor)
 		return
 	}
 
 	job, err := h.manager.CreateJob(r.Context(), req.URL, req.LibraryID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -65,7 +66,7 @@ func (h *DownloadHandler) List(w http.ResponseWriter, r *http.Request) {
 	libID := mux.Vars(r)["id"]
 
 	if !h.perm.IsMember(r.Context(), libID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibAccessDenied)
 		return
 	}
 
@@ -79,12 +80,12 @@ func (h *DownloadHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	job, err := h.manager.Get(r.Context(), jobID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrDownloadJobNotFound)
 		return
 	}
 
 	if !h.perm.IsMember(r.Context(), job.LibraryID, userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibAccessDenied)
 		return
 	}
 
@@ -97,12 +98,12 @@ func (h *DownloadHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 	job, err := h.manager.Get(r.Context(), jobID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrDownloadJobNotFound)
 		return
 	}
 
 	if !h.perm.HasRole(r.Context(), job.LibraryID, userID, middleware.RoleContributor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "need contributor role"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNeedContributor)
 		return
 	}
 

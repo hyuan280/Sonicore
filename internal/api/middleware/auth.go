@@ -2,12 +2,22 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/auth"
 )
+
+func writeCodedError(w http.ResponseWriter, status int, code domain.ErrorCode) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": code.DefaultMessage(),
+		"code":  int(code),
+	})
+}
 
 type ctxKey string
 
@@ -22,19 +32,19 @@ func AuthMiddleware(jwtService *auth.JWTService) func(http.Handler) http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				writeCodedError(w, http.StatusUnauthorized, domain.ErrMissingAuthHeader)
 				return
 			}
 
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 			if tokenStr == authHeader {
-				http.Error(w, `{"error":"invalid authorization format"}`, http.StatusUnauthorized)
+				writeCodedError(w, http.StatusUnauthorized, domain.ErrInvalidAuthFormat)
 				return
 			}
 
 			claims, err := jwtService.Validate(tokenStr)
 			if err != nil {
-				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				writeCodedError(w, http.StatusUnauthorized, domain.ErrInvalidToken)
 				return
 			}
 

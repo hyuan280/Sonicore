@@ -12,6 +12,9 @@ package domain
 //	400 – 499  metadata
 //	500 – 599  jukebox
 //	600 – 699  stream
+//	700 – 799  platform
+//	800 – 899  admin
+//	900 – 999  download
 type ErrorCode int
 
 // ---- common (1-99) ----
@@ -67,6 +70,7 @@ const (
 	ErrLibChangeOwnerRole    ErrorCode = 211
 	ErrLibUpdateRoleFailed   ErrorCode = 212
 	ErrLibListMembersFailed  ErrorCode = 213
+	ErrLibDeleteFailed       ErrorCode = 214
 )
 
 // ---- user (300-399) ----
@@ -88,14 +92,25 @@ const (
 // ---- metadata (400-499) ----
 
 const (
-	ErrMetaFileHashRequired ErrorCode = 400
-	ErrMetaTitleRequired    ErrorCode = 401
-	ErrMetaInvalidRequest   ErrorCode = 402
-	ErrMetaTrackNotFound    ErrorCode = 403
-	ErrMetaUpdateTrack      ErrorCode = 404
-	ErrMetaProbeFile        ErrorCode = 405
-	ErrMetaNameRequired     ErrorCode = 406
-	ErrMetaSaveAlbums       ErrorCode = 407
+	ErrMetaFileHashRequired     ErrorCode = 400
+	ErrMetaTitleRequired        ErrorCode = 401
+	ErrMetaInvalidRequest       ErrorCode = 402
+	ErrMetaTrackNotFound        ErrorCode = 403
+	ErrMetaUpdateTrack          ErrorCode = 404
+	ErrMetaProbeFile            ErrorCode = 405
+	ErrMetaNameRequired         ErrorCode = 406
+	ErrMetaSaveAlbums           ErrorCode = 407
+	ErrMetaUnsupportedSource    ErrorCode = 408
+	ErrMetaLookupEnrichment     ErrorCode = 409
+	ErrMetaIdentifyTrack        ErrorCode = 410
+	ErrMetaUpdateArtists        ErrorCode = 411
+	ErrMetaUpdateAlbum          ErrorCode = 412
+	ErrMetaDeleteCovers         ErrorCode = 413
+	ErrMetaSourceRequired       ErrorCode = 414
+	ErrMetaNotFoundInSource     ErrorCode = 415
+	ErrMetaUpdateAlbumYearGenre ErrorCode = 416
+	ErrLyricsTrackIDRequired    ErrorCode = 417
+	ErrLyricsUpdateOffsetFailed ErrorCode = 418
 )
 
 // ---- jukebox (500-599) ----
@@ -136,6 +151,31 @@ const (
 	ErrPlatUpstream        ErrorCode = 703
 )
 
+// ---- admin (800-899) ----
+
+const (
+	ErrAdminListUsers        ErrorCode = 800
+	ErrAdminInvalidRole      ErrorCode = 801
+	ErrAdminActorNotFound    ErrorCode = 802
+	ErrAdminTargetNotFound   ErrorCode = 803
+	ErrAdminChangeSuperAdmin ErrorCode = 804
+	ErrAdminManageAdmin      ErrorCode = 805
+	ErrAdminUpdateRole       ErrorCode = 806
+	ErrAdminCookieConflict   ErrorCode = 807
+	ErrAdminStoreCookie      ErrorCode = 808
+	ErrAdminInvalidLogLevel  ErrorCode = 809
+	ErrAdminSaveSettings     ErrorCode = 810
+	ErrAdminReadDirectory    ErrorCode = 811
+	ErrAdminAccessRequired   ErrorCode = 812
+)
+
+// ---- download (900-999) ----
+
+const (
+	ErrDownloadURLRequired ErrorCode = 900
+	ErrDownloadJobNotFound ErrorCode = 901
+)
+
 // Category returns the category label for the error code's range.
 func (c ErrorCode) Category() string {
 	switch {
@@ -155,6 +195,10 @@ func (c ErrorCode) Category() string {
 		return "stream"
 	case c >= 700 && c <= 799:
 		return "platform"
+	case c >= 800 && c <= 899:
+		return "admin"
+	case c >= 900 && c <= 999:
+		return "download"
 	default:
 		return "common"
 	}
@@ -261,6 +305,33 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrPlatInvalidID:            "INVALID_PLATFORM_ID",
 	ErrPlatUnsupportedType:      "UNSUPPORTED_SEARCH_TYPE",
 	ErrPlatUpstream:             "PLATFORM_UPSTREAM_ERROR",
+	ErrLibDeleteFailed:          "DELETE_LIBRARY_FAILED",
+	ErrMetaUnsupportedSource:    "UNSUPPORTED_METADATA_SOURCE",
+	ErrMetaLookupEnrichment:     "LOOKUP_ENRICHMENT_FAILED",
+	ErrMetaIdentifyTrack:        "IDENTIFY_TRACK_FAILED",
+	ErrMetaUpdateArtists:        "UPDATE_ARTISTS_FAILED",
+	ErrMetaUpdateAlbum:          "UPDATE_ALBUM_FAILED",
+	ErrMetaDeleteCovers:         "DELETE_COVERS_FAILED",
+	ErrMetaSourceRequired:       "SOURCE_REQUIRED",
+	ErrMetaNotFoundInSource:     "NOT_FOUND_IN_SOURCE",
+	ErrMetaUpdateAlbumYearGenre: "UPDATE_ALBUM_YEAR_GENRE_FAILED",
+	ErrLyricsTrackIDRequired:    "LYRICS_TRACK_ID_REQUIRED",
+	ErrLyricsUpdateOffsetFailed: "LYRICS_UPDATE_OFFSET_FAILED",
+	ErrAdminListUsers:           "ADMIN_LIST_USERS_FAILED",
+	ErrAdminInvalidRole:         "ADMIN_INVALID_ROLE",
+	ErrAdminActorNotFound:       "ADMIN_ACTOR_NOT_FOUND",
+	ErrAdminTargetNotFound:      "ADMIN_TARGET_NOT_FOUND",
+	ErrAdminChangeSuperAdmin:    "ADMIN_CHANGE_SUPER_ADMIN",
+	ErrAdminManageAdmin:         "ADMIN_MANAGE_ADMIN",
+	ErrAdminUpdateRole:          "ADMIN_UPDATE_ROLE_FAILED",
+	ErrAdminCookieConflict:      "ADMIN_COOKIE_CONFLICT",
+	ErrAdminStoreCookie:         "ADMIN_STORE_COOKIE_FAILED",
+	ErrAdminInvalidLogLevel:     "ADMIN_INVALID_LOG_LEVEL",
+	ErrAdminSaveSettings:        "ADMIN_SAVE_SETTINGS_FAILED",
+	ErrAdminReadDirectory:       "ADMIN_READ_DIRECTORY_FAILED",
+	ErrAdminAccessRequired:      "ADMIN_ACCESS_REQUIRED",
+	ErrDownloadURLRequired:      "DOWNLOAD_URL_REQUIRED",
+	ErrDownloadJobNotFound:      "DOWNLOAD_JOB_NOT_FOUND",
 }
 
 // errorCodeMessages maps each code to its default English fallback message.
@@ -347,4 +418,31 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrPlatInvalidID:            "Invalid resource id",
 	ErrPlatUnsupportedType:      "Unsupported search type",
 	ErrPlatUpstream:             "Upstream platform error",
+	ErrLibDeleteFailed:          "Failed to delete library",
+	ErrMetaUnsupportedSource:    "Unsupported metadata source",
+	ErrMetaLookupEnrichment:     "Failed to lookup enrichment data",
+	ErrMetaIdentifyTrack:        "Failed to identify track",
+	ErrMetaUpdateArtists:        "Failed to update artists",
+	ErrMetaUpdateAlbum:          "Failed to update album",
+	ErrMetaDeleteCovers:         "Failed to delete old covers",
+	ErrMetaSourceRequired:       "Source is required when external_id is provided",
+	ErrMetaNotFoundInSource:     "Not found in source",
+	ErrMetaUpdateAlbumYearGenre: "Failed to update album year/genre",
+	ErrLyricsTrackIDRequired:    "Track ID is required",
+	ErrLyricsUpdateOffsetFailed: "Failed to update lyrics offset",
+	ErrAdminListUsers:           "Failed to list users",
+	ErrAdminInvalidRole:         "Invalid role, must be admin or user",
+	ErrAdminActorNotFound:       "Actor not found",
+	ErrAdminTargetNotFound:      "Target user not found",
+	ErrAdminChangeSuperAdmin:    "Cannot change super admin role",
+	ErrAdminManageAdmin:         "Admins cannot manage other admins",
+	ErrAdminUpdateRole:          "Failed to update role",
+	ErrAdminCookieConflict:      "Cannot set and clear the cookie in one request",
+	ErrAdminStoreCookie:         "Failed to store cookie",
+	ErrAdminInvalidLogLevel:     "Invalid log level, must be one of: debug, info, warn, warning, error",
+	ErrAdminSaveSettings:        "Failed to save settings",
+	ErrAdminReadDirectory:       "Failed to read directory",
+	ErrAdminAccessRequired:      "Admin access required",
+	ErrDownloadURLRequired:      "URL is required",
+	ErrDownloadJobNotFound:      "Download job not found",
 }

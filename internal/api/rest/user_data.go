@@ -40,7 +40,7 @@ func NewUserDataHandler(db *sql.DB) *UserDataHandler {
 func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			 LIMIT $2 OFFSET $3`, userID, perPage, offset)
 		}
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+			writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 			return
 		}
 		defer rows.Close()
@@ -191,7 +191,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			"SELECT item_type, item_id, created_at FROM favorites WHERE user_id = $1 AND ($2 = '' OR item_type = $2) ORDER BY created_at DESC",
 			userID, itemType)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+			writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 			return
 		}
 		defer rows.Close()
@@ -218,13 +218,13 @@ type favoritesRequest struct {
 func (h *UserDataHandler) AddFavorites(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req favoritesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -241,7 +241,7 @@ func (h *UserDataHandler) AddFavorites(w http.ResponseWriter, r *http.Request) {
 				`INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at)
 				 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
 				userID, req.ItemType, tid, libID, now); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 				return
 			}
 		}
@@ -253,13 +253,13 @@ func (h *UserDataHandler) AddFavorites(w http.ResponseWriter, r *http.Request) {
 func (h *UserDataHandler) RemoveFavorites(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req favoritesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -278,7 +278,7 @@ func (h *UserDataHandler) RemoveFavorites(w http.ResponseWriter, r *http.Request
 func (h *UserDataHandler) CheckFavorites(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -286,7 +286,7 @@ func (h *UserDataHandler) CheckFavorites(w http.ResponseWriter, r *http.Request)
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -316,7 +316,7 @@ func (h *UserDataHandler) CheckFavorites(w http.ResponseWriter, r *http.Request)
 func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 	page, perPage := parsePagination(r)
@@ -383,7 +383,7 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 			userID, perPage, offset)
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 		return
 	}
 	defer rows.Close()
@@ -427,7 +427,7 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -435,7 +435,7 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 		TrackID string `json:"track_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -447,7 +447,7 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT library_id FROM tracks WHERE id = $1", req.TrackID).Scan(&libID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "track not found"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserTrackNotFound)
 		return
 	}
 
@@ -455,7 +455,7 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO play_history (id, user_id, track_id, library_id, played_at)
 		 VALUES ($1, $2, $3, $4, $5)`,
 		domain.NewID(), userID, req.TrackID, libID, now); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 		return
 	}
 
@@ -465,7 +465,7 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 func (h *UserDataHandler) RemoveHistoryItems(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -473,7 +473,7 @@ func (h *UserDataHandler) RemoveHistoryItems(w http.ResponseWriter, r *http.Requ
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 	h.db.ExecContext(r.Context(),
@@ -487,7 +487,7 @@ func (h *UserDataHandler) RemoveHistoryItems(w http.ResponseWriter, r *http.Requ
 func (h *UserDataHandler) ListPlaylists(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -495,7 +495,7 @@ func (h *UserDataHandler) ListPlaylists(w http.ResponseWriter, r *http.Request) 
 		"SELECT id, name, track_ids, is_public, created_at FROM playlists WHERE owner_id = $1 ORDER BY name",
 		userID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 		return
 	}
 	defer rows.Close()
@@ -520,7 +520,7 @@ func (h *UserDataHandler) ListPlaylists(w http.ResponseWriter, r *http.Request) 
 func (h *UserDataHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -528,7 +528,7 @@ func (h *UserDataHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request)
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -538,7 +538,7 @@ func (h *UserDataHandler) CreatePlaylist(w http.ResponseWriter, r *http.Request)
 		"INSERT INTO playlists (id, name, owner_id, track_ids, is_public, created_at, updated_at) VALUES ($1, $2, $3, '[]', false, $4, $4)",
 		id, req.Name, userID, now)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create failed: " + err.Error()})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 		return
 	}
 
@@ -565,7 +565,7 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 		"SELECT name, track_ids, created_at FROM playlists WHERE id = $1 AND owner_id = $2",
 		plID, userID).Scan(&name, &trackIDsJSON, &createdAt)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
 		return
 	}
 
@@ -689,7 +689,7 @@ func (h *UserDataHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if req.TrackID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track_id required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrUserTrackIDRequired)
 		return
 	}
 
@@ -796,14 +796,14 @@ func (h *UserDataHandler) RemoveTracksFromPlaylist(w http.ResponseWriter, r *htt
 func (h *UserDataHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	rows, err := h.db.QueryContext(r.Context(),
 		"SELECT key, value FROM user_settings WHERE user_id = $1", userID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 		return
 	}
 	defer rows.Close()
@@ -821,13 +821,13 @@ func (h *UserDataHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 func (h *UserDataHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -853,13 +853,13 @@ type queuePayload struct {
 func (h *UserDataHandler) SaveQueue(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req queuePayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -891,7 +891,7 @@ type trackSummary struct {
 func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -928,7 +928,7 @@ func (h *UserDataHandler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		 WHERE t.id = ANY($1)
 		 ORDER BY array_position($1::text[], t.id)`, pq.Array(q.TrackIDs))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 		return
 	}
 	defer rows.Close()

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/sonicore/server/internal/core/domain"
 )
 
 type rateLimiter struct {
@@ -71,7 +73,7 @@ func RateLimitMiddleware(limiter *rateLimiter) func(http.Handler) http.Handler {
 			key := ClientIP(r)
 			if !limiter.allow(key) {
 				w.Header().Set("Retry-After", "60")
-				http.Error(w, `{"error":"too many requests"}`, http.StatusTooManyRequests)
+				writeCodedError(w, http.StatusTooManyRequests, domain.ErrTooManyRequests)
 				return
 			}
 			next.ServeHTTP(w, r)

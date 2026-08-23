@@ -800,7 +800,12 @@ export default function SettingsPage() {
                                 track_id: trk.id,
                               }),
                             });
-                            setSearchModal({ track: trk, result: await res.json(), edit: {} });
+                            const result = await res.json();
+                            if (!res.ok) {
+                              setSearchModal({ track: trk, error: translateApiError(t, result) });
+                            } else {
+                              setSearchModal({ track: trk, result, edit: {} });
+                            }
                           } catch {
                             setSearchModal({ track: trk, error: t("settings.searchFailed") });
                           }
@@ -995,7 +1000,7 @@ function SearchResultModal({
       const result = await res.json();
       if (!res.ok) {
         setExtIDError(true);
-        setSaveError(result.error || "Search failed");
+        setSaveError(translateApiError(tModal, result));
         setExtIDSearching(false);
         return;
       }
@@ -1116,7 +1121,7 @@ function SearchResultModal({
               onClick={async () => {
                 setReidentifying(true);
                 try {
-                  await fetch("/api/metadata/reidentify", {
+                  const res = await fetch("/api/metadata/reidentify", {
                     method: "POST",
                     headers: {
                       "Content-Type": "application/json",
@@ -1127,6 +1132,12 @@ function SearchResultModal({
                       file_hash: data.result?.file_hash || data.track?.file_hash || "",
                     }),
                   });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    setSaveError(translateApiError(tModal, err));
+                    setReidentifying(false);
+                    return;
+                  }
                   onSaved?.();
                   onClose();
                 } catch (e) {

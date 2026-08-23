@@ -146,7 +146,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		} `json:"albums"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FileHash == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file_hash required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaFileHashRequired)
 		return
 	}
 
@@ -155,14 +155,14 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// and version grouping.
 	reg := h.newRegistry(r.Context())
 	if req.Source != "" && !isValidSource(utils.NormalizeSource(req.Source), reg) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported metadata source"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaUnsupportedSource)
 		return
 	}
 	for i := range req.Artists {
 		if req.Artists[i].Source != "" {
 			src := utils.NormalizeSource(req.Artists[i].Source)
 			if !isValidSource(src, reg) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported artist metadata source"})
+				writeCodedError(w, http.StatusBadRequest, domain.ErrMetaUnsupportedSource)
 				return
 			}
 			req.Artists[i].Source = src
@@ -172,7 +172,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		if req.Albums[i].Source != "" {
 			src := utils.NormalizeSource(req.Albums[i].Source)
 			if !isValidSource(src, reg) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported album metadata source"})
+				writeCodedError(w, http.StatusBadRequest, domain.ErrMetaUnsupportedSource)
 				return
 			}
 			req.Albums[i].Source = src
@@ -287,7 +287,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		Genre:          req.Genre,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
 	}
 
@@ -346,7 +346,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := h.trackRepo.Update(r.Context(), track); err != nil {
 				logger.Error("[metadata] save track update error: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateTrack)
 				return
 			}
 
@@ -504,7 +504,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				if err := h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, trackAlbums); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to save albums: %v", err)})
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaSaveAlbums)
 					return
 				}
 				// Backfill covers for newly associated albums that lack one
@@ -532,7 +532,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 						if updated {
 							if err := h.albumRepo.Update(r.Context(), album); err != nil {
 								logger.Error("[metadata] save year/genre: Update error: %v", err)
-								writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album year/genre"})
+								writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateAlbumYearGenre)
 								return
 							}
 						}
@@ -621,7 +621,7 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 				if oldExtID != saved.ExternalID && saved.CoverImageID != nil {
 					if err := h.covers.DeleteTrackCovers(r.Context(), saved.LibraryID, saved.ID); err != nil {
 						logger.Info("[metadata] save delete old cover for %s: %v", saved.ID, err)
-						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete old covers"})
+						writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaDeleteCovers)
 						return
 					}
 					saved.CoverImageID = nil
@@ -674,7 +674,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		Source     string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaInvalidRequest)
 		return
 	}
 
@@ -725,7 +725,7 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 					result, err := h.lookupEnrichment(r.Context(), source, track.ExternalID)
 					if err != nil {
 						logger.Error("[metadata] SearchTrack lookupEnrichment error: %v", err)
-						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lookup enrichment data"})
+						writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaLookupEnrichment)
 						return
 					}
 					if result != nil {
@@ -784,14 +784,14 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 	// the id against the wrong resolver (e.g. a NetEase id hitting MusicBrainz).
 	if req.ExternalID != "" {
 		if req.Source == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source required when external_id is provided"})
+			writeCodedError(w, http.StatusBadRequest, domain.ErrMetaSourceRequired)
 			return
 		}
 		source := sourceOrDefaultSource(utils.NormalizeSource(req.Source))
 		result, err := h.lookupEnrichment(r.Context(), source, req.ExternalID)
 		if err != nil {
 			logger.Error("[metadata] SearchTrack lookupEnrichment error: %v", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lookup enrichment data"})
+			writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaLookupEnrichment)
 			return
 		}
 		if result != nil {
@@ -822,12 +822,12 @@ func (h *MetadataHandler) SearchTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track_id or external_id required"})
+	writeCodedError(w, http.StatusBadRequest, domain.ErrMetaInvalidRequest)
 }
 func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -837,12 +837,12 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 		Source     string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TrackID == "" || req.ExternalID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "need track_id and external_id"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaInvalidRequest)
 		return
 	}
 	track, err := h.trackRepo.FindByID(r.Context(), req.TrackID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "track not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrMetaTrackNotFound)
 		return
 	}
 
@@ -855,11 +855,11 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 	result, err := h.lookupEnrichment(r.Context(), source, req.ExternalID)
 	if err != nil {
 		logger.Error("[metadata] Identify lookupEnrichment error: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lookup enrichment data"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaLookupEnrichment)
 		return
 	}
 	if result == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found in source " + source})
+		writeCodedError(w, http.StatusNotFound, domain.ErrMetaNotFoundInSource)
 		return
 	}
 
@@ -878,7 +878,7 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 		track.Title = metadata.TrimParenSuffix(result.Title)
 	}
 	if err := h.trackRepo.Update(r.Context(), track); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateTrack)
 		return
 	}
 
@@ -954,7 +954,7 @@ func (h *MetadataHandler) Identify(w http.ResponseWriter, r *http.Request) {
 func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -963,7 +963,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 		FileHash string `json:"file_hash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TrackID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "need track_id"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaInvalidRequest)
 		return
 	}
 
@@ -974,14 +974,14 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 
 	track, err := h.trackRepo.FindByID(r.Context(), req.TrackID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "track not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrMetaTrackNotFound)
 		return
 	}
 
 	// Probe the file to get fresh metadata (same as scanner flow)
 	meta, err := metadata.Probe(track.FilePath)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to probe file"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaProbeFile)
 		return
 	}
 	meta.TitleFromFilename = true
@@ -997,7 +997,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 	candidate, err := registry.Identify(r.Context(), q)
 	if err != nil {
 		logger.Error("[metadata] Reidentify Identify error: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to identify track"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaIdentifyTrack)
 		return
 	}
 	enrichment := metadata.CandidateToEnrichment(candidate)
@@ -1053,7 +1053,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			// replaces — either way, a failure rolls back the entire operation.
 			if err := h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, newArtists); err != nil {
 				logger.Error("[metadata] reidentify set artists error: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update artists"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateArtists)
 				return
 			}
 			track.Artists = nil // prevent Update from duplicating the work
@@ -1087,7 +1087,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			// When trackAlbum is nil it only deletes; when non-empty it replaces.
 			if err := h.trackRepo.ReplaceTrackAlbums(r.Context(), track.ID, trackAlbum); err != nil {
 				logger.Error("[metadata] reidentify album: ReplaceTrackAlbums failed: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateAlbum)
 				return
 			}
 			track.Albums = nil // prevent Update from duplicating the work
@@ -1102,7 +1102,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := h.trackRepo.Update(r.Context(), track); err != nil {
 				logger.Error("[metadata] reidentify (changed) update error: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateTrack)
 				return
 			}
 
@@ -1115,7 +1115,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			if h.covers != nil {
 				if err := h.covers.DeleteTrackCovers(r.Context(), track.LibraryID, track.ID); err != nil {
 					logger.Info("[metadata] reidentify delete old covers for %s: %v", track.ID, err)
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete old covers"})
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaDeleteCovers)
 					return
 				}
 			}
@@ -1168,7 +1168,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := h.trackRepo.Update(r.Context(), track); err != nil {
 				logger.Error("[metadata] reidentify (incremental) update error: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateTrack)
 				return
 			}
 
@@ -1179,7 +1179,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 						AlbumID: album.ID, TrackNumber: 1, DiscNumber: 1,
 					}}); err != nil {
 						logger.Error("[metadata] reidentify (incremental) replace albums error: %v", err)
-						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album"})
+						writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateAlbum)
 						return
 					}
 				}
@@ -1213,7 +1213,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := h.trackRepo.Update(r.Context(), track); err != nil {
 			logger.Error("[metadata] reidentify (no-match) update error: %v", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update track"})
+			writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateTrack)
 			return
 		}
 
@@ -1234,7 +1234,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 			if len(newArtists) > 0 {
 				if err := h.trackRepo.ReplaceTrackArtists(r.Context(), track.ID, newArtists); err != nil {
 					logger.Error("[metadata] reidentify (no-match) set artists error: %v", err)
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update artists"})
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateArtists)
 					return
 				}
 			}
@@ -1249,7 +1249,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 					Artist:    unknown,
 				}}); err != nil {
 					logger.Error("[metadata] reidentify (no-match) set unknown artist error: %v", err)
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update artists"})
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateArtists)
 					return
 				}
 			}
@@ -1282,7 +1282,7 @@ func (h *MetadataHandler) Reidentify(w http.ResponseWriter, r *http.Request) {
 				DiscNumber:  1,
 			}}); err != nil {
 				logger.Error("[metadata] reidentify (no-match) replace albums error: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update album"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrMetaUpdateAlbum)
 				return
 			}
 			if album.CoverImageID == nil && album.Title != "Unknown Album" && h.covers != nil {
@@ -1302,7 +1302,7 @@ func (h *MetadataHandler) SearchArtist(w http.ResponseWriter, r *http.Request) {
 		Source string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaNameRequired)
 		return
 	}
 	source := utils.NormalizeSource(req.Source)
@@ -1329,7 +1329,7 @@ func (h *MetadataHandler) SearchRelease(w http.ResponseWriter, r *http.Request) 
 		Source string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrMetaNameRequired)
 		return
 	}
 	source := utils.NormalizeSource(req.Source)

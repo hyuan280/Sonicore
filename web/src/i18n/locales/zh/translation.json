@@ -370,7 +370,8 @@
       "REMOVE_MEMBER_FAILED": "移除成员失败",
       "CANNOT_CHANGE_OWNER_ROLE": "无法更改拥有者的角色",
       "UPDATE_ROLE_FAILED": "更新角色失败",
-      "LIST_MEMBERS_FAILED": "获取成员列表失败"
+      "LIST_MEMBERS_FAILED": "获取成员列表失败",
+      "DELETE_LIBRARY_FAILED": "删除音乐库失败"
     },
     "user": {
       "USER_NOT_FOUND": "用户不存在",
@@ -393,7 +394,18 @@
       "PROBE_FILE_FAILED": "探测文件失败",
       "SAVE_ALBUMS_FAILED": "保存专辑失败",
       "META_TRACK_NOT_FOUND": "曲目不存在",
-      "META_NAME_REQUIRED": "名称不能为空"
+      "META_NAME_REQUIRED": "名称不能为空",
+      "UNSUPPORTED_METADATA_SOURCE": "不支持的元数据来源",
+      "LOOKUP_ENRICHMENT_FAILED": "查询补充数据失败",
+      "IDENTIFY_TRACK_FAILED": "识别曲目失败",
+      "UPDATE_ARTISTS_FAILED": "更新艺术家失败",
+      "UPDATE_ALBUM_FAILED": "更新专辑失败",
+      "DELETE_COVERS_FAILED": "删除旧封面失败",
+      "SOURCE_REQUIRED": "提供外部 ID 时必须指定来源",
+      "NOT_FOUND_IN_SOURCE": "在来源中未找到",
+      "UPDATE_ALBUM_YEAR_GENRE_FAILED": "更新专辑年份/流派失败",
+      "LYRICS_TRACK_ID_REQUIRED": "缺少曲目 ID",
+      "LYRICS_UPDATE_OFFSET_FAILED": "更新歌词偏移失败"
     },
     "jukebox": {
       "DEVICE_NOT_FOUND": "未找到设备配置",
@@ -423,6 +435,25 @@
       "INVALID_PLATFORM_ID": "无效的资源 ID",
       "UNSUPPORTED_SEARCH_TYPE": "不支持的搜索类型",
       "PLATFORM_UPSTREAM_ERROR": "平台服务暂时不可用，请稍后重试。"
+    },
+    "admin": {
+      "ADMIN_LIST_USERS_FAILED": "获取用户列表失败",
+      "ADMIN_INVALID_ROLE": "无效的角色，必须为 admin 或 user",
+      "ADMIN_ACTOR_NOT_FOUND": "操作者不存在",
+      "ADMIN_TARGET_NOT_FOUND": "目标用户不存在",
+      "ADMIN_CHANGE_SUPER_ADMIN": "无法更改超级管理员角色",
+      "ADMIN_MANAGE_ADMIN": "管理员无法管理其他管理员",
+      "ADMIN_UPDATE_ROLE_FAILED": "更新角色失败",
+      "ADMIN_COOKIE_CONFLICT": "无法同时设置和清除 Cookie",
+      "ADMIN_STORE_COOKIE_FAILED": "存储 Cookie 失败",
+      "ADMIN_INVALID_LOG_LEVEL": "无效的日志级别",
+      "ADMIN_SAVE_SETTINGS_FAILED": "保存设置失败",
+      "ADMIN_READ_DIRECTORY_FAILED": "读取目录失败",
+      "ADMIN_ACCESS_REQUIRED": "需要管理员权限"
+    },
+    "download": {
+      "DOWNLOAD_URL_REQUIRED": "URL 不能为空",
+      "DOWNLOAD_JOB_NOT_FOUND": "下载任务不存在"
     }
   },
   "discover": {

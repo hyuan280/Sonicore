@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/sonicore/server/internal/api/middleware"
+	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/service"
 )
 
@@ -29,7 +30,7 @@ func (h *ScanHandler) Start(w http.ResponseWriter, r *http.Request) {
 	libID := mux.Vars(r)["id"]
 
 	if !h.perm.HasRole(r.Context(), libID, userID, middleware.RoleContributor) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "need contributor role or higher"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibNeedContributor)
 		return
 	}
 
@@ -39,7 +40,7 @@ func (h *ScanHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.scanner.StartScan(r.Context(), libID, mode); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		writeCodedError(w, http.StatusConflict, domain.ErrInternal)
 		return
 	}
 

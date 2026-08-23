@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 
+	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 )
 
@@ -76,7 +77,7 @@ func (pc *PermissionChecker) Middleware(required string) func(http.Handler) http
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID := GetUserID(r.Context())
 			if userID == "" {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 				return
 			}
 
@@ -87,7 +88,7 @@ func (pc *PermissionChecker) Middleware(required string) func(http.Handler) http
 			}
 
 			if !pc.HasRole(r.Context(), libID, userID, required) {
-				http.Error(w, `{"error":"insufficient permissions"}`, http.StatusForbidden)
+				writeCodedError(w, http.StatusForbidden, domain.ErrAuthInsufficientPerms)
 				return
 			}
 

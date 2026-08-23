@@ -370,7 +370,8 @@
       "REMOVE_MEMBER_FAILED": "Failed to remove member",
       "CANNOT_CHANGE_OWNER_ROLE": "Cannot change the owner's role",
       "UPDATE_ROLE_FAILED": "Failed to update role",
-      "LIST_MEMBERS_FAILED": "Failed to list members"
+      "LIST_MEMBERS_FAILED": "Failed to list members",
+      "DELETE_LIBRARY_FAILED": "Failed to delete library"
     },
     "user": {
       "USER_NOT_FOUND": "User not found",
@@ -393,7 +394,18 @@
       "PROBE_FILE_FAILED": "Failed to probe file",
       "SAVE_ALBUMS_FAILED": "Failed to save albums",
       "META_TRACK_NOT_FOUND": "Track not found",
-      "META_NAME_REQUIRED": "Name is required"
+      "META_NAME_REQUIRED": "Name is required",
+      "UNSUPPORTED_METADATA_SOURCE": "Unsupported metadata source",
+      "LOOKUP_ENRICHMENT_FAILED": "Failed to lookup enrichment data",
+      "IDENTIFY_TRACK_FAILED": "Failed to identify track",
+      "UPDATE_ARTISTS_FAILED": "Failed to update artists",
+      "UPDATE_ALBUM_FAILED": "Failed to update album",
+      "DELETE_COVERS_FAILED": "Failed to delete old covers",
+      "SOURCE_REQUIRED": "Source is required when external_id is provided",
+      "NOT_FOUND_IN_SOURCE": "Not found in source",
+      "UPDATE_ALBUM_YEAR_GENRE_FAILED": "Failed to update album year/genre",
+      "LYRICS_TRACK_ID_REQUIRED": "Track ID is required",
+      "LYRICS_UPDATE_OFFSET_FAILED": "Failed to update lyrics offset"
     },
     "jukebox": {
       "DEVICE_NOT_FOUND": "Device config not found",
@@ -423,6 +435,25 @@
       "INVALID_PLATFORM_ID": "Invalid resource id",
       "UNSUPPORTED_SEARCH_TYPE": "Unsupported search type",
       "PLATFORM_UPSTREAM_ERROR": "The platform service is temporarily unavailable. Please try again later."
+    },
+    "admin": {
+      "ADMIN_LIST_USERS_FAILED": "Failed to list users",
+      "ADMIN_INVALID_ROLE": "Invalid role, must be admin or user",
+      "ADMIN_ACTOR_NOT_FOUND": "Actor not found",
+      "ADMIN_TARGET_NOT_FOUND": "Target user not found",
+      "ADMIN_CHANGE_SUPER_ADMIN": "Cannot change super admin role",
+      "ADMIN_MANAGE_ADMIN": "Admins cannot manage other admins",
+      "ADMIN_UPDATE_ROLE_FAILED": "Failed to update role",
+      "ADMIN_COOKIE_CONFLICT": "Cannot set and clear the cookie in one request",
+      "ADMIN_STORE_COOKIE_FAILED": "Failed to store cookie",
+      "ADMIN_INVALID_LOG_LEVEL": "Invalid log level",
+      "ADMIN_SAVE_SETTINGS_FAILED": "Failed to save settings",
+      "ADMIN_READ_DIRECTORY_FAILED": "Failed to read directory",
+      "ADMIN_ACCESS_REQUIRED": "Admin access required"
+    },
+    "download": {
+      "DOWNLOAD_URL_REQUIRED": "URL is required",
+      "DOWNLOAD_JOB_NOT_FOUND": "Download job not found"
     }
   },
   "discover": {

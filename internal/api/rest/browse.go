@@ -83,7 +83,7 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if libID := r.URL.Query().Get("libId"); libID != "" {
 		if !h.perm.IsMember(r.Context(), libID, userID) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+			writeCodedError(w, http.StatusForbidden, domain.ErrLibAccessDenied)
 			return
 		}
 		allTracks, err = h.trackRepo.FindByLibraryID(r.Context(), libID)
@@ -96,7 +96,7 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 		allTracks, err = h.trackRepo.FindByLibraryID(r.Context(), ids...)
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load tracks"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
 	}
 
@@ -187,7 +187,7 @@ func (h *DataHandler) Artists(w http.ResponseWriter, r *http.Request) {
 
 	all, err := h.artistRepo.FindAccessible(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load artists"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 
 	artist, err := h.artistRepo.FindByID(r.Context(), artistID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artist not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrNotFound)
 		return
 	}
 
@@ -319,7 +319,7 @@ func (h *DataHandler) Albums(w http.ResponseWriter, r *http.Request) {
 
 	all, err := h.albumRepo.FindAccessible(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load albums"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
 	}
 
@@ -374,7 +374,7 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 
 	album, err := h.albumRepo.FindByID(r.Context(), albumID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "album not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrNotFound)
 		return
 	}
 
@@ -513,7 +513,7 @@ func (h *DataHandler) TracksByIDs(w http.ResponseWriter, r *http.Request) {
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 	if len(req.IDs) == 0 {
@@ -523,7 +523,7 @@ func (h *DataHandler) TracksByIDs(w http.ResponseWriter, r *http.Request) {
 
 	tracks, err := h.trackRepo.FindByIDs(r.Context(), req.IDs)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
 	}
 	if tracks == nil {

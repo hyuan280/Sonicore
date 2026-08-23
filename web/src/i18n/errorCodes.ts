@@ -12,6 +12,8 @@ import type { TFunction } from "i18next";
 // 500 – 599  jukebox
 // 600 – 699  stream
 // 700 – 799  platform
+// 800 – 899  admin
+// 900 – 999  download
 
 export const ERROR_CODES = {
   // ---- common (1-99) ----
@@ -59,6 +61,7 @@ export const ERROR_CODES = {
   CANNOT_CHANGE_OWNER_ROLE: 211,
   UPDATE_ROLE_FAILED: 212,
   LIST_MEMBERS_FAILED: 213,
+  DELETE_LIBRARY_FAILED: 214,
 
   // ---- user (300-399) ----
   USER_NOT_FOUND: 300,
@@ -82,6 +85,17 @@ export const ERROR_CODES = {
   PROBE_FILE_FAILED: 405,
   META_NAME_REQUIRED: 406,
   SAVE_ALBUMS_FAILED: 407,
+  UNSUPPORTED_METADATA_SOURCE: 408,
+  LOOKUP_ENRICHMENT_FAILED: 409,
+  IDENTIFY_TRACK_FAILED: 410,
+  UPDATE_ARTISTS_FAILED: 411,
+  UPDATE_ALBUM_FAILED: 412,
+  DELETE_COVERS_FAILED: 413,
+  SOURCE_REQUIRED: 414,
+  NOT_FOUND_IN_SOURCE: 415,
+  UPDATE_ALBUM_YEAR_GENRE_FAILED: 416,
+  LYRICS_TRACK_ID_REQUIRED: 417,
+  LYRICS_UPDATE_OFFSET_FAILED: 418,
 
   // ---- jukebox (500-599) ----
   JBX_NAME_REQUIRED: 500,
@@ -111,6 +125,25 @@ export const ERROR_CODES = {
   INVALID_PLATFORM_ID: 701,
   UNSUPPORTED_SEARCH_TYPE: 702,
   PLATFORM_UPSTREAM_ERROR: 703,
+
+  // ---- admin (800-899) ----
+  ADMIN_LIST_USERS_FAILED: 800,
+  ADMIN_INVALID_ROLE: 801,
+  ADMIN_ACTOR_NOT_FOUND: 802,
+  ADMIN_TARGET_NOT_FOUND: 803,
+  ADMIN_CHANGE_SUPER_ADMIN: 804,
+  ADMIN_MANAGE_ADMIN: 805,
+  ADMIN_UPDATE_ROLE_FAILED: 806,
+  ADMIN_COOKIE_CONFLICT: 807,
+  ADMIN_STORE_COOKIE_FAILED: 808,
+  ADMIN_INVALID_LOG_LEVEL: 809,
+  ADMIN_SAVE_SETTINGS_FAILED: 810,
+  ADMIN_READ_DIRECTORY_FAILED: 811,
+  ADMIN_ACCESS_REQUIRED: 812,
+
+  // ---- download (900-999) ----
+  DOWNLOAD_URL_REQUIRED: 900,
+  DOWNLOAD_JOB_NOT_FOUND: 901,
 } as const;
 
 const CODE_TO_I18N_KEY: Record<number, string> = {};
@@ -129,6 +162,8 @@ function getCategory(code: number): string {
   if (code <= 599) return "jukebox";
   if (code <= 699) return "stream";
   if (code <= 799) return "platform";
+  if (code <= 899) return "admin";
+  if (code <= 999) return "download";
   return "common";
 }
 

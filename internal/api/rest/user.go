@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sonicore/server/internal/api/middleware"
+	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -30,13 +31,13 @@ func NewUserHandler(db *sql.DB, sessionStore *cache.SessionStore, tokenStore *ca
 func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	user, err := h.userRepo.FindByID(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserNotFound)
 		return
 	}
 
@@ -57,37 +58,37 @@ type updatePasswordRequest struct {
 func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
 	var req updatePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	user, err := h.userRepo.FindByID(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserNotFound)
 		return
 	}
 
 	if !auth.CheckPassword(req.OldPassword, user.PasswordHash) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "wrong password"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrUserWrongPassword)
 		return
 	}
 
 	hash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to hash"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserHashFailed)
 		return
 	}
 
 	user.PasswordHash = hash
 	user.UpdatedAt = time.Now()
 	if err := h.userRepo.Update(r.Context(), user); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update password"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserUpdatePassword)
 		return
 	}
 
@@ -97,7 +98,7 @@ func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) MeRenew(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeCodedError(w, http.StatusUnauthorized, domain.ErrUnauthorized)
 		return
 	}
 
@@ -113,14 +114,14 @@ func (h *UserHandler) MeRenew(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(extErr, cache.ErrClientMismatch) {
 			h.sessionStore.Revoke(r.Context(), req.SessionToken)
 			h.tokenStore.RevokeAll(r.Context(), userID)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "client mismatch, please re-login"})
+			writeCodedError(w, http.StatusUnauthorized, domain.ErrUserClientMismatch)
 			return
 		}
 	}
 
 	sessToken, err := h.sessionStore.Generate(r.Context(), userID, r.UserAgent())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate session"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserSessionGenerate)
 		return
 	}
 

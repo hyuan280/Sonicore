@@ -69,7 +69,7 @@ func (h *AdminHandler) cookieBroken(raw string) bool {
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userRepo.ListAll(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list users"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminListUsers)
 		return
 	}
 
@@ -96,42 +96,42 @@ func (h *AdminHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 
 	var req updateRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
 	newRole := domain.Role(req.Role)
 	if newRole != domain.RoleAdmin && newRole != domain.RoleUser {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role, must be admin or user"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAdminInvalidRole)
 		return
 	}
 
 	actor, err := h.userRepo.FindByID(r.Context(), actorID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "actor not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrAdminActorNotFound)
 		return
 	}
 
 	target, err := h.userRepo.FindByID(r.Context(), targetID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target user not found"})
+		writeCodedError(w, http.StatusNotFound, domain.ErrAdminTargetNotFound)
 		return
 	}
 
 	if target.Role == domain.RoleSuperAdmin {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot change super admin role"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrAdminChangeSuperAdmin)
 		return
 	}
 
 	if actor.Role == domain.RoleAdmin && target.Role == domain.RoleAdmin {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admins cannot manage other admins"})
+		writeCodedError(w, http.StatusForbidden, domain.ErrAdminManageAdmin)
 		return
 	}
 
 	target.Role = newRole
 	target.UpdatedAt = time.Now()
 	if err := h.userRepo.Update(r.Context(), target); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update role"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminUpdateRole)
 		return
 	}
 
@@ -189,7 +189,7 @@ type updateSettingsRequest struct {
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req updateSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
@@ -197,7 +197,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// leaves a partial state behind (settings written, then a 400).
 	if req.NeteaseCookie != nil && req.NeteaseCookieClear != nil &&
 		*req.NeteaseCookieClear && *req.NeteaseCookie != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot set and clear the cookie in one request"})
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAdminCookieConflict)
 		return
 	}
 
@@ -240,7 +240,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			enc, err := h.encryptSecret(*req.NeteaseCookie)
 			if err != nil {
 				logger.Info("[admin] store platforms_netease_cookie: %v", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store cookie"})
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminStoreCookie)
 				return
 			}
 			writes["platforms_netease_cookie"] = enc
@@ -257,7 +257,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LogLevel != nil {
 		if _, ok := logger.ParseLevelOk(*req.LogLevel); !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid log level, must be one of: debug, info, warn, warning, error"})
+			writeCodedError(w, http.StatusBadRequest, domain.ErrAdminInvalidLogLevel)
 			return
 		}
 		writes["log_level"] = *req.LogLevel
@@ -265,7 +265,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.settingsRepo.SetMany(r.Context(), writes); err != nil {
 		logger.Info("[admin] save settings batch: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminSaveSettings)
 		return
 	}
 
@@ -310,7 +310,7 @@ func (h *AdminHandler) ListDirs(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(browseDir)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read directory"})
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminReadDirectory)
 		return
 	}
 
@@ -345,7 +345,7 @@ func AdminOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		roleStr := middleware.GetUserRole(r.Context())
 		if !port.HasPermission(domain.Role(roleStr), port.PermAdminAccess) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin access required"})
+			writeCodedError(w, http.StatusForbidden, domain.ErrAdminAccessRequired)
 			return
 		}
 		next.ServeHTTP(w, r)

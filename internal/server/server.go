@@ -21,6 +21,7 @@ import (
 	"github.com/sonicore/server/internal/api/subsonic"
 	"github.com/sonicore/server/internal/api/ws"
 	"github.com/sonicore/server/internal/config"
+	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/auth"
@@ -35,6 +36,15 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/secrets"
 	"github.com/sonicore/server/internal/infrastructure/transcoder"
 )
+
+func writeCodedError(w http.ResponseWriter, status int, code domain.ErrorCode) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": code.DefaultMessage(),
+		"code":  int(code),
+	})
+}
 
 type Server struct {
 	cfg    *config.Config
@@ -382,11 +392,11 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	r.HandleFunc("/ws/{session}", func(w http.ResponseWriter, r *http.Request) {
 		sessionToken := mux.Vars(r)["session"]
 		if sessionToken == "" {
-			http.Error(w, `{"error":"missing session"}`, http.StatusUnauthorized)
+			writeCodedError(w, http.StatusUnauthorized, domain.ErrStreamMissingSession)
 			return
 		}
 		if _, err := sessionStore.Validate(r.Context(), sessionToken); err != nil {
-			http.Error(w, `{"error":"invalid session"}`, http.StatusUnauthorized)
+			writeCodedError(w, http.StatusUnauthorized, domain.ErrStreamInvalidSession)
 			return
 		}
 		wsHub.Handle(w, r)
