@@ -87,6 +87,25 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User,
 	return scanUser(row)
 }
 
+func (r *UserRepo) FindByRole(ctx context.Context, role domain.Role) ([]domain.User, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE role = $1 ORDER BY created_at ASC", role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []domain.User
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
+			&u.Role, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (r *UserRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", id)
 	return err

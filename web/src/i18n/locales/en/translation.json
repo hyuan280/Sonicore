@@ -245,7 +245,24 @@
     "neteaseCookieShow": "Show or hide cookie",
     "logging": "Logging",
     "logLevel": "Log Level",
-    "logLevelDesc": "Change the log output level at runtime"
+    "logLevelDesc": "Change the log output level at runtime",
+    "notification": "Notification Platforms",
+    "notificationEmail": "Email",
+    "notificationEmailDesc": "SMTP email notifications for scan results and system alerts",
+    "notifSmtpHost": "SMTP Host",
+    "notifSmtpPort": "SMTP Port",
+    "notifUsername": "Username",
+    "notifPassword": "Password",
+    "notifFromAddress": "From Address",
+    "notifFromName": "From Name",
+    "notifTls": "Use TLS",
+    "notifSaving": "Saving...",
+    "notifTest": "Send Test",
+    "notifTesting": "Sending...",
+    "notifTestSuccess": "Test email sent successfully",
+    "notifPasswordKeep": "Keep as is",
+    "notifPasswordClear": "No password",
+    "notifNoEmail": "Please set your email address in Settings first"
   },
   "album": {
     "label": "Album",
@@ -449,11 +466,15 @@
       "ADMIN_INVALID_LOG_LEVEL": "Invalid log level",
       "ADMIN_SAVE_SETTINGS_FAILED": "Failed to save settings",
       "ADMIN_READ_DIRECTORY_FAILED": "Failed to read directory",
-      "ADMIN_ACCESS_REQUIRED": "Admin access required"
+      "ADMIN_ACCESS_REQUIRED": "Admin access required",
+      "ADMIN_ENCRYPT_SECRET_FAILED": "Failed to encrypt secret"
     },
     "download": {
       "DOWNLOAD_URL_REQUIRED": "URL is required",
       "DOWNLOAD_JOB_NOT_FOUND": "Download job not found"
+    },
+    "notification": {
+      "NOTIFICATION_SEND_FAILED": "Notification send failed"
     }
   },
   "discover": {

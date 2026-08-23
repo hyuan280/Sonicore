@@ -14,6 +14,7 @@ import type { TFunction } from "i18next";
 // 700 – 799  platform
 // 800 – 899  admin
 // 900 – 999  download
+// 1000 – 1099  notification
 
 export const ERROR_CODES = {
   // ---- common (1-99) ----
@@ -140,10 +141,14 @@ export const ERROR_CODES = {
   ADMIN_SAVE_SETTINGS_FAILED: 810,
   ADMIN_READ_DIRECTORY_FAILED: 811,
   ADMIN_ACCESS_REQUIRED: 812,
+  ADMIN_ENCRYPT_SECRET_FAILED: 813,
 
   // ---- download (900-999) ----
   DOWNLOAD_URL_REQUIRED: 900,
   DOWNLOAD_JOB_NOT_FOUND: 901,
+
+  // ---- notification (1000-1099) ----
+  NOTIFICATION_SEND_FAILED: 1000,
 } as const;
 
 const CODE_TO_I18N_KEY: Record<number, string> = {};
@@ -164,6 +169,7 @@ function getCategory(code: number): string {
   if (code <= 799) return "platform";
   if (code <= 899) return "admin";
   if (code <= 999) return "download";
+  if (code <= 1099) return "notification";
   return "common";
 }
 

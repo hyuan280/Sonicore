@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"net/http"
@@ -28,7 +29,7 @@ func newAdminHandler(t *testing.T) (*AdminHandler, sqlmock.Sqlmock) {
 	t.Cleanup(func() { db.Close() })
 	enc, err := secrets.New([]byte("0123456789abcdef0123456789abcdef"))
 	require.NoError(t, err)
-	return NewAdminHandler(db, enc), mock
+	return NewAdminHandler(db, enc, func(_ context.Context) {}), mock
 }
 
 func adminUserRow(id, username, role string) *sqlmock.Rows {

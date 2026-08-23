@@ -45,6 +45,7 @@ type ScannerService struct {
 	neteaseProvider *netease.Provider
 	neteaseEnabled  bool
 	covers          *metadata.CoverManager
+	notif           *NotificationService
 
 	mu         sync.RWMutex
 	activeScan map[string]*ScanProgress
@@ -83,7 +84,7 @@ type registryFlight struct {
 // neteaseEnabled is true. covers is the shared cover manager (may be nil; a
 // private one is created then — note that sharing is required to serialize
 // extraction across scanner and HTTP paths).
-func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.MBConfig, mbClient *metadata.MBClient, neteaseProvider *netease.Provider, neteaseEnabled bool, covers *metadata.CoverManager) *ScannerService {
+func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.MBConfig, mbClient *metadata.MBClient, neteaseProvider *netease.Provider, neteaseEnabled bool, covers *metadata.CoverManager, notif *NotificationService) *ScannerService {
 	s := &ScannerService{
 		db:              db,
 		scanRepo:        repository.NewScanJobRepo(db),
@@ -96,6 +97,7 @@ func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.M
 		mbClient:        mbClient,
 		neteaseProvider: neteaseProvider,
 		neteaseEnabled:  neteaseEnabled,
+		notif:           notif,
 		activeScan:      make(map[string]*ScanProgress),
 	}
 	if covers == nil {
@@ -391,6 +393,18 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, en
 
 	logger.Info("[scanner] finished library=%s status=%s new=%d updated=%d deleted=%d errors=%d",
 		libraryID, job.Status, job.NewTracks, job.UpdatedTracks, job.DeletedTracks, len(stats.Errors))
+
+	if s.notif != nil {
+		if err != nil {
+			if nerr := s.notif.NotifyScanFailed(ctx, lib.Name, err.Error()); nerr != nil {
+				logger.Error("[scanner] failed to send scan failure notification: %v", nerr)
+			}
+		} else {
+			if nerr := s.notif.NotifyScanComplete(ctx, job, lib.Name); nerr != nil {
+				logger.Error("[scanner] failed to send scan completion notification: %v", nerr)
+			}
+		}
+	}
 
 	s.mu.Lock()
 	delete(s.activeScan, libraryID)

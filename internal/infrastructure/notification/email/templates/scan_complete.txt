@@ -1,0 +1,8 @@
+Scan Complete — {{.LibraryName}}
+
+New tracks:   {{.NewTracks}}
+Updated:      {{.UpdatedTracks}}
+Deleted:      {{.DeletedTracks}}
+Errors:       {{.Errors}}
+
+{{.Timestamp}}

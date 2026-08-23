@@ -15,6 +15,7 @@ package domain
 //	700 – 799  platform
 //	800 – 899  admin
 //	900 – 999  download
+//	1000 – 1099  notification
 type ErrorCode int
 
 // ---- common (1-99) ----
@@ -167,6 +168,13 @@ const (
 	ErrAdminSaveSettings     ErrorCode = 810
 	ErrAdminReadDirectory    ErrorCode = 811
 	ErrAdminAccessRequired   ErrorCode = 812
+	ErrAdminEncryptSecret    ErrorCode = 813
+)
+
+// ---- notification (1000-1099) ----
+
+const (
+	ErrNotificationSendFailed ErrorCode = 1000
 )
 
 // ---- download (900-999) ----
@@ -199,6 +207,8 @@ func (c ErrorCode) Category() string {
 		return "admin"
 	case c >= 900 && c <= 999:
 		return "download"
+	case c >= 1000 && c <= 1099:
+		return "notification"
 	default:
 		return "common"
 	}
@@ -330,8 +340,10 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrAdminSaveSettings:        "ADMIN_SAVE_SETTINGS_FAILED",
 	ErrAdminReadDirectory:       "ADMIN_READ_DIRECTORY_FAILED",
 	ErrAdminAccessRequired:      "ADMIN_ACCESS_REQUIRED",
+	ErrAdminEncryptSecret:       "ADMIN_ENCRYPT_SECRET_FAILED",
 	ErrDownloadURLRequired:      "DOWNLOAD_URL_REQUIRED",
 	ErrDownloadJobNotFound:      "DOWNLOAD_JOB_NOT_FOUND",
+	ErrNotificationSendFailed:   "NOTIFICATION_SEND_FAILED",
 }
 
 // errorCodeMessages maps each code to its default English fallback message.
@@ -443,6 +455,8 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrAdminSaveSettings:        "Failed to save settings",
 	ErrAdminReadDirectory:       "Failed to read directory",
 	ErrAdminAccessRequired:      "Admin access required",
+	ErrAdminEncryptSecret:       "Failed to encrypt secret",
 	ErrDownloadURLRequired:      "URL is required",
 	ErrDownloadJobNotFound:      "Download job not found",
+	ErrNotificationSendFailed:   "Notification send failed",
 }

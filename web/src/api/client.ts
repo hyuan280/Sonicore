@@ -217,6 +217,14 @@ export const api = {
     deleteDeviceConfig: (id: string) =>
       request(`/api/audio/device/configs/${id}`, { method: "DELETE" }),
   },
+  notifications: {
+    channels: () => request("/api/notifications/channels"),
+    test: (channel: string, to: string[], config?: Record<string, unknown>) =>
+      request("/api/notifications/test", {
+        method: "POST",
+        body: JSON.stringify({ channel, to, config }),
+      }),
+  },
   platform: {
     list: () => request("/api/plat/list"),
     charts: (name: string) => request(`/api/plat/${encodeURIComponent(name)}/charts`),

@@ -1,12 +1,14 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,16 +26,22 @@ type AdminHandler struct {
 	userRepo     *repository.UserRepo
 	settingsRepo *repository.SettingsRepo
 	enc          *secrets.Encryptor
+	reloadNotif  func(ctx context.Context)
 }
 
 // NewAdminHandler builds the admin handler. enc encrypts at-rest secrets
 // (platform cookies) before they are written to the settings DB; a nil
-// Encryptor falls back to plaintext storage.
-func NewAdminHandler(db *sql.DB, enc *secrets.Encryptor) *AdminHandler {
+// Encryptor falls back to plaintext storage. reloadNotif is called after
+// settings are saved so the notification service picks up config changes.
+func NewAdminHandler(db *sql.DB, enc *secrets.Encryptor, reloadNotif func(ctx context.Context)) *AdminHandler {
+	if reloadNotif == nil {
+		reloadNotif = func(_ context.Context) {}
+	}
 	return &AdminHandler{
 		userRepo:     repository.NewUserRepo(db),
 		settingsRepo: repository.NewSettingsRepo(db),
 		enc:          enc,
+		reloadNotif:  reloadNotif,
 	}
 }
 
@@ -157,33 +165,41 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	// but unreadable" — the provider silently degrades to anonymous in the
 	// latter case.
 	cookieBroken := h.cookieBroken(neCookie)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
 		"metadata_musicbrainz_api_url":    mbURL,
 		"metadata_musicbrainz_rate_limit": mbRateLimit,
 		"metadata_netease_enabled":        neEnabled == "true",
 		"platforms_netease_rate_limit":    neRateLimit,
-		// The cookie itself never leaves the server; only its presence is
-		// reported so the credential does not sit in browser state/DOM.
-		"platforms_netease_cookie_set":   neCookie != "" && !cookieBroken,
-		"platforms_netease_cookie_error": cookieBroken,
-		"subsonic_jukebox_id":            subJukebox,
-		"log_level":                      logLevel,
-	})
+		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
+		"platforms_netease_cookie_error":  cookieBroken,
+		"subsonic_jukebox_id":             subJukebox,
+		"log_level":                       logLevel,
+	}
+	h.mergeNotificationSettings(r.Context(), resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type updateSettingsRequest struct {
-	AllowRegistration    *bool   `json:"allow_registration,omitempty"`
-	MusicBrainzEnabled   *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
-	MusicBrainzAPIURL    *string `json:"metadata_musicbrainz_api_url,omitempty"`
-	MusicBrainzRateLimit *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
-	NeteaseEnabled       *bool   `json:"metadata_netease_enabled,omitempty"`
-	NeteaseCookie        *string `json:"platforms_netease_cookie,omitempty"`
-	NeteaseCookieClear   *bool   `json:"platforms_netease_cookie_clear,omitempty"`
-	NeteaseRateLimit     *string `json:"platforms_netease_rate_limit,omitempty"`
-	SubsonicJukeboxID    *string `json:"subsonic_jukebox_id,omitempty"`
-	LogLevel             *string `json:"log_level,omitempty"`
+	AllowRegistration         *bool   `json:"allow_registration,omitempty"`
+	MusicBrainzEnabled        *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
+	MusicBrainzAPIURL         *string `json:"metadata_musicbrainz_api_url,omitempty"`
+	MusicBrainzRateLimit      *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
+	NeteaseEnabled            *bool   `json:"metadata_netease_enabled,omitempty"`
+	NeteaseCookie             *string `json:"platforms_netease_cookie,omitempty"`
+	NeteaseCookieClear        *bool   `json:"platforms_netease_cookie_clear,omitempty"`
+	NeteaseRateLimit          *string `json:"platforms_netease_rate_limit,omitempty"`
+	SubsonicJukeboxID         *string `json:"subsonic_jukebox_id,omitempty"`
+	LogLevel                  *string `json:"log_level,omitempty"`
+	NotificationEmailEnabled  *bool   `json:"notification_email_enabled,omitempty"`
+	NotificationEmailSMTPHost *string `json:"notification_email_smtp_host,omitempty"`
+	NotificationEmailSMTPPort *string `json:"notification_email_smtp_port,omitempty"`
+	NotificationEmailUsername *string `json:"notification_email_username,omitempty"`
+	NotificationEmailPassword *string `json:"notification_email_password,omitempty"`
+	NotificationEmailFromAddr *string `json:"notification_email_from_address,omitempty"`
+	NotificationEmailFromName *string `json:"notification_email_from_name,omitempty"`
+	NotificationEmailTLS      *bool   `json:"notification_email_tls,omitempty"`
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -262,6 +278,61 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		writes["log_level"] = *req.LogLevel
 	}
+	notifDirty := false
+	if req.NotificationEmailEnabled != nil {
+		notifDirty = true
+		val := "false"
+		if *req.NotificationEmailEnabled {
+			val = "true"
+		}
+		writes["notification_email_enabled"] = val
+	}
+	if req.NotificationEmailSMTPHost != nil {
+		notifDirty = true
+		writes["notification_email_smtp_host"] = *req.NotificationEmailSMTPHost
+	}
+	if req.NotificationEmailSMTPPort != nil {
+		notifDirty = true
+		if port, err := strconv.Atoi(*req.NotificationEmailSMTPPort); err != nil || port < 1 || port > 65535 {
+			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+			return
+		}
+		writes["notification_email_smtp_port"] = *req.NotificationEmailSMTPPort
+	}
+	if req.NotificationEmailUsername != nil {
+		notifDirty = true
+		writes["notification_email_username"] = *req.NotificationEmailUsername
+	}
+	if req.NotificationEmailPassword != nil {
+		notifDirty = true
+		if *req.NotificationEmailPassword != "" {
+			enc, err := h.encryptSecret(*req.NotificationEmailPassword)
+			if err != nil {
+				logger.Error("[admin] encrypt notification_email_password: %v", err)
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminEncryptSecret)
+				return
+			}
+			writes["notification_email_password"] = enc
+		} else {
+			writes["notification_email_password"] = ""
+		}
+	}
+	if req.NotificationEmailFromAddr != nil {
+		notifDirty = true
+		writes["notification_email_from_address"] = *req.NotificationEmailFromAddr
+	}
+	if req.NotificationEmailFromName != nil {
+		notifDirty = true
+		writes["notification_email_from_name"] = *req.NotificationEmailFromName
+	}
+	if req.NotificationEmailTLS != nil {
+		notifDirty = true
+		val := "false"
+		if *req.NotificationEmailTLS {
+			val = "true"
+		}
+		writes["notification_email_tls"] = val
+	}
 
 	if err := h.settingsRepo.SetMany(r.Context(), writes); err != nil {
 		logger.Info("[admin] save settings batch: %v", err)
@@ -271,6 +342,10 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	if req.LogLevel != nil {
 		logger.SetLevel(*req.LogLevel)
+	}
+
+	if notifDirty {
+		h.reloadNotif(r.Context())
 	}
 
 	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
@@ -283,7 +358,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
 	cookieBroken := h.cookieBroken(neCookie)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
 		"metadata_musicbrainz_api_url":    mbURL,
@@ -294,7 +369,35 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_cookie_error":  cookieBroken,
 		"subsonic_jukebox_id":             subJukebox,
 		"log_level":                       logLevel,
-	})
+	}
+	h.mergeNotificationSettings(r.Context(), resp)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *AdminHandler) mergeNotificationSettings(ctx context.Context, resp map[string]interface{}) {
+	keys := []string{
+		"notification_email_enabled",
+		"notification_email_smtp_host",
+		"notification_email_smtp_port",
+		"notification_email_username",
+		"notification_email_password",
+		"notification_email_from_address",
+		"notification_email_from_name",
+		"notification_email_tls",
+	}
+	vals, err := h.settingsRepo.GetMany(ctx, keys)
+	if err != nil {
+		logger.Error("[admin] failed to load notification settings: %v", err)
+		return
+	}
+	resp["notification_email_enabled"] = vals["notification_email_enabled"] == "true"
+	resp["notification_email_smtp_host"] = vals["notification_email_smtp_host"]
+	resp["notification_email_smtp_port"] = vals["notification_email_smtp_port"]
+	resp["notification_email_username"] = vals["notification_email_username"]
+	resp["notification_email_password_set"] = vals["notification_email_password"] != ""
+	resp["notification_email_from_address"] = vals["notification_email_from_address"]
+	resp["notification_email_from_name"] = vals["notification_email_from_name"]
+	resp["notification_email_tls"] = vals["notification_email_tls"] == "true"
 }
 
 func (h *AdminHandler) ListDirs(w http.ResponseWriter, r *http.Request) {

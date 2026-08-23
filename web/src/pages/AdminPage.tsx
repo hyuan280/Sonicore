@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { translateApiError } from "../i18n/errorCodes";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { getRole } from "../stores/auth";
+import { getRole, useAuth } from "../stores/auth";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { MetadataProviderCard } from "../components/MetadataProviderCard";
-import { Shield, Users, Trash2, Eye, EyeOff } from "lucide-react";
+import { Shield, Users, Trash2, Eye, EyeOff, Bell } from "lucide-react";
+import type { NotifTestOptions } from "../types";
 
 export default function AdminPage() {
   const { t } = useTranslation();
@@ -38,6 +39,31 @@ export default function AdminPage() {
   const [logLevelInit, setLogLevelInit] = useState("info");
   const [logLevelSaving, setLogLevelSaving] = useState(false);
   const [logLevelError, setLogLevelError] = useState("");
+  const [notifEmailEnabled, setNotifEmailEnabled] = useState(false);
+  const [notifSmtpHost, setNotifSmtpHost] = useState("");
+  const [notifSmtpPort, setNotifSmtpPort] = useState("587");
+  const [notifUsername, setNotifUsername] = useState("");
+  const [notifPassword, setNotifPassword] = useState("");
+  const [notifPasswordAction, setNotifPasswordAction] = useState<"keep" | "set" | "clear">("keep");
+  const [notifPasswordOpen, setNotifPasswordOpen] = useState(false);
+  const [notifFromAddr, setNotifFromAddr] = useState("");
+  const [notifFromName, setNotifFromName] = useState("");
+  const [notifTls, setNotifTls] = useState(true);
+  const [notifInit, setNotifInit] = useState({
+    enabled: false,
+    smtpHost: "",
+    smtpPort: "587",
+    username: "",
+    passwordSet: false,
+    fromAddr: "",
+    fromName: "",
+    tls: true,
+  });
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifModified, setNotifModified] = useState(false);
+  const [notifError, setNotifError] = useState("");
+  const [notifTesting, setNotifTesting] = useState(false);
+  const [notifSuccess, setNotifSuccess] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -71,6 +97,24 @@ export default function AdminPage() {
       });
       setLogLevel(s.log_level || "info");
       setLogLevelInit(s.log_level || "info");
+      setNotifEmailEnabled(s.notification_email_enabled);
+      setNotifSmtpHost(s.notification_email_smtp_host || "");
+      setNotifSmtpPort(s.notification_email_smtp_port || "587");
+      setNotifUsername(s.notification_email_username || "");
+      setNotifPassword("");
+      setNotifFromAddr(s.notification_email_from_address || "");
+      setNotifFromName(s.notification_email_from_name || "");
+      setNotifTls(s.notification_email_tls);
+      setNotifInit({
+        enabled: s.notification_email_enabled,
+        smtpHost: s.notification_email_smtp_host || "",
+        smtpPort: s.notification_email_smtp_port || "587",
+        username: s.notification_email_username || "",
+        passwordSet: s.notification_email_password_set,
+        fromAddr: s.notification_email_from_address || "",
+        fromName: s.notification_email_from_name || "",
+        tls: s.notification_email_tls,
+      });
     } catch (err: any) {
       setError(translateApiError(t, err));
     }
@@ -121,6 +165,17 @@ export default function AdminPage() {
   }
 
   const currentRole = getRole();
+  const currentUser = useAuth((s) => s.user);
+  const passwordRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (passwordRef.current && !passwordRef.current.contains(e.target as Node)) {
+        setNotifPasswordOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <div className="p-6 space-y-6">
@@ -335,6 +390,303 @@ export default function AdminPage() {
           </div>
         </div>
       </MetadataProviderCard>
+
+      <Card className="space-y-3">
+        <h3 className="font-medium flex items-center gap-2">
+          <Bell className="w-4 h-4" /> {t("admin.notification")}
+        </h3>
+
+        <div className="space-y-3 p-3 rounded-lg bg-zinc-800/50">
+          {/* Email toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">{t("admin.notificationEmail")}</p>
+              <p className="text-xs text-zinc-400">{t("admin.notificationEmailDesc")}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notifEmailEnabled}
+              onClick={() => {
+                setNotifEmailEnabled(!notifEmailEnabled);
+                setNotifModified(true);
+              }}
+              disabled={notifSaving}
+              className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${notifEmailEnabled ? "bg-green-600" : "bg-zinc-700"}`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${notifEmailEnabled ? "translate-x-6" : ""}`}
+              />
+            </button>
+          </div>
+
+          {/* SMTP Host */}
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.notifSmtpHost")}</p>
+            <Input
+              value={notifSmtpHost}
+              onChange={(e) => {
+                setNotifSmtpHost(e.target.value);
+                setNotifModified(true);
+              }}
+              placeholder="smtp.example.com"
+              disabled={notifSaving}
+            />
+          </div>
+
+          {/* SMTP Port */}
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.notifSmtpPort")}</p>
+            <Input
+              type="number"
+              min={1}
+              max={65535}
+              value={notifSmtpPort}
+              onChange={(e) => {
+                setNotifSmtpPort(e.target.value);
+                setNotifModified(true);
+              }}
+              placeholder="587"
+              disabled={notifSaving}
+            />
+          </div>
+
+          {/* Username */}
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.notifUsername")}</p>
+            <Input
+              value={notifUsername}
+              onChange={(e) => {
+                setNotifUsername(e.target.value);
+                setNotifModified(true);
+              }}
+              placeholder=""
+              disabled={notifSaving}
+            />
+          </div>
+
+          {/* Password */}
+          <div className="relative" ref={passwordRef}>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.notifPassword")}</p>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={notifPasswordAction === "clear" ? "" : notifPassword}
+              placeholder={(() => {
+                if (notifPasswordAction === "clear") return t("admin.notifPasswordClear");
+                return notifInit.passwordSet ? "********" : "";
+              })()}
+              onFocus={() => {
+                if (notifPasswordAction !== "clear") setNotifPasswordAction("set");
+                setNotifPasswordOpen(true);
+              }}
+              onChange={(e) => {
+                setNotifPassword(e.target.value);
+                setNotifPasswordAction("set");
+                setNotifModified(true);
+              }}
+              disabled={notifSaving}
+            />
+            {notifPasswordOpen && (
+              <div className="absolute z-10 mt-1 w-full rounded-lg bg-zinc-800 border border-zinc-700 shadow-lg overflow-hidden">
+                <button
+                  type="button"
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer ${notifPasswordAction === "keep" ? "text-green-400" : "text-zinc-300"}`}
+                  onClick={() => {
+                    setNotifPasswordAction("keep");
+                    setNotifPasswordOpen(false);
+                    setNotifPassword("");
+                  }}
+                >
+                  {t("admin.notifPasswordKeep")}
+                </button>
+                <button
+                  type="button"
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-zinc-700 cursor-pointer ${notifPasswordAction === "clear" ? "text-red-400" : "text-zinc-300"}`}
+                  onClick={() => {
+                    setNotifPasswordAction("clear");
+                    setNotifPasswordOpen(false);
+                    setNotifPassword("");
+                    setNotifModified(true);
+                  }}
+                >
+                  {t("admin.notifPasswordClear")}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* From Address */}
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.notifFromAddress")}</p>
+            <Input
+              value={notifFromAddr}
+              onChange={(e) => {
+                setNotifFromAddr(e.target.value);
+                setNotifModified(true);
+              }}
+              placeholder="sonicore@example.com"
+              disabled={notifSaving}
+            />
+          </div>
+
+          {/* From Name */}
+          <div>
+            <p className="text-xs text-zinc-400 mb-1">{t("admin.notifFromName")}</p>
+            <Input
+              value={notifFromName}
+              onChange={(e) => {
+                setNotifFromName(e.target.value);
+                setNotifModified(true);
+              }}
+              placeholder="Sonicore"
+              disabled={notifSaving}
+            />
+          </div>
+
+          {/* TLS toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">{t("admin.notifTls")}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notifTls}
+              onClick={() => {
+                setNotifTls(!notifTls);
+                setNotifModified(true);
+              }}
+              disabled={notifSaving}
+              className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${notifTls ? "bg-green-600" : "bg-zinc-700"}`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${notifTls ? "translate-x-6" : ""}`}
+              />
+            </button>
+          </div>
+
+          {notifSuccess && <span className="text-xs text-green-400">{notifSuccess}</span>}
+          {notifError && <span className="text-xs text-red-400">{notifError}</span>}
+
+          {notifModified && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={async () => {
+                  setNotifSaving(true);
+                  setNotifError("");
+                  setNotifSuccess("");
+                  try {
+                    const payload: Record<string, unknown> = {
+                      notification_email_enabled: notifEmailEnabled,
+                      notification_email_smtp_host: notifSmtpHost,
+                      notification_email_smtp_port: notifSmtpPort,
+                      notification_email_username: notifUsername,
+                      notification_email_from_address: notifFromAddr,
+                      notification_email_from_name: notifFromName,
+                      notification_email_tls: notifTls,
+                    };
+                    if (notifPasswordAction === "set" && notifPassword !== "") {
+                      payload.notification_email_password = notifPassword;
+                    } else if (notifPasswordAction === "clear") {
+                      payload.notification_email_password = "";
+                    }
+                    await api.admin.updateSettings(payload);
+                    // buttons disappearing is the success feedback
+                    setNotifModified(false);
+                    const savedPasswordSet = (() => {
+                      if (notifPasswordAction === "clear") return false;
+                      if (notifPasswordAction === "set" && notifPassword !== "") return true;
+                      return notifInit.passwordSet;
+                    })();
+                    setNotifInit({
+                      enabled: notifEmailEnabled,
+                      smtpHost: notifSmtpHost,
+                      smtpPort: notifSmtpPort,
+                      username: notifUsername,
+                      passwordSet: savedPasswordSet,
+                      fromAddr: notifFromAddr,
+                      fromName: notifFromName,
+                      tls: notifTls,
+                    });
+                    setNotifPassword("");
+                    setNotifPasswordAction("keep");
+                  } catch (err: unknown) {
+                    setNotifError(translateApiError(t, err));
+                  } finally {
+                    setNotifSaving(false);
+                  }
+                }}
+                disabled={notifSaving}
+                className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer"
+              >
+                {notifSaving ? t("admin.notifSaving") : t("admin.save")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNotifEmailEnabled(notifInit.enabled);
+                  setNotifSmtpHost(notifInit.smtpHost);
+                  setNotifSmtpPort(notifInit.smtpPort);
+                  setNotifUsername(notifInit.username);
+                  setNotifPassword("");
+                  setNotifPasswordAction("keep");
+                  setNotifPasswordOpen(false);
+                  setNotifFromAddr(notifInit.fromAddr);
+                  setNotifFromName(notifInit.fromName);
+                  setNotifTls(notifInit.tls);
+                  setNotifModified(false);
+                  setNotifError("");
+                  setNotifSuccess("");
+                }}
+                disabled={notifSaving}
+                className="px-3 py-1.5 rounded-lg text-sm bg-zinc-700 text-white hover:bg-zinc-600 disabled:opacity-50 cursor-pointer"
+              >
+                {t("admin.revert")}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setNotifTesting(true);
+                  setNotifError("");
+                  setNotifSuccess("");
+                  try {
+                    const userEmail = currentUser?.email;
+                    if (!userEmail) {
+                      setNotifError(t("admin.notifNoEmail"));
+                      return;
+                    }
+                    const testOpts: NotifTestOptions = {
+                      smtp_host: notifSmtpHost,
+                      smtp_port: notifSmtpPort,
+                      username: notifUsername,
+                      from_address: notifFromAddr,
+                      from_name: notifFromName,
+                      tls: notifTls,
+                    };
+                    if (notifPasswordAction === "set" && notifPassword !== "") {
+                      testOpts.password = notifPassword;
+                    } else if (notifPasswordAction === "clear") {
+                      testOpts.password = "";
+                    }
+                    await api.notifications.test("email", [userEmail], { ...testOpts });
+                    setNotifSuccess(t("admin.notifTestSuccess"));
+                  } catch (err: unknown) {
+                    setNotifError(translateApiError(t, err));
+                  } finally {
+                    setNotifTesting(false);
+                  }
+                }}
+                disabled={notifTesting || !currentUser?.email}
+                className="px-3 py-1.5 rounded-lg text-sm bg-zinc-600 text-white hover:bg-zinc-500 disabled:opacity-50 cursor-pointer"
+              >
+                {notifTesting ? t("admin.notifTesting") : t("admin.notifTest")}
+              </button>
+            </div>
+          )}
+        </div>
+      </Card>
 
       <Card className="space-y-3">
         <h3 className="font-medium flex items-center gap-2">

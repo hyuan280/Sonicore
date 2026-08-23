@@ -245,7 +245,24 @@
     "neteaseCookieShow": "显示或隐藏 Cookie",
     "logging": "日志管理",
     "logLevel": "日志级别",
-    "logLevelDesc": "运行时修改日志输出级别"
+    "logLevelDesc": "运行时修改日志输出级别",
+    "notification": "通知平台",
+    "notificationEmail": "邮箱",
+    "notificationEmailDesc": "SMTP 邮件通知，用于扫描结果和系统告警",
+    "notifSmtpHost": "SMTP 服务器",
+    "notifSmtpPort": "SMTP 端口",
+    "notifUsername": "用户名",
+    "notifPassword": "密码",
+    "notifFromAddress": "发件地址",
+    "notifFromName": "发件人名称",
+    "notifTls": "使用 TLS",
+    "notifSaving": "保存中...",
+    "notifTest": "发送测试",
+    "notifTesting": "发送中...",
+    "notifTestSuccess": "测试邮件发送成功",
+    "notifPasswordKeep": "不更改密码",
+    "notifPasswordClear": "无密码",
+    "notifNoEmail": "请先在设置中绑定邮箱"
   },
   "album": {
     "label": "专辑",
@@ -449,11 +466,15 @@
       "ADMIN_INVALID_LOG_LEVEL": "无效的日志级别",
       "ADMIN_SAVE_SETTINGS_FAILED": "保存设置失败",
       "ADMIN_READ_DIRECTORY_FAILED": "读取目录失败",
-      "ADMIN_ACCESS_REQUIRED": "需要管理员权限"
+      "ADMIN_ACCESS_REQUIRED": "需要管理员权限",
+      "ADMIN_ENCRYPT_SECRET_FAILED": "加密密钥失败"
     },
     "download": {
       "DOWNLOAD_URL_REQUIRED": "URL 不能为空",
       "DOWNLOAD_JOB_NOT_FOUND": "下载任务不存在"
+    },
+    "notification": {
+      "NOTIFICATION_SEND_FAILED": "通知发送失败"
     }
   },
   "discover": {

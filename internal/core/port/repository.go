@@ -11,6 +11,7 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id string) (*domain.User, error)
 	FindByUsername(ctx context.Context, username string) (*domain.User, error)
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
+	FindByRole(ctx context.Context, role domain.Role) ([]domain.User, error)
 }
 
 type LibraryRepository interface {

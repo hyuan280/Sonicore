@@ -196,13 +196,16 @@ func New(cfg *config.Config) (*Server, error) {
 		return metadata.BuildRegistry(sources...)
 	}
 	covers := metadata.NewCoverManager(cfg.Data.ImagesDir, db, buildRegistry)
-	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers)
+
+	notifService := service.NewNotificationService(cfg.Notification, repository.NewUserRepo(db), repository.NewSettingsRepo(db), enc)
+
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers, notifService)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -222,7 +225,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -403,7 +406,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	})
 
 	// Admin
-	adminHandler := rest.NewAdminHandler(db, enc)
+	adminHandler := rest.NewAdminHandler(db, enc, func(ctx context.Context) { notifService.ReloadEmailConfig(ctx) })
 	admin := r.PathPrefix("/api/admin").Subrouter()
 	admin.Use(middleware.AuthMiddleware(jwtService))
 	admin.Use(rest.AdminOnly)
@@ -412,6 +415,14 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	admin.HandleFunc("/settings", adminHandler.GetSettings).Methods("GET")
 	admin.HandleFunc("/settings", adminHandler.UpdateSettings).Methods("PUT")
 	admin.HandleFunc("/dirs", adminHandler.ListDirs).Methods("GET")
+
+	// Notification channels
+	notifHandler := rest.NewNotificationHandler(notifService)
+	notif := r.PathPrefix("/api/notifications").Subrouter()
+	notif.Use(middleware.AuthMiddleware(jwtService))
+	notif.Use(rest.AdminOnly)
+	notif.HandleFunc("/channels", notifHandler.ListChannels).Methods("GET")
+	notif.HandleFunc("/test", notifHandler.SendTest).Methods("POST")
 
 	// Frontend static files (SPA)
 	distDir := cfg.Server.WebDir

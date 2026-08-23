@@ -9,15 +9,34 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Redis     RedisConfig     `mapstructure:"redis"`
-	Data      DataConfig      `mapstructure:"data"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	Log       LogConfig       `mapstructure:"log"`
-	Audio     AudioConfig     `mapstructure:"audio"`
-	Metadata  MetadataConfig  `mapstructure:"metadata"`
-	Platforms PlatformsConfig `mapstructure:"platforms"`
+	Server       ServerConfig       `mapstructure:"server"`
+	Database     DatabaseConfig     `mapstructure:"database"`
+	Redis        RedisConfig        `mapstructure:"redis"`
+	Data         DataConfig         `mapstructure:"data"`
+	JWT          JWTConfig          `mapstructure:"jwt"`
+	Log          LogConfig          `mapstructure:"log"`
+	Audio        AudioConfig        `mapstructure:"audio"`
+	Metadata     MetadataConfig     `mapstructure:"metadata"`
+	Platforms    PlatformsConfig    `mapstructure:"platforms"`
+	Notification NotificationConfig `mapstructure:"notification"`
+}
+
+type NotificationConfig struct {
+	Email EmailConfig `mapstructure:"email"`
+}
+
+type EmailConfig struct {
+	Enabled     bool   `mapstructure:"enabled"`
+	SMTPHost    string `mapstructure:"smtp_host"`
+	SMTPPort    int    `mapstructure:"smtp_port"`
+	Username    string `mapstructure:"username"`
+	Password    string `mapstructure:"password"`
+	FromAddress string `mapstructure:"from_address"`
+	FromName    string `mapstructure:"from_name"`
+	TLS         bool   `mapstructure:"tls"`
+	IMAPHost    string `mapstructure:"imap_host"`
+	IMAPPort    int    `mapstructure:"imap_port"`
+	IMAPEnabled bool   `mapstructure:"imap_enabled"`
 }
 
 // PlatformsConfig controls external music platform integration.
@@ -166,6 +185,18 @@ func Load() *Config {
 	v.SetDefault("platforms.netease.enabled", false)
 	v.SetDefault("platforms.netease.cookie", "")
 	v.SetDefault("platforms.netease.rate_limit", 1)
+
+	v.SetDefault("notification.email.enabled", false)
+	v.SetDefault("notification.email.smtp_host", "")
+	v.SetDefault("notification.email.smtp_port", 587)
+	v.SetDefault("notification.email.username", "")
+	v.SetDefault("notification.email.password", "")
+	v.SetDefault("notification.email.from_address", "")
+	v.SetDefault("notification.email.from_name", "Sonicore")
+	v.SetDefault("notification.email.tls", true)
+	v.SetDefault("notification.email.imap_host", "")
+	v.SetDefault("notification.email.imap_port", 993)
+	v.SetDefault("notification.email.imap_enabled", false)
 
 	v.AutomaticEnv()
 	v.SetEnvPrefix("SONICORE")

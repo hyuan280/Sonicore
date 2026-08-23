@@ -78,6 +78,25 @@ enabled = false
 # （code 405 操作频繁）；默认 1 较保守，可依账号实际耐受度调高，0 关闭限速。
 # rate_limit = 1
 
+[notification]
+# 通知渠道配置。启用渠道后，系统会在关键事件（如扫描完成）时自动发送通知。
+
+[notification.email]
+# SMTP 邮件发送。启用后需要配置 SMTP 服务器地址和发件人信息。
+enabled = false
+# smtp_host = "smtp.example.com"
+# smtp_port = 587
+# username = ""
+# password = ""
+# from_address = "sonicore@example.com"
+# from_name = "Sonicore"
+# tls = true
+
+# 收邮件（将来扩展）
+# imap_host = "imap.example.com"
+# imap_port = 993
+# imap_enabled = false
+
 [log]
 # 日志级别：debug / info / warn / error
 level = "info"

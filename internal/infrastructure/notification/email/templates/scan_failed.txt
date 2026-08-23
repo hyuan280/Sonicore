@@ -1,0 +1,5 @@
+Scan Failed — {{.LibraryName}}
+
+{{.Error}}
+
+{{.Timestamp}}

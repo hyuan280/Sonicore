@@ -106,3 +106,13 @@ export interface ScanStatus {
   deleted_tracks: number;
   errors: number;
 }
+
+export interface NotifTestOptions {
+  smtp_host: string;
+  smtp_port: string;
+  username: string;
+  password?: string;
+  from_address: string;
+  from_name: string;
+  tls: boolean;
+}
