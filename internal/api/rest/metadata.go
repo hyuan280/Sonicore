@@ -1433,6 +1433,9 @@ func (h *MetadataHandler) ListSources(w http.ResponseWriter, r *http.Request) {
 	reg := h.newRegistry(r.Context())
 	var sources []map[string]string
 	for _, s := range reg.Sources() {
+		if s.Name() == "user" {
+			continue
+		}
 		sources = append(sources, map[string]string{"name": s.Name(), "label": s.Label()})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sources": sources})
