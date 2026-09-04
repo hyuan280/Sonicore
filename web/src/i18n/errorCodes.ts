@@ -149,6 +149,7 @@ export const ERROR_CODES = {
 
   // ---- notification (1000-1099) ----
   NOTIFICATION_SEND_FAILED: 1000,
+  NOTIFICATION_SAVE_PREFS_FAILED: 1001,
 } as const;
 
 const CODE_TO_I18N_KEY: Record<number, string> = {};

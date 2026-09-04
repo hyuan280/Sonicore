@@ -212,7 +212,21 @@
     "scanErrors": "{{count}} scan error(s)",
     "failed": "Failed",
     "trackCount_one": "{{count}} track",
-    "trackCount_other": "{{count}} tracks"
+    "trackCount_other": "{{count}} tracks",
+    "notificationPrefs": "Notification Preferences",
+    "notifSelectPlatform": "Select a platform...",
+    "notifNoTypes": "No message types configured",
+    "notifNoPlatforms": "No platforms configured. Click + to add one.",
+    "notifScopeSettings": "Notification Scope Settings",
+    "notifType": "Type",
+    "notifRecipients": "Recipients",
+    "myNotificationPrefs": "My Notifications",
+    "notifCat_scan": "Scan",
+    "notifCat_system": "System",
+    "notifRole_operator": "Operator",
+    "notifRole_admin": "Admin",
+    "notifRole_all": "All Users",
+    "saved": "Saved"
   },
   "admin": {
     "administration": "Administration",
@@ -474,7 +488,8 @@
       "DOWNLOAD_JOB_NOT_FOUND": "Download job not found"
     },
     "notification": {
-      "NOTIFICATION_SEND_FAILED": "Notification send failed"
+      "NOTIFICATION_SEND_FAILED": "Notification send failed",
+      "NOTIFICATION_SAVE_PREFS_FAILED": "Failed to save notification preferences"
     }
   },
   "discover": {

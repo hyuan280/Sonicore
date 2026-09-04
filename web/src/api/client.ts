@@ -224,6 +224,18 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ channel, to, config }),
       }),
+    getPreferences: () => request("/api/notifications/preferences"),
+    updatePreferences: (prefs: Record<string, { roles?: string[]; channels?: string[] }>) =>
+      request("/api/notifications/preferences", {
+        method: "PUT",
+        body: JSON.stringify({ preferences: prefs }),
+      }),
+    getUserPrefs: () => request("/api/notifications/user-prefs"),
+    updateUserPref: (prefs: { category: string; enabled: boolean }[]) =>
+      request("/api/notifications/user-prefs", {
+        method: "PUT",
+        body: JSON.stringify({ prefs }),
+      }),
   },
   platform: {
     list: () => request("/api/plat/list"),

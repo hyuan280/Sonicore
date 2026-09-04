@@ -17,7 +17,7 @@ func newTestScannerService(t *testing.T) (*ScannerService, *sql.DB, sqlmock.Sqlm
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
-	s := NewScannerService(db, t.TempDir(), t.TempDir(), metadata.MBConfig{}, nil, nil, false, nil)
+	s := NewScannerService(db, t.TempDir(), t.TempDir(), metadata.MBConfig{}, nil, nil, false, nil, nil)
 	return s, db, mock
 }
 

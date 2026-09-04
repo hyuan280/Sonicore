@@ -197,7 +197,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	covers := metadata.NewCoverManager(cfg.Data.ImagesDir, db, buildRegistry)
 
-	notifService := service.NewNotificationService(cfg.Notification, repository.NewUserRepo(db), repository.NewSettingsRepo(db), enc)
+	notifService := service.NewNotificationService(cfg.Notification, repository.NewUserRepo(db), repository.NewSettingsRepo(db), enc, repository.NewNotificationPrefRepo(db))
 
 	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers, notifService)
 	downloadManager := download.NewManager(db)
@@ -423,6 +423,12 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	notif.Use(rest.AdminOnly)
 	notif.HandleFunc("/channels", notifHandler.ListChannels).Methods("GET")
 	notif.HandleFunc("/test", notifHandler.SendTest).Methods("POST")
+	notif.HandleFunc("/preferences", notifHandler.GetPreferences).Methods("GET")
+	notif.HandleFunc("/preferences", notifHandler.UpdatePreferences).Methods("PUT")
+
+	// Per-user notification preferences are self-service (not admin-only).
+	protected.HandleFunc("/notifications/user-prefs", notifHandler.GetUserPrefs).Methods("GET")
+	protected.HandleFunc("/notifications/user-prefs", notifHandler.UpdateUserPref).Methods("PUT")
 
 	// Frontend static files (SPA)
 	distDir := cfg.Server.WebDir

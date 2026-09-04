@@ -175,6 +175,7 @@ const (
 
 const (
 	ErrNotificationSendFailed ErrorCode = 1000
+	ErrNotificationSavePrefs  ErrorCode = 1001
 )
 
 // ---- download (900-999) ----
@@ -344,6 +345,7 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrDownloadURLRequired:      "DOWNLOAD_URL_REQUIRED",
 	ErrDownloadJobNotFound:      "DOWNLOAD_JOB_NOT_FOUND",
 	ErrNotificationSendFailed:   "NOTIFICATION_SEND_FAILED",
+	ErrNotificationSavePrefs:    "NOTIFICATION_SAVE_PREFS_FAILED",
 }
 
 // errorCodeMessages maps each code to its default English fallback message.
@@ -459,4 +461,5 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrDownloadURLRequired:      "URL is required",
 	ErrDownloadJobNotFound:      "Download job not found",
 	ErrNotificationSendFailed:   "Notification send failed",
+	ErrNotificationSavePrefs:    "Failed to save notification preferences",
 }

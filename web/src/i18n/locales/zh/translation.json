@@ -212,7 +212,21 @@
     "scanErrors": "{{count}} 个扫描错误",
     "failed": "失败",
     "trackCount_one": "{{count}} 首",
-    "trackCount_other": "{{count}} 首"
+    "trackCount_other": "{{count}} 首",
+    "notificationPrefs": "通知偏好",
+    "notifSelectPlatform": "选择通知平台...",
+    "notifNoTypes": "未配置消息类型",
+    "notifNoPlatforms": "未配置通知平台，点击 + 添加",
+    "notifScopeSettings": "通知范围设置",
+    "notifType": "消息类型",
+    "notifRecipients": "接收者",
+    "myNotificationPrefs": "我的通知",
+    "notifCat_scan": "扫描",
+    "notifCat_system": "系统",
+    "notifRole_operator": "操作用户",
+    "notifRole_admin": "管理员",
+    "notifRole_all": "所有用户",
+    "saved": "已保存"
   },
   "admin": {
     "administration": "管理",
@@ -474,7 +488,8 @@
       "DOWNLOAD_JOB_NOT_FOUND": "下载任务不存在"
     },
     "notification": {
-      "NOTIFICATION_SEND_FAILED": "通知发送失败"
+      "NOTIFICATION_SEND_FAILED": "通知发送失败",
+      "NOTIFICATION_SAVE_PREFS_FAILED": "保存通知偏好失败"
     }
   },
   "discover": {

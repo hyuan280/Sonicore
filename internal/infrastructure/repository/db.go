@@ -324,6 +324,28 @@ func RunMigrations(db *sql.DB) error {
 
 	INSERT INTO server_settings (key, value) VALUES ('allow_registration', 'true')
 		ON CONFLICT (key) DO NOTHING;
+
+	CREATE TABLE IF NOT EXISTS notification_category_prefs (
+		category VARCHAR(32) PRIMARY KEY,
+		roles    TEXT[] NOT NULL DEFAULT '{}',
+		channels TEXT[] NOT NULL DEFAULT '{}'
+	);
+
+	CREATE TABLE IF NOT EXISTS user_notification_prefs (
+		user_id   VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		category  VARCHAR(32) NOT NULL,
+		enabled   BOOLEAN NOT NULL DEFAULT true,
+		channels  TEXT[],
+		roles     TEXT[],
+		PRIMARY KEY (user_id, category)
+	);
+
+	INSERT INTO notification_category_prefs (category, roles, channels)
+		VALUES ('scan', ARRAY['operator','admin'], ARRAY['email'])
+		ON CONFLICT (category) DO NOTHING;
+	INSERT INTO notification_category_prefs (category, roles, channels)
+		VALUES ('system', ARRAY['admin'], ARRAY['email'])
+		ON CONFLICT (category) DO NOTHING;
 	`
 
 	if _, err := db.Exec(schema); err != nil {

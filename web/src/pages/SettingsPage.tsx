@@ -34,6 +34,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Bell,
+  Settings,
 } from "lucide-react";
 import LanguageSwitcher from "../components/LanguageSwitcher";
 import { formatDuration, performerNames } from "../lib/utils";
@@ -158,6 +160,7 @@ export default function SettingsPage() {
   }, [manageSearch]);
 
   const [showPwModal, setShowPwModal] = useState(false);
+  const [notifPrefsOpen, setNotifPrefsOpen] = useState(false);
   const [pwForm, setPwForm] = useState({ oldPw: "", newPw: "", confirmPw: "" });
   const [pwError, setPwError] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
@@ -328,11 +331,17 @@ export default function SettingsPage() {
             <span className="text-green-500">{roleLabel(user?.role || "")}</span>
           </p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => setShowPwModal(true)}>
-          {t("settings.changePassword")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="primary" size="sm" onClick={() => setShowPwModal(true)}>
+            {t("settings.changePassword")}
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => setNotifPrefsOpen(true)}>
+            {t("settings.myNotificationPrefs")}
+          </Button>
+        </div>
       </Card>
 
+      {notifPrefsOpen && <UserNotificationModal onClose={() => setNotifPrefsOpen(false)} />}
       {isAdmin && (
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
@@ -449,6 +458,7 @@ export default function SettingsPage() {
         </Card>
       )}
 
+      {isAdmin && <NotificationChannelPrefs />}
       {isAdmin && <DeviceManager />}
       {isAdmin && <SubsonicJukeboxSetting />}
 
@@ -1579,6 +1589,429 @@ function SearchResultModal({
             {saving ? "Saving..." : "Save"}
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Recipient roles shown in the notification scope editor.
+// Keep in sync with domain.RecipientRole in internal/core/domain/notification.go
+// ("operator", "admin", "all").
+const NOTIFICATION_RECIPIENT_ROLES = ["operator", "admin", "all"];
+
+function NotificationChannelPrefs() {
+  const { t } = useTranslation();
+  const [prefs, setPrefs] = useState<Record<string, { roles: string[]; channels: string[] }>>({});
+  const [channels, setChannels] = useState<{ type: string; name: string; enabled: boolean }[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [formChannel, setFormChannel] = useState("");
+  const [formCats, setFormCats] = useState<string[]>([]);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopePrefs, setScopePrefs] = useState<Record<string, { roles: string[] }>>({});
+  const [editChannel, setEditChannel] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    Promise.all([api.notifications.getPreferences(), api.notifications.channels()])
+      .then(([p, c]) => {
+        setPrefs(p);
+        setScopePrefs(p);
+        setChannels(c.channels || []);
+      })
+      .catch((err: unknown) => setError(translateApiError(t, err)));
+  }, [t]);
+
+  const categories = Object.keys(prefs);
+
+  function toggleFormCat(cat: string) {
+    setFormCats((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
+  }
+
+  // Only show channels that are enabled and configured with at least one category
+  function channelEntries(): { type: string; name: string; cats: string[] }[] {
+    return channels
+      .filter((ch) => ch.enabled)
+      .map((ch) => {
+        const cats = categories.filter((cat) => (prefs[cat]?.channels || []).includes(ch.type));
+        return { ...ch, cats };
+      })
+      .filter((e) => e.cats.length > 0);
+  }
+
+  async function create() {
+    if (!formChannel || formCats.length === 0) return;
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const update: Record<string, { channels: string[] }> = {};
+      for (const cat of categories) {
+        const cur = [...(prefs[cat]?.channels || [])];
+        if (formCats.includes(cat)) {
+          if (!cur.includes(formChannel)) cur.push(formChannel);
+        } else {
+          const idx = cur.indexOf(formChannel);
+          if (idx >= 0) cur.splice(idx, 1);
+        }
+        update[cat] = { channels: cur };
+      }
+      await api.notifications.updatePreferences(update);
+      // Reload to get fresh state
+      const fresh = await api.notifications.getPreferences();
+      setPrefs(fresh);
+      setShowForm(false);
+      setFormChannel("");
+      setFormCats([]);
+      setEditChannel(null);
+      setSuccess(t("settings.saved"));
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    }
+    setSaving(false);
+  }
+
+  function toggleRole(cat: string, role: string) {
+    setScopePrefs((prev) => {
+      const p = { ...prev };
+      const cur = { ...(p[cat] || { roles: [] }) };
+      if (cur.roles.includes(role)) {
+        cur.roles = cur.roles.filter((r: string) => r !== role);
+      } else {
+        cur.roles = [...cur.roles, role];
+      }
+      p[cat] = cur;
+      return p;
+    });
+  }
+
+  async function saveScope() {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const update: Record<string, { roles: string[] }> = {};
+      for (const [cat, p] of Object.entries(scopePrefs)) {
+        update[cat] = { roles: p.roles };
+      }
+      await api.notifications.updatePreferences(update);
+      const fresh = await api.notifications.getPreferences();
+      setPrefs(fresh);
+      setScopePrefs(fresh);
+      setScopeOpen(false);
+      setSuccess(t("settings.saved"));
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    }
+    setSaving(false);
+  }
+
+  async function remove(chType: string) {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const update: Record<string, { channels: string[] }> = {};
+      for (const cat of categories) {
+        update[cat] = {
+          channels: (prefs[cat]?.channels || []).filter((c: string) => c !== chType),
+        };
+      }
+      await api.notifications.updatePreferences(update);
+      const fresh = await api.notifications.getPreferences();
+      setPrefs(fresh);
+      if (editChannel === chType || formChannel === chType) {
+        setShowForm(false);
+        setFormChannel("");
+        setFormCats([]);
+        setEditChannel(null);
+      }
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    }
+    setSaving(false);
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium flex items-center gap-2">
+          <Bell className="w-4 h-4" /> {t("settings.notificationPrefs")}
+        </h3>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setScopeOpen(true);
+              setScopePrefs(prefs);
+            }}
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setShowForm(!showForm);
+              setFormChannel("");
+              setFormCats([]);
+              setEditChannel(null);
+            }}
+            className="px-2 py-1 text-xs"
+          >
+            <Plus className="w-3.5 h-3.5 mr-0.5" />
+            {t("settings.add")}
+          </Button>
+        </div>
+      </div>
+
+      {scopeOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setScopeOpen(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold">{t("settings.notifScopeSettings")}</h2>
+            <div className="rounded-lg bg-zinc-800/50 overflow-hidden">
+              <div className="grid grid-cols-[1fr_2fr] gap-0 text-xs text-zinc-500 font-medium border-b border-zinc-700">
+                <div className="px-3 py-2">{t("settings.notifType")}</div>
+                <div className="px-3 py-2">{t("settings.notifRecipients")}</div>
+              </div>
+              {Object.entries(scopePrefs).map(([cat, p]) => (
+                <div
+                  key={cat}
+                  className="grid grid-cols-[1fr_2fr] gap-0 border-b border-zinc-700/50 last:border-b-0"
+                >
+                  <div className="px-3 py-2 flex items-center">
+                    <span className="text-sm">{t("settings.notifCat_" + cat)}</span>
+                  </div>
+                  <div className="px-3 py-2 flex flex-wrap gap-1.5 items-center">
+                    {NOTIFICATION_RECIPIENT_ROLES.map((role) => {
+                      const active = (p.roles || []).includes(role);
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          onClick={() => toggleRole(cat, role)}
+                          className={`px-2 py-0.5 rounded text-xs border cursor-pointer transition-colors ${
+                            active
+                              ? "bg-green-600/20 border-green-600 text-green-400"
+                              : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                          }`}
+                        >
+                          {t("settings.notifRole_" + role)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" size="sm" onClick={() => setScopeOpen(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button variant="primary" size="sm" onClick={saveScope} disabled={saving}>
+                {saving ? t("common.saving") : t("common.save")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="space-y-3 p-3 rounded-lg bg-zinc-800">
+          {editChannel ? (
+            <div className="text-sm font-medium">
+              {channels.find((ch) => ch.type === editChannel)?.name || editChannel}
+            </div>
+          ) : (
+            <select
+              value={formChannel}
+              onChange={(e) => {
+                setFormChannel(e.target.value);
+                if (e.target.value) {
+                  const cats = categories.filter((cat) =>
+                    (prefs[cat]?.channels || []).includes(e.target.value),
+                  );
+                  setFormCats(cats);
+                } else {
+                  setFormCats([]);
+                }
+              }}
+              className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm focus:outline-none focus:border-green-500"
+            >
+              <option value="">{t("settings.notifSelectPlatform")}</option>
+              {channels
+                .filter((ch) => ch.enabled)
+                .filter(
+                  (ch) =>
+                    editChannel === ch.type || !channelEntries().some((e) => e.type === ch.type),
+                )
+                .map((ch) => (
+                  <option key={ch.type} value={ch.type}>
+                    {ch.name}
+                  </option>
+                ))}
+            </select>
+          )}
+          {formChannel && (
+            <div className="flex flex-wrap gap-2">
+              {categories.map((cat) => {
+                const active = formCats.includes(cat);
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => toggleFormCat(cat)}
+                    className={`px-3 py-1 rounded-lg text-xs border cursor-pointer transition-colors ${
+                      active
+                        ? "bg-green-600/20 border-green-600 text-green-400"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                    }`}
+                  >
+                    {t("settings.notifCat_" + cat)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <Button
+            size="sm"
+            onClick={create}
+            disabled={saving || !formChannel || formCats.length === 0}
+          >
+            {saving ? t("common.saving") : editChannel ? t("common.save") : t("settings.create")}
+          </Button>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {channelEntries().length === 0 && (
+          <p className="text-xs text-zinc-500 p-3">{t("settings.notifNoPlatforms")}</p>
+        )}
+        {channelEntries().map((entry) => (
+          <div
+            key={entry.type}
+            className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{entry.name}</p>
+                <p className="text-xs text-zinc-500">
+                  {entry.cats.map((c) => t("settings.notifCat_" + c)).join(" · ")}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditChannel(entry.type);
+                  setFormChannel(entry.type);
+                  setFormCats(entry.cats);
+                  setShowForm(true);
+                }}
+              >
+                <Pen className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => remove(entry.type)}>
+                <Trash2 className="w-4 h-4 text-red-400" />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {success && <p className="text-xs text-green-400">{success}</p>}
+    </Card>
+  );
+}
+
+function UserNotificationModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const [prefs, setPrefs] = useState<Record<string, boolean>>({});
+  const [categories, setCategories] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([api.notifications.getUserPrefs(), api.notifications.getPreferences()])
+      .then(([userPrefs, globalPrefs]) => {
+        setCategories(Object.keys(globalPrefs));
+        const enabled: Record<string, boolean> = {};
+        for (const cat of Object.keys(globalPrefs)) {
+          enabled[cat] = userPrefs[cat]?.enabled ?? true;
+        }
+        setPrefs(enabled);
+      })
+      .catch((err: unknown) => setError(translateApiError(t, err)));
+  }, [t]);
+
+  function toggle(cat: string) {
+    setPrefs((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  }
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      const payload = Object.entries(prefs).map(([category, enabled]) => ({ category, enabled }));
+      await api.notifications.updateUserPref(payload);
+      onClose();
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-sm shadow-xl space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-bold">{t("settings.myNotificationPrefs")}</h2>
+        <div className="space-y-2">
+          {categories.map((cat) => (
+            <div
+              key={cat}
+              className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50"
+            >
+              <span className="text-sm">{t("settings.notifCat_" + cat)}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={prefs[cat] ?? true}
+                onClick={() => toggle(cat)}
+                disabled={saving}
+                className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${prefs[cat] !== false ? "bg-green-600" : "bg-zinc-700"}`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${prefs[cat] !== false ? "translate-x-6" : ""}`}
+                />
+              </button>
+            </div>
+          ))}
+        </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={saving}>
+            {saving ? t("common.saving") : t("common.save")}
+          </Button>
+        </div>
       </div>
     </div>
   );
