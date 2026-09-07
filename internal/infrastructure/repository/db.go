@@ -35,6 +35,8 @@ func RunMigrations(db *sql.DB) error {
 		email       VARCHAR(255) NOT NULL UNIQUE,
 		password_hash VARCHAR(255) NOT NULL,
 		role        VARCHAR(20) NOT NULL DEFAULT 'user',
+		avatar      BYTEA,
+		avatar_format VARCHAR(10) NOT NULL DEFAULT '',
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);

@@ -17,14 +17,15 @@ import {
   Heart,
   History,
   Settings,
-  LogOut,
   Shield,
   ChevronRight,
   Compass,
+  UserRound,
 } from "lucide-react";
 import i18n from "./i18n";
 import Logo from "./components/Logo";
 import PlayerBar from "./components/PlayerBar";
+import UserAvatar from "./components/UserAvatar";
 import { restorePlayerState } from "./stores/player";
 
 const pageFallback = (
@@ -82,6 +83,7 @@ const JukeboxPage = lazy(() => import("./pages/JukeboxPage"));
 const JukeboxDetailPage = lazy(() => import("./pages/JukeboxDetailPage"));
 const PlaylistDetailPage = lazy(() => import("./pages/PlaylistDetailPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const DiscoverPage = lazy(() => import("./pages/DiscoverPage"));
 const DiscoverChartPage = lazy(() => import("./pages/DiscoverChartPage"));
@@ -311,23 +313,34 @@ function Sidebar() {
 
       <div className="border-t border-zinc-800 mx-2" />
       <div className="px-2 py-2 space-y-1">
-        <LogoutButton />
+        <ProfileEntry />
       </div>
     </aside>
   );
 }
 
-function LogoutButton() {
-  const { t } = useTranslation();
-  const { logout, user } = useAuth();
+function ProfileEntry() {
+  const location = useLocation();
+  const { user } = useAuth();
+  if (!user) return null;
+  const active = location.pathname === "/profile";
   return (
-    <button
-      onClick={logout}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left cursor-pointer text-zinc-400 hover:text-red-400 hover:bg-zinc-800"
+    <Link
+      to="/profile"
+      title={user.username}
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+        active
+          ? "bg-green-600/20 text-green-500"
+          : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+      }`}
     >
-      <LogOut className="w-4 h-4" />
-      {user?.username || t("nav.signOut")}
-    </button>
+      {user.avatar_format ? (
+        <UserAvatar avatarFormat={user.avatar_format} className="w-4 h-4 rounded-md" />
+      ) : (
+        <UserRound className="w-4 h-4 shrink-0" />
+      )}
+      <span className="flex-1 truncate">{user.username}</span>
+    </Link>
   );
 }
 
@@ -423,6 +436,7 @@ export default function App() {
         <Route path="jukebox/:id" element={<JukeboxDetailPage />} />
         <Route path="player" element={<PlayerPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route path="admin" element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

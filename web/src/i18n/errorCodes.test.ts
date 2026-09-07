@@ -66,6 +66,9 @@ describe("errorCodes 前后端一致性", () => {
       [500, 599, "jukebox"],
       [600, 699, "stream"],
       [700, 799, "platform"],
+      [800, 899, "admin"],
+      [900, 999, "download"],
+      [1000, 1099, "notification"],
     ];
     for (const [code] of goCodes) {
       const cat = categories.find(([lo, hi]) => code >= lo && code <= hi);

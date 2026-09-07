@@ -1,8 +1,12 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"image"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -34,8 +38,8 @@ func newUserHandler(t *testing.T) (*UserHandler, sqlmock.Sqlmock, *miniredis.Min
 }
 
 func userRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow("u-001", "alice", "alice@example.com", "hash", "user", time.Now(), time.Now())
+	return sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow("u-001", "alice", "alice@example.com", "hash", "user", "", time.Now(), time.Now())
 }
 
 func userIDRequest(method, path, body, userID string) *http.Request {
@@ -64,7 +68,7 @@ func TestUserMeUnauthorized(t *testing.T) {
 func TestUserMeNotFound(t *testing.T) {
 	h, mock, _ := newUserHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
 		WillReturnError(sql.ErrNoRows)
 
@@ -77,7 +81,7 @@ func TestUserMeNotFound(t *testing.T) {
 func TestUserMeSuccess(t *testing.T) {
 	h, mock, _ := newUserHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
 		WillReturnRows(userRows())
 
@@ -97,10 +101,10 @@ func TestUserChangePasswordSuccess(t *testing.T) {
 	hash, err := auth.HashPassword("old-pass")
 	require.NoError(t, err)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-			AddRow("u-001", "alice", "a@b.c", hash, "user", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow("u-001", "alice", "a@b.c", hash, "user", "", time.Now(), time.Now()))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET username=$2, email=$3, password_hash=$4, role=$5, updated_at=$6 WHERE id=$1`)).
 		WithArgs("u-001", "alice", "a@b.c", sqlmock.AnyArg(), "user", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -118,10 +122,10 @@ func TestUserChangePasswordWrongPassword(t *testing.T) {
 	h, mock, _ := newUserHandler(t)
 
 	hash, _ := auth.HashPassword("real-pass")
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-			AddRow("u-001", "alice", "a@b.c", hash, "user", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow("u-001", "alice", "a@b.c", hash, "user", "", time.Now(), time.Now()))
 
 	rec := httptest.NewRecorder()
 	h.ChangePassword(rec, userIDRequest(http.MethodPost, "/api/users/me/password",
@@ -144,10 +148,10 @@ func TestUserChangePasswordUpdateError(t *testing.T) {
 	h, mock, _ := newUserHandler(t)
 
 	hash, _ := auth.HashPassword("old-pass")
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-			AddRow("u-001", "alice", "a@b.c", hash, "user", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow("u-001", "alice", "a@b.c", hash, "user", "", time.Now(), time.Now()))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET username=$2, email=$3, password_hash=$4, role=$5, updated_at=$6 WHERE id=$1`)).
 		WillReturnError(sql.ErrConnDone)
 
@@ -231,4 +235,150 @@ func TestUserMeRenewUnauthorized(t *testing.T) {
 	h.MeRenew(rec, userIDRequest(http.MethodPost, "/api/users/me/renew", `{}`, ""))
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func pngBytes(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	return buf.Bytes()
+}
+
+func TestUserGetAvatarSuccess(t *testing.T) {
+	h, mock, _ := newUserHandler(t)
+	data := pngBytes(t)
+
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-001").
+		WillReturnRows(sqlmock.NewRows([]string{"avatar", "avatar_format"}).AddRow(data, "png"))
+
+	rec := httptest.NewRecorder()
+	h.GetAvatar(rec, userIDRequest(http.MethodGet, "/api/user/avatar", "", "u-001"))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+	assert.Equal(t, data, rec.Body.Bytes())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserGetAvatarNone(t *testing.T) {
+	h, mock, _ := newUserHandler(t)
+
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-001").
+		WillReturnRows(sqlmock.NewRows([]string{"avatar", "avatar_format"}).AddRow(nil, ""))
+
+	rec := httptest.NewRecorder()
+	h.GetAvatar(rec, userIDRequest(http.MethodGet, "/api/user/avatar", "", "u-001"))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserGetAvatarUserGone(t *testing.T) {
+	h, mock, _ := newUserHandler(t)
+
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-001").
+		WillReturnError(sql.ErrNoRows)
+
+	rec := httptest.NewRecorder()
+	h.GetAvatar(rec, userIDRequest(http.MethodGet, "/api/user/avatar", "", "u-001"))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserGetAvatarUnauthorized(t *testing.T) {
+	h, _, _ := newUserHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.GetAvatar(rec, userIDRequest(http.MethodGet, "/api/user/avatar", "", ""))
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestUserUploadAvatarSuccess(t *testing.T) {
+	h, mock, _ := newUserHandler(t)
+	data := pngBytes(t)
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET avatar = $2, avatar_format = $3, updated_at = NOW() WHERE id = $1`)).
+		WithArgs("u-001", data, "png").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, userIDRequest(http.MethodPut, "/api/user/avatar", string(data), "u-001"))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"avatar_format":"png"`)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserUploadAvatarTooLarge(t *testing.T) {
+	h, _, _ := newUserHandler(t)
+	data := pngBytes(t)
+	big := append(data, make([]byte, maxAvatarSize-len(data)+1)...)
+
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, userIDRequest(http.MethodPut, "/api/user/avatar", string(big), "u-001"))
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	assert.Contains(t, rec.Body.String(), "1MB")
+}
+
+func TestUserUploadAvatarInvalidFormat(t *testing.T) {
+	h, _, _ := newUserHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, userIDRequest(http.MethodPut, "/api/user/avatar", "this is not an image", "u-001"))
+
+	assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code)
+	assert.Contains(t, rec.Body.String(), "JPEG, PNG or WebP")
+}
+
+func TestUserUploadAvatarEmptyRemoves(t *testing.T) {
+	h, mock, _ := newUserHandler(t)
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET avatar = NULL, avatar_format = '', updated_at = NOW() WHERE id = $1`)).
+		WithArgs("u-001").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, userIDRequest(http.MethodPut, "/api/user/avatar", "", "u-001"))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"avatar_format":""`)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserUploadAvatarUpdateError(t *testing.T) {
+	h, mock, _ := newUserHandler(t)
+	data := pngBytes(t)
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET avatar = $2, avatar_format = $3, updated_at = NOW() WHERE id = $1`)).
+		WithArgs("u-001", data, "png").
+		WillReturnError(sql.ErrConnDone)
+
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, userIDRequest(http.MethodPut, "/api/user/avatar", string(data), "u-001"))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Failed to update avatar")
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestUserUploadAvatarReadError(t *testing.T) {
+	h, _, _ := newUserHandler(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/user/avatar", errReader{})
+	req = req.WithContext(contextWithUserID(req.Context(), "u-001"))
+	rec := httptest.NewRecorder()
+	h.UploadAvatar(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Invalid request body")
 }

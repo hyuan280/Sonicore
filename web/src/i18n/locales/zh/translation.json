@@ -10,7 +10,8 @@
     "settings": "设置",
     "administration": "管理",
     "signOut": "退出登录",
-    "discover": "发现"
+    "discover": "发现",
+    "profile": "个人信息"
   },
   "auth": {
     "signIn": "登录",
@@ -228,6 +229,14 @@
     "notifRole_all": "所有用户",
     "saved": "已保存"
   },
+  "profile": {
+    "title": "个人信息",
+    "uploadAvatar": "上传头像",
+    "resetAvatar": "重置头像",
+    "avatarHint": "支持 JPEG、PNG、WebP，最大 1MB",
+    "passwordChanged": "密码已更新",
+    "fillAllFields": "请填写所有密码字段"
+  },
   "admin": {
     "administration": "管理",
     "serverSettings": "服务器设置",
@@ -415,7 +424,11 @@
       "PLAYLIST_NOT_FOUND": "播放列表不存在",
       "TRACK_ID_REQUIRED": "缺少曲目 ID",
       "TRACK_IDS_REQUIRED": "缺少曲目 ID 列表",
-      "TRACK_NOT_FOUND": "曲目不存在"
+      "TRACK_NOT_FOUND": "曲目不存在",
+      "AVATAR_TOO_LARGE": "头像不能超过 1MB",
+      "AVATAR_INVALID_FORMAT": "头像必须是 JPEG、PNG 或 WebP 图片",
+      "AVATAR_READ_FAILED": "读取头像失败",
+      "AVATAR_UPDATE_FAILED": "更新头像失败"
     },
     "metadata": {
       "FILE_HASH_REQUIRED": "缺少文件哈希",

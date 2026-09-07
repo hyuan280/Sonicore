@@ -86,6 +86,24 @@ describe("api client", () => {
     expect(localStorage.getItem("refresh_token")).toBe("newrt");
   });
 
+  it("shares one refresh request across concurrent 401s", async () => {
+    localStorage.setItem("token", "old");
+    localStorage.setItem("refresh_token", "rt");
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: "expired" }, 401))
+      .mockResolvedValueOnce(jsonResponse({ error: "expired" }, 401))
+      .mockResolvedValueOnce(jsonResponse({ token: "new", refresh_token: "newrt" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "u1" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "u1" }));
+
+    const [a, b] = await Promise.all([api.auth.me(), api.auth.me()]);
+    expect(a).toEqual({ id: "u1" });
+    expect(b).toEqual({ id: "u1" });
+    const refreshCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/auth/refresh");
+    expect(refreshCalls).toHaveLength(1);
+    expect(localStorage.getItem("token")).toBe("new");
+  });
+
   it("clears storage and redirects to login when refresh fails", async () => {
     localStorage.setItem("token", "old");
     localStorage.setItem("refresh_token", "rt");
@@ -111,5 +129,53 @@ describe("api client", () => {
     const err: any = await api.auth.login({ username: "u", password: "w" }).catch((e) => e);
     expect(err.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("getAvatar returns the blob on success", async () => {
+    localStorage.setItem("token", "t");
+    fetchMock.mockResolvedValue(new Response("img", { status: 200 }));
+    const blob = await api.user.getAvatar();
+    expect(blob).toBeInstanceOf(Blob);
+    expect(await blob!.text()).toBe("img");
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/user/avatar");
+    expect((opts.headers as Record<string, string>).Authorization).toBe("Bearer t");
+  });
+
+  it("getAvatar returns null on 404", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
+    await expect(api.user.getAvatar()).resolves.toBeNull();
+  });
+
+  it("getAvatar returns null on network error", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(api.user.getAvatar()).resolves.toBeNull();
+  });
+
+  it("getAvatar returns null when reading the body fails", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: vi.fn().mockRejectedValue(new Error("stream closed")),
+    });
+    await expect(api.user.getAvatar()).resolves.toBeNull();
+  });
+
+  it("getAvatar clears storage and redirects to login when refresh fails", async () => {
+    localStorage.setItem("token", "old");
+    localStorage.setItem("refresh_token", "rt");
+    fetchMock.mockResolvedValue(jsonResponse({ error: "expired" }, 401));
+
+    const hrefSetter = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { href: "" },
+      writable: true,
+    });
+    vi.spyOn(window.location, "href", "set").mockImplementation(hrefSetter);
+
+    await expect(api.user.getAvatar()).resolves.toBeNull();
+    expect(localStorage.getItem("token")).toBeNull();
+    expect(hrefSetter).toHaveBeenCalledWith("/login");
   });
 });

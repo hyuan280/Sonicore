@@ -40,7 +40,7 @@ func (r *UserRepo) Count(ctx context.Context) (int, error) {
 
 func (r *UserRepo) ListAll(ctx context.Context) ([]domain.User, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users ORDER BY created_at ASC")
+		"SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users ORDER BY created_at ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (r *UserRepo) ListAll(ctx context.Context) ([]domain.User, error) {
 	for rows.Next() {
 		var u domain.User
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-			&u.Role, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&u.Role, &u.AvatarFormat, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -62,7 +62,7 @@ func scanUser(row interface {
 }) (*domain.User, error) {
 	var u domain.User
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-		&u.Role, &u.CreatedAt, &u.UpdatedAt)
+		&u.Role, &u.AvatarFormat, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -71,25 +71,25 @@ func scanUser(row interface {
 
 func (r *UserRepo) FindByID(ctx context.Context, id string) (*domain.User, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = $1", id)
+		"SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = $1", id)
 	return scanUser(row)
 }
 
 func (r *UserRepo) FindByUsername(ctx context.Context, username string) (*domain.User, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = $1", username)
+		"SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = $1", username)
 	return scanUser(row)
 }
 
 func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = $1", email)
+		"SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE email = $1", email)
 	return scanUser(row)
 }
 
 func (r *UserRepo) FindByRole(ctx context.Context, role domain.Role) ([]domain.User, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE role = $1 ORDER BY created_at ASC", role)
+		"SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE role = $1 ORDER BY created_at ASC", role)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (r *UserRepo) FindByRole(ctx context.Context, role domain.Role) ([]domain.U
 	for rows.Next() {
 		var u domain.User
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-			&u.Role, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&u.Role, &u.AvatarFormat, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -108,5 +108,33 @@ func (r *UserRepo) FindByRole(ctx context.Context, role domain.Role) ([]domain.U
 
 func (r *UserRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", id)
+	return err
+}
+
+// GetAvatar returns the user's stored avatar bytes and image format.
+// An empty format means the user has no avatar.
+func (r *UserRepo) GetAvatar(ctx context.Context, id string) ([]byte, string, error) {
+	var data []byte
+	var format string
+	err := r.db.QueryRowContext(ctx,
+		"SELECT avatar, avatar_format FROM users WHERE id = $1", id).Scan(&data, &format)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, format, nil
+}
+
+// UpdateAvatar stores the avatar bytes with the given format, or removes
+// the avatar when data is nil.
+func (r *UserRepo) UpdateAvatar(ctx context.Context, id string, data []byte, format string) error {
+	var err error
+	if data == nil {
+		_, err = r.db.ExecContext(ctx,
+			"UPDATE users SET avatar = NULL, avatar_format = '', updated_at = NOW() WHERE id = $1", id)
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
+		"UPDATE users SET avatar = $2, avatar_format = $3, updated_at = NOW() WHERE id = $1",
+		id, data, format)
 	return err
 }

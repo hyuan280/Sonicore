@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { User, Role } from "../types";
 import { api } from "../api/client";
+import { clearAvatarCache } from "../lib/avatarCache";
 
 function clearAuthStorage() {
   localStorage.removeItem("token");
@@ -21,6 +22,7 @@ interface AuthState {
   logout: () => Promise<void>;
   loadUser: () => Promise<void>;
   loadRegistrationStatus: () => Promise<void>;
+  setUser: (patch: Partial<User>) => void;
 }
 
 export const useAuth = create<AuthState>((set) => ({
@@ -35,6 +37,7 @@ export const useAuth = create<AuthState>((set) => ({
     localStorage.setItem("refresh_token", data.refresh_token);
     if (data.session_token) localStorage.setItem("session_token", data.session_token);
     if (data.role) localStorage.setItem("role", data.role);
+    clearAvatarCache();
     set({
       token: data.token,
       user: {
@@ -53,6 +56,7 @@ export const useAuth = create<AuthState>((set) => ({
     localStorage.setItem("refresh_token", data.refresh_token);
     if (data.session_token) localStorage.setItem("session_token", data.session_token);
     if (data.role) localStorage.setItem("role", data.role);
+    clearAvatarCache();
     set({
       token: data.token,
       user: { id: data.user_id, username: data.username, email, role: data.role, created_at: "" },
@@ -62,6 +66,7 @@ export const useAuth = create<AuthState>((set) => ({
   logout: async () => {
     await api.auth.logout().catch(() => {});
     clearAuthStorage();
+    clearAvatarCache();
     set({ user: null, token: null });
   },
 
@@ -82,6 +87,8 @@ export const useAuth = create<AuthState>((set) => ({
       set({ allowRegistration: data.allow_registration });
     } catch {}
   },
+
+  setUser: (patch) => set((s) => ({ user: s.user ? { ...s.user, ...patch } : s.user })),
 }));
 
 export function getRole(): Role | null {

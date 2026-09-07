@@ -299,6 +299,8 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/user/me", userHandler.Me).Methods("GET")
 	protected.HandleFunc("/user/me", userHandler.MeRenew).Methods("POST")
 	protected.HandleFunc("/user/password", userHandler.ChangePassword).Methods("PUT")
+	protected.HandleFunc("/user/avatar", userHandler.GetAvatar).Methods("GET")
+	protected.HandleFunc("/user/avatar", userHandler.UploadAvatar).Methods("PUT")
 
 	browseHandler := rest.NewDataHandler(db)
 	protected.HandleFunc("/data/tracks", browseHandler.Tracks).Methods("GET")

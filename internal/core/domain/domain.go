@@ -24,11 +24,15 @@ const (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	Role         Role      `json:"role"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"-"`
+	Role         Role   `json:"role"`
+	// AvatarFormat holds the stored avatar's image format (jpeg/png/webp);
+	// empty means no avatar. The raw bytes are loaded separately via the
+	// repository to keep regular user queries light.
+	AvatarFormat string    `json:"avatar_format,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

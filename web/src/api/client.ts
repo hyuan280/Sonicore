@@ -1,18 +1,49 @@
 const BASE = "";
 
-async function request(path: string, opts: RequestInit = {}): Promise<any> {
-  const token = localStorage.getItem("token");
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  if (!(opts.body instanceof FormData)) headers["Content-Type"] = "application/json";
-
-  const res = await fetch(BASE + path, { ...opts, headers });
-
-  if (res.status === 401 && path !== "/api/auth/login" && path !== "/api/auth/register") {
+// fetchWithAuth performs a fetch with the stored bearer token and, on 401,
+// attempts one token refresh before retrying. skipRefresh is used by the
+// login/register endpoints where a 401 is a normal outcome.
+async function fetchWithAuth(
+  path: string,
+  init: RequestInit = {},
+  opts: { skipRefresh?: boolean } = {},
+): Promise<Response> {
+  const doFetch = () => {
+    const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+    const token = localStorage.getItem("token");
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return fetch(BASE + path, { ...init, headers });
+  };
+  let res = await doFetch();
+  if (res.status === 401 && !opts.skipRefresh) {
     const ok = await tryRefresh();
-    if (ok) return request(path, opts);
-    localStorage.clear();
-    window.location.href = "/login";
+    if (ok) res = await doFetch();
+  }
+  return res;
+}
+
+// handleSessionExpiry applies the shared policy for a failed token refresh:
+// the session is considered dead — clear the session keys (only) and bounce
+// to the login page.
+function handleSessionExpiry() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("refresh_token");
+  localStorage.removeItem("session_token");
+  localStorage.removeItem("role");
+  window.location.href = "/login";
+}
+
+async function request(path: string, opts: RequestInit = {}): Promise<any> {
+  const headers: Record<string, string> = {};
+  if (!(opts.body instanceof FormData) && !(opts.body instanceof Blob)) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const skipRefresh = path === "/api/auth/login" || path === "/api/auth/register";
+  const res = await fetchWithAuth(path, { ...opts, headers }, { skipRefresh });
+
+  if (res.status === 401 && !skipRefresh) {
+    handleSessionExpiry();
     throw new Error("session expired");
   }
 
@@ -29,24 +60,53 @@ async function request(path: string, opts: RequestInit = {}): Promise<any> {
   return res.json();
 }
 
+// refreshInFlight merges concurrent refresh attempts into one request. The
+// backend rotates refresh tokens (validate, revoke the old one, issue a new
+// one), so parallel refreshes would race each other: the losers would fail
+// with the revoked token and wrongly trigger handleSessionExpiry.
+let refreshInFlight: Promise<boolean> | null = null;
+
 async function tryRefresh(): Promise<boolean> {
-  const rt = localStorage.getItem("refresh_token");
-  if (!rt) return false;
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const rt = localStorage.getItem("refresh_token");
+    if (!rt) return false;
+    try {
+      const data = await fetch(BASE + "/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: rt }),
+      }).then((r) => r.json());
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("refresh_token", data.refresh_token);
+        if (data.session_token) localStorage.setItem("session_token", data.session_token);
+        if (data.role) localStorage.setItem("role", data.role);
+        return true;
+      }
+    } catch {}
+    return false;
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+// requestBlob fetches a protected binary resource (e.g. avatar images).
+// Returns null for any non-2xx status or network error so callers can fall
+// back gracefully.
+async function requestBlob(path: string): Promise<Blob | null> {
   try {
-    const data = await fetch(BASE + "/api/auth/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: rt }),
-    }).then((r) => r.json());
-    if (data.token) {
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("refresh_token", data.refresh_token);
-      if (data.session_token) localStorage.setItem("session_token", data.session_token);
-      if (data.role) localStorage.setItem("role", data.role);
-      return true;
+    const res = await fetchWithAuth(path, {});
+    if (res.status === 401) {
+      handleSessionExpiry();
+      return null;
     }
-  } catch {}
-  return false;
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null;
+  }
 }
 
 export const api = {
@@ -161,6 +221,8 @@ export const api = {
       mode: string;
     }) => request("/api/user/queue", { method: "PUT", body: JSON.stringify(q) }),
     getQueue: () => request("/api/user/queue"),
+    getAvatar: () => requestBlob("/api/user/avatar"),
+    updateAvatar: (file: Blob) => request("/api/user/avatar", { method: "PUT", body: file }),
   },
   jukebox: {
     list: () => request("/api/jukeboxes"),

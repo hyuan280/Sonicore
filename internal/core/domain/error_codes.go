@@ -88,6 +88,10 @@ const (
 	ErrUserTrackIDRequired  ErrorCode = 308
 	ErrUserTrackIDsRequired ErrorCode = 309
 	ErrUserTrackNotFound    ErrorCode = 310
+	ErrUserAvatarTooLarge   ErrorCode = 311
+	ErrUserAvatarFormat     ErrorCode = 312
+	ErrUserAvatarRead       ErrorCode = 313
+	ErrUserAvatarUpdate     ErrorCode = 314
 )
 
 // ---- metadata (400-499) ----
@@ -285,6 +289,10 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrUserTrackIDRequired:      "TRACK_ID_REQUIRED",
 	ErrUserTrackIDsRequired:     "TRACK_IDS_REQUIRED",
 	ErrUserTrackNotFound:        "TRACK_NOT_FOUND",
+	ErrUserAvatarTooLarge:       "AVATAR_TOO_LARGE",
+	ErrUserAvatarFormat:         "AVATAR_INVALID_FORMAT",
+	ErrUserAvatarRead:           "AVATAR_READ_FAILED",
+	ErrUserAvatarUpdate:         "AVATAR_UPDATE_FAILED",
 	ErrMetaFileHashRequired:     "FILE_HASH_REQUIRED",
 	ErrMetaTitleRequired:        "TITLE_REQUIRED",
 	ErrMetaInvalidRequest:       "INVALID_REQUEST",
@@ -401,6 +409,10 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrUserTrackIDRequired:      "Track ID is required",
 	ErrUserTrackIDsRequired:     "Track IDs are required",
 	ErrUserTrackNotFound:        "Track not found",
+	ErrUserAvatarTooLarge:       "Avatar must be at most 1MB",
+	ErrUserAvatarFormat:         "Avatar must be a JPEG, PNG or WebP image",
+	ErrUserAvatarRead:           "Failed to read avatar",
+	ErrUserAvatarUpdate:         "Failed to update avatar",
 	ErrMetaFileHashRequired:     "File hash is required",
 	ErrMetaTitleRequired:        "Title is required",
 	ErrMetaInvalidRequest:       "Invalid request",

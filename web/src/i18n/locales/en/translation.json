@@ -10,7 +10,8 @@
     "settings": "Settings",
     "administration": "Administration",
     "signOut": "Sign out",
-    "discover": "Discover"
+    "discover": "Discover",
+    "profile": "Profile"
   },
   "auth": {
     "signIn": "Sign In",
@@ -228,6 +229,14 @@
     "notifRole_all": "All Users",
     "saved": "Saved"
   },
+  "profile": {
+    "title": "Profile",
+    "uploadAvatar": "Upload avatar",
+    "resetAvatar": "Reset avatar",
+    "avatarHint": "JPEG, PNG or WebP, up to 1MB",
+    "passwordChanged": "Password updated",
+    "fillAllFields": "Please fill in all password fields"
+  },
   "admin": {
     "administration": "Administration",
     "serverSettings": "Server Settings",
@@ -415,7 +424,11 @@
       "PLAYLIST_NOT_FOUND": "Playlist not found",
       "TRACK_ID_REQUIRED": "Track ID is required",
       "TRACK_IDS_REQUIRED": "Track IDs are required",
-      "TRACK_NOT_FOUND": "Track not found"
+      "TRACK_NOT_FOUND": "Track not found",
+      "AVATAR_TOO_LARGE": "Avatar must be at most 1MB",
+      "AVATAR_INVALID_FORMAT": "Avatar must be a JPEG, PNG or WebP image",
+      "AVATAR_READ_FAILED": "Failed to read avatar",
+      "AVATAR_UPDATE_FAILED": "Failed to update avatar"
     },
     "metadata": {
       "FILE_HASH_REQUIRED": "File hash is required",

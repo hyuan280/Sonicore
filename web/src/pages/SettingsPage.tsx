@@ -17,7 +17,6 @@ import {
   Plus,
   FolderOpen,
   Loader2,
-  UserRound,
   SquareLibrary,
   Speaker,
   Turntable,
@@ -48,7 +47,7 @@ import type { JukeboxInfo } from "../stores/jukebox";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { libraries, load: reloadLibs } = useLibrary();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -159,18 +158,6 @@ export default function SettingsPage() {
     return () => clearTimeout(timerRef.current);
   }, [manageSearch]);
 
-  const [showPwModal, setShowPwModal] = useState(false);
-  const [notifPrefsOpen, setNotifPrefsOpen] = useState(false);
-  const [pwForm, setPwForm] = useState({ oldPw: "", newPw: "", confirmPw: "" });
-  const [pwError, setPwError] = useState("");
-  const [pwSaving, setPwSaving] = useState(false);
-
-  const roleLabels: Record<string, string> = {
-    super_admin: t("settings.superAdmin"),
-    admin: t("settings.admin"),
-    user: t("settings.user"),
-  };
-  const roleLabel = (r: string) => roleLabels[r] || t("settings.user");
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   useEffect(() => {
     return () => {
@@ -290,24 +277,6 @@ export default function SettingsPage() {
     }
   };
 
-  const changePassword = async () => {
-    setPwSaving(true);
-    setPwError("");
-    if (pwForm.newPw !== pwForm.confirmPw) {
-      setPwError(t("settings.passwordsNoMatch"));
-      setPwSaving(false);
-      return;
-    }
-    try {
-      await api.auth.changePassword(pwForm.oldPw, pwForm.newPw);
-      setShowPwModal(false);
-      setPwForm({ oldPw: "", newPw: "", confirmPw: "" });
-    } catch (err: any) {
-      setPwError(translateApiError(t, err));
-    }
-    setPwSaving(false);
-  };
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -315,33 +284,6 @@ export default function SettingsPage() {
         <LanguageSwitcher />
       </div>
 
-      <Card className="space-y-3">
-        <h3 className="font-medium flex items-center gap-2">
-          <UserRound className="w-4 h-4" /> {t("settings.account")}
-        </h3>
-        <div className="space-y-1 p-3 rounded-lg bg-zinc-800/50">
-          <p className="text-sm text-zinc-400">
-            {t("settings.username")}: {user?.username}
-          </p>
-          <p className="text-sm text-zinc-400">
-            {t("settings.email")}: {user?.email}
-          </p>
-          <p className="text-sm text-zinc-400">
-            {t("settings.role")}:{" "}
-            <span className="text-green-500">{roleLabel(user?.role || "")}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="primary" size="sm" onClick={() => setShowPwModal(true)}>
-            {t("settings.changePassword")}
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => setNotifPrefsOpen(true)}>
-            {t("settings.myNotificationPrefs")}
-          </Button>
-        </div>
-      </Card>
-
-      {notifPrefsOpen && <UserNotificationModal onClose={() => setNotifPrefsOpen(false)} />}
       {isAdmin && (
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
@@ -461,66 +403,6 @@ export default function SettingsPage() {
       {isAdmin && <NotificationChannelPrefs />}
       {isAdmin && <DeviceManager />}
       {isAdmin && <SubsonicJukeboxSetting />}
-
-      {showPwModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowPwModal(false)}
-        >
-          <div
-            className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-md shadow-xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-lg font-bold">{t("settings.changePassword")}</h2>
-
-            {pwError && <p className="text-sm text-red-400">{pwError}</p>}
-
-            <Input
-              type="password"
-              placeholder={t("settings.currentPassword")}
-              value={pwForm.oldPw}
-              onChange={(e) => setPwForm({ ...pwForm, oldPw: e.target.value })}
-            />
-            <Input
-              type="password"
-              placeholder={t("settings.newPassword")}
-              value={pwForm.newPw}
-              onChange={(e) => setPwForm({ ...pwForm, newPw: e.target.value })}
-            />
-            <Input
-              type="password"
-              placeholder={t("settings.confirmPassword")}
-              value={pwForm.confirmPw}
-              onChange={(e) => setPwForm({ ...pwForm, confirmPw: e.target.value })}
-              onKeyDown={(e) => e.key === "Enter" && changePassword()}
-            />
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setShowPwModal(false);
-                  setPwError("");
-                  setPwForm({ oldPw: "", newPw: "", confirmPw: "" });
-                }}
-              >
-                {t("settings.cancel")}
-              </Button>
-              <Button
-                variant="primary"
-                onClick={changePassword}
-                disabled={pwSaving || !pwForm.oldPw || !pwForm.newPw || !pwForm.confirmPw}
-              >
-                {pwSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : t("settings.update")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <Button variant="danger" onClick={logout}>
-        {t("settings.signOut")}
-      </Button>
 
       {/* Scan dialog */}
       {scanDialogLib && (
@@ -1931,89 +1813,6 @@ function NotificationChannelPrefs() {
       {error && <p className="text-xs text-red-400">{error}</p>}
       {success && <p className="text-xs text-green-400">{success}</p>}
     </Card>
-  );
-}
-
-function UserNotificationModal({ onClose }: { onClose: () => void }) {
-  const { t } = useTranslation();
-  const [prefs, setPrefs] = useState<Record<string, boolean>>({});
-  const [categories, setCategories] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    Promise.all([api.notifications.getUserPrefs(), api.notifications.getPreferences()])
-      .then(([userPrefs, globalPrefs]) => {
-        setCategories(Object.keys(globalPrefs));
-        const enabled: Record<string, boolean> = {};
-        for (const cat of Object.keys(globalPrefs)) {
-          enabled[cat] = userPrefs[cat]?.enabled ?? true;
-        }
-        setPrefs(enabled);
-      })
-      .catch((err: unknown) => setError(translateApiError(t, err)));
-  }, [t]);
-
-  function toggle(cat: string) {
-    setPrefs((prev) => ({ ...prev, [cat]: !prev[cat] }));
-  }
-
-  async function save() {
-    setSaving(true);
-    setError("");
-    try {
-      const payload = Object.entries(prefs).map(([category, enabled]) => ({ category, enabled }));
-      await api.notifications.updateUserPref(payload);
-      onClose();
-    } catch (err: unknown) {
-      setError(translateApiError(t, err));
-    }
-    setSaving(false);
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-sm shadow-xl space-y-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-bold">{t("settings.myNotificationPrefs")}</h2>
-        <div className="space-y-2">
-          {categories.map((cat) => (
-            <div
-              key={cat}
-              className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50"
-            >
-              <span className="text-sm">{t("settings.notifCat_" + cat)}</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={prefs[cat] ?? true}
-                onClick={() => toggle(cat)}
-                disabled={saving}
-                className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${prefs[cat] !== false ? "bg-green-600" : "bg-zinc-700"}`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${prefs[cat] !== false ? "translate-x-6" : ""}`}
-                />
-              </button>
-            </div>
-          ))}
-        </div>
-        {error && <p className="text-xs text-red-400">{error}</p>}
-        <div className="flex justify-end gap-3">
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" size="sm" onClick={save} disabled={saving}>
-            {saving ? t("common.saving") : t("common.save")}
-          </Button>
-        </div>
-      </div>
-    </div>
   );
 }
 

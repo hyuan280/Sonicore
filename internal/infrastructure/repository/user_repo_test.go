@@ -97,11 +97,11 @@ func TestUserRepoListAll(t *testing.T) {
 	other.ID = "u-002"
 	other.Username = "bob"
 
-	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.CreatedAt, user.UpdatedAt).
-		AddRow(other.ID, other.Username, other.Email, other.PasswordHash, other.Role, other.CreatedAt, other.UpdatedAt)
+	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.AvatarFormat, user.CreatedAt, user.UpdatedAt).
+		AddRow(other.ID, other.Username, other.Email, other.PasswordHash, other.Role, other.AvatarFormat, other.CreatedAt, other.UpdatedAt)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users ORDER BY created_at ASC`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users ORDER BY created_at ASC`).
 		WillReturnRows(rows)
 
 	users, err := repo.ListAll(context.Background())
@@ -117,10 +117,10 @@ func TestUserRepoFindByID(t *testing.T) {
 	repo := NewUserRepo(db)
 	user := testUser()
 
-	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.CreatedAt, user.UpdatedAt)
+	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.AvatarFormat, user.CreatedAt, user.UpdatedAt)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
 		WillReturnRows(rows)
 
@@ -134,7 +134,7 @@ func TestUserRepoFindByIDNotFound(t *testing.T) {
 	db, mock := newMockDB(t)
 	repo := NewUserRepo(db)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
 
@@ -147,10 +147,10 @@ func TestUserRepoFindByUsername(t *testing.T) {
 	repo := NewUserRepo(db)
 	user := testUser()
 
-	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.CreatedAt, user.UpdatedAt)
+	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.AvatarFormat, user.CreatedAt, user.UpdatedAt)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("alice").
 		WillReturnRows(rows)
 
@@ -165,10 +165,10 @@ func TestUserRepoFindByEmail(t *testing.T) {
 	repo := NewUserRepo(db)
 	user := testUser()
 
-	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.CreatedAt, user.UpdatedAt)
+	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow(user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.AvatarFormat, user.CreatedAt, user.UpdatedAt)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE email = \$1`).
 		WithArgs("alice@example.com").
 		WillReturnRows(rows)
 
@@ -183,7 +183,7 @@ func TestUserRepoFindScanError(t *testing.T) {
 	repo := NewUserRepo(db)
 
 	rows := sqlmock.NewRows([]string{"id", "username"}).AddRow("u-001", "alice")
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
 		WillReturnRows(rows)
 
@@ -200,5 +200,63 @@ func TestUserRepoDelete(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.Delete(context.Background(), "u-001"))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserRepoGetAvatar(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewUserRepo(db)
+
+	rows := sqlmock.NewRows([]string{"avatar", "avatar_format"}).
+		AddRow([]byte{0xff, 0xd8}, "jpeg")
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-001").
+		WillReturnRows(rows)
+
+	data, format, err := repo.GetAvatar(context.Background(), "u-001")
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0xff, 0xd8}, data)
+	assert.Equal(t, "jpeg", format)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserRepoGetAvatarNone(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewUserRepo(db)
+
+	rows := sqlmock.NewRows([]string{"avatar", "avatar_format"}).
+		AddRow(nil, "")
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-001").
+		WillReturnRows(rows)
+
+	data, format, err := repo.GetAvatar(context.Background(), "u-001")
+	require.NoError(t, err)
+	assert.Nil(t, data)
+	assert.Equal(t, "", format)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserRepoUpdateAvatar(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewUserRepo(db)
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET avatar = $2, avatar_format = $3, updated_at = NOW() WHERE id = $1`)).
+		WithArgs("u-001", []byte{0x01, 0x02}, "png").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateAvatar(context.Background(), "u-001", []byte{0x01, 0x02}, "png"))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserRepoRemoveAvatar(t *testing.T) {
+	db, mock := newMockDB(t)
+	repo := NewUserRepo(db)
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET avatar = NULL, avatar_format = '', updated_at = NOW() WHERE id = $1`)).
+		WithArgs("u-001").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	require.NoError(t, repo.UpdateAvatar(context.Background(), "u-001", nil, ""))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
