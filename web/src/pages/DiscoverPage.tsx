@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import { Card, CardGrid } from "../components/ui/card";
 import PlatformSwitcher, { type PlatformItem } from "../components/PlatformSwitcher";
@@ -78,7 +79,7 @@ export default function DiscoverPage() {
 
   const submitSearch = () => {
     const q = query.trim();
-    if (q && platform) navigate(`/discover/search/${platform}?q=${encodeURIComponent(q)}`);
+    if (q && platform) navigate(`${ROUTES.discover}/search/${platform}?q=${encodeURIComponent(q)}`);
   };
 
   const renderChartBody = () => {
@@ -105,7 +106,7 @@ export default function DiscoverPage() {
     return (
       <CardGrid>
         {charts.map((c) => (
-          <Link key={c.id} to={`/discover/charts/${platform}/${c.id}`} className="block">
+          <Link key={c.id} to={`${ROUTES.discover}/charts/${platform}/${c.id}`} className="block">
             <Card className="hover:bg-zinc-800/50 transition-colors h-full p-0 overflow-hidden">
               <div className="aspect-square flex items-center justify-center overflow-hidden bg-zinc-800">
                 {c.cover_url ? (

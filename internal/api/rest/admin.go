@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -84,14 +85,51 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]interface{}, 0, len(users))
 	for _, u := range users {
 		result = append(result, map[string]interface{}{
-			"id":         u.ID,
-			"username":   u.Username,
-			"email":      u.Email,
-			"role":       u.Role,
-			"created_at": u.CreatedAt,
+			"id":            u.ID,
+			"username":      u.Username,
+			"email":         u.Email,
+			"role":          u.Role,
+			"avatar_format": u.AvatarFormat,
+			"created_at":    u.CreatedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"users": result})
+}
+
+// GetUserAvatar streams a target user's avatar image. The self-service
+// /api/user/avatar endpoint is always scoped to the caller, so admins list
+// users through this route. 404 means the user has no avatar.
+func (h *AdminHandler) GetUserAvatar(w http.ResponseWriter, r *http.Request) {
+	targetID := mux.Vars(r)["id"]
+	if targetID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	data, format, err := h.userRepo.GetAvatar(r.Context(), targetID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserAvatarRead)
+		return
+	}
+	if data == nil || format == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	contentType := allowedAvatarFormats[format]
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
 }
 
 type updateRoleRequest struct {

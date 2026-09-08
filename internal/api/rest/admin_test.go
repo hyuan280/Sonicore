@@ -33,12 +33,12 @@ func newAdminHandler(t *testing.T) (*AdminHandler, sqlmock.Sqlmock) {
 }
 
 func adminUserRow(id, username, role string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow(id, username, username+"@example.com", "h", role, time.Now(), time.Now())
+	return sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow(id, username, username+"@example.com", "h", role, "", time.Now(), time.Now())
 }
 
 func adminUserValues(id, username, role string) []driver.Value {
-	return []driver.Value{id, username, username + "@example.com", "h", role, time.Now(), time.Now()}
+	return []driver.Value{id, username, username + "@example.com", "h", role, "", time.Now(), time.Now()}
 }
 
 type driverValue2 = interface{}
@@ -46,8 +46,8 @@ type driverValue2 = interface{}
 func TestAdminListUsers(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users ORDER BY created_at ASC`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users ORDER BY created_at ASC`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
 			AddRow(adminUserValues("u-1", "alice", "user")...).
 			AddRow(adminUserValues("u-2", "bob", "admin")...))
 
@@ -57,13 +57,14 @@ func TestAdminListUsers(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"username":"alice"`)
 	assert.Contains(t, rec.Body.String(), `"username":"bob"`)
+	assert.Contains(t, rec.Body.String(), `"avatar_format":""`)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestAdminListUsersError(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users ORDER BY created_at ASC`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users ORDER BY created_at ASC`).
 		WillReturnError(sql.ErrConnDone)
 
 	rec := httptest.NewRecorder()
@@ -72,13 +73,62 @@ func TestAdminListUsersError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+func TestAdminGetUserAvatarSuccess(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	data := []byte{0x89, 0x50, 0x4e, 0x47}
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-1").
+		WillReturnRows(sqlmock.NewRows([]string{"avatar", "avatar_format"}).AddRow(data, "png"))
+
+	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/admin/users/u-1/avatar", nil),
+		map[string]string{"id": "u-1"})
+	rec := httptest.NewRecorder()
+	h.GetUserAvatar(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+	assert.Equal(t, data, rec.Body.Bytes())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAdminGetUserAvatarNone(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("u-1").
+		WillReturnRows(sqlmock.NewRows([]string{"avatar", "avatar_format"}).AddRow(nil, ""))
+
+	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/admin/users/u-1/avatar", nil),
+		map[string]string{"id": "u-1"})
+	rec := httptest.NewRecorder()
+	h.GetUserAvatar(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestAdminGetUserAvatarUserGone(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	mock.ExpectQuery(`SELECT avatar, avatar_format FROM users WHERE id = \$1`).
+		WithArgs("ghost").
+		WillReturnError(sql.ErrNoRows)
+
+	req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/admin/users/ghost/avatar", nil),
+		map[string]string{"id": "ghost"})
+	rec := httptest.NewRecorder()
+	h.GetUserAvatar(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestAdminUpdateUserRoleSuccess(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("super-1").
 		WillReturnRows(adminUserRow("super-1", "root", "super_admin"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-2").
 		WillReturnRows(adminUserRow("u-2", "bob", "user"))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET username=$2, email=$3, password_hash=$4, role=$5, updated_at=$6 WHERE id=$1`)).
@@ -111,10 +161,10 @@ func TestAdminUpdateUserRoleInvalidRole(t *testing.T) {
 func TestAdminUpdateUserRoleCannotTouchSuperAdmin(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("super-1").
 		WillReturnRows(adminUserRow("super-1", "root", "super_admin"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-super-2").
 		WillReturnRows(adminUserRow("u-super-2", "other-root", "super_admin"))
 
@@ -130,10 +180,10 @@ func TestAdminUpdateUserRoleCannotTouchSuperAdmin(t *testing.T) {
 func TestAdminUpdateUserRoleAdminCannotManageAdmin(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("admin-1").
 		WillReturnRows(adminUserRow("admin-1", "a", "admin"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("admin-2").
 		WillReturnRows(adminUserRow("admin-2", "b", "admin"))
 
@@ -149,7 +199,7 @@ func TestAdminUpdateUserRoleAdminCannotManageAdmin(t *testing.T) {
 func TestAdminUpdateUserRoleActorNotFound(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("ghost").
 		WillReturnError(sql.ErrNoRows)
 

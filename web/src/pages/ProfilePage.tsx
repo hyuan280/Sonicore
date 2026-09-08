@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../stores/auth";
 import { translateApiError } from "../i18n/errorCodes";
@@ -8,10 +8,115 @@ import { Card } from "../components/ui/card";
 import { api } from "../api/client";
 import UserAvatar from "../components/UserAvatar";
 import { clearAvatarCache } from "../lib/avatarCache";
-import { Loader2, Upload, RotateCcw, UserRound, KeyRound } from "lucide-react";
+import { Loader2, Upload, RotateCcw, UserRound, KeyRound, Bell } from "lucide-react";
 
 const MAX_AVATAR_SIZE = 1 * 1024 * 1024;
 const AVATAR_FORMATS = ["image/jpeg", "image/png", "image/webp"];
+
+// Categories exposed for per-user notification toggles.
+// Keep in sync with domain.NotificationCategory in internal/core/domain/notification.go
+const USER_NOTIF_CATEGORIES = ["scan", "system"];
+
+// User notification preference rows as served by GET /api/notifications/user-prefs.
+interface UserNotifPref {
+  category: string;
+  enabled: boolean;
+  roles?: string[];
+  channels?: string[];
+}
+
+function UserNotificationPrefs() {
+  const { t } = useTranslation();
+  const [prefs, setPrefs] = useState<Record<string, { enabled: boolean }>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.notifications
+      .getUserPrefs()
+      .then((p: Record<string, UserNotifPref>) => {
+        if (cancelled) return;
+        const map: Record<string, { enabled: boolean }> = {};
+        for (const cat of USER_NOTIF_CATEGORIES) {
+          map[cat] = { enabled: p?.[cat] ? !!p[cat].enabled : true };
+        }
+        setPrefs(map);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(translateApiError(t, err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  const toggle = async (cat: string) => {
+    if (saving) return;
+    const next = !prefs[cat]?.enabled;
+    setPrefs((prev) => ({ ...prev, [cat]: { ...prev[cat], enabled: next } }));
+    setSaving(cat);
+    setError("");
+    setSuccess("");
+    try {
+      await api.notifications.updateUserPref([{ category: cat, enabled: next }]);
+      setSuccess(t("settings.saved"));
+    } catch (err: unknown) {
+      setPrefs((prev) => ({ ...prev, [cat]: { ...prev[cat], enabled: !next } }));
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <Card className="space-y-3">
+      <h3 className="font-medium flex items-center gap-2">
+        <Bell className="w-4 h-4" /> {t("settings.myNotificationPrefs")}
+      </h3>
+      <p className="text-xs text-zinc-400">{t("settings.notifPersonalDesc")}</p>
+      {loading ? (
+        <div className="flex items-center justify-center py-6">
+          <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {USER_NOTIF_CATEGORIES.map((cat) => {
+            const enabled = !!prefs[cat]?.enabled;
+            return (
+              <div
+                key={cat}
+                className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/50"
+              >
+                <p className="text-sm font-medium">{t("settings.notifCat_" + cat)}</p>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enabled}
+                  onClick={() => toggle(cat)}
+                  disabled={saving !== null}
+                  className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${enabled ? "bg-green-600" : "bg-zinc-700"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${enabled ? "translate-x-6" : ""}`}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {success && <p className="text-xs text-green-400">{success}</p>}
+    </Card>
+  );
+}
 
 export default function ProfilePage() {
   const { t } = useTranslation();
@@ -202,6 +307,8 @@ export default function ProfilePage() {
           </Button>
         </div>
       </Card>
+
+      <UserNotificationPrefs />
 
       <Button variant="danger" onClick={logout}>
         {t("settings.signOut")}

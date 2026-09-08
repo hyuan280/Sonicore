@@ -11,11 +11,18 @@ type AudioDevice struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	IsDefault   bool   `json:"is_default"`
+	Driver      string `json:"driver"` // "alsa" or "pulseaudio"
 }
 
 func DetectAudioDevices() []AudioDevice {
 	devices := []AudioDevice{
-		{ID: "default", Name: "System Default", Description: "Default audio output", IsDefault: true},
+		{
+			ID:          "default",
+			Name:        "System Default",
+			Description: "Default audio output",
+			IsDefault:   true,
+			Driver:      "alsa",
+		},
 	}
 
 	alsaDevs := detectALSA()
@@ -58,6 +65,7 @@ func detectALSA() []AudioDevice {
 			ID:          "hw:" + cardID + ",0",
 			Name:        cardName,
 			Description: "ALSA hardware device (hw:" + cardID + ",0)",
+			Driver:      "alsa",
 		})
 	}
 
@@ -121,6 +129,7 @@ func parsePactlVerbose(out string) []AudioDevice {
 
 		if strings.HasPrefix(trimmed, "Name:") {
 			current.ID = strings.TrimSpace(strings.TrimPrefix(trimmed, "Name:"))
+			current.Driver = "pulseaudio"
 		} else if strings.HasPrefix(trimmed, "Description:") {
 			desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "Description:"))
 			current.Name = desc

@@ -1,13 +1,20 @@
 import { Component, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Routes, Route, Navigate, Link, useLocation, Outlet } from "react-router-dom";
-import { useAuth } from "./stores/auth";
+import { useAuth, isAdmin } from "./stores/auth";
 import { useLibrary } from "./stores/library";
 import { useJukebox } from "./stores/jukebox";
 import { usePlaylists } from "./stores/playlists";
 import { usePlayer } from "./stores/player";
 import { api } from "./api/client";
-import { APP_VERSION } from "./lib/constants";
+import {
+  APP_VERSION,
+  ROUTES,
+  SETTINGS_TABS,
+  SETTINGS_TAB_STORAGE_KEY,
+  settingsPath,
+  type SettingsTab,
+} from "./lib/constants";
 import {
   Turntable,
   Music,
@@ -17,7 +24,6 @@ import {
   Heart,
   History,
   Settings,
-  Shield,
   ChevronRight,
   Compass,
   UserRound,
@@ -84,7 +90,12 @@ const JukeboxDetailPage = lazy(() => import("./pages/JukeboxDetailPage"));
 const PlaylistDetailPage = lazy(() => import("./pages/PlaylistDetailPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
-const AdminPage = lazy(() => import("./pages/AdminPage"));
+const SystemTab = lazy(() => import("./pages/settings/SystemTab"));
+const LibrariesTab = lazy(() => import("./pages/settings/LibrariesTab"));
+const DevicesTab = lazy(() => import("./pages/settings/DevicesTab"));
+const SourcesTab = lazy(() => import("./pages/settings/SourcesTab"));
+const NotificationsTab = lazy(() => import("./pages/settings/NotificationsTab"));
+const UsersTab = lazy(() => import("./pages/settings/UsersTab"));
 const DiscoverPage = lazy(() => import("./pages/DiscoverPage"));
 const DiscoverChartPage = lazy(() => import("./pages/DiscoverChartPage"));
 const DiscoverSearchPage = lazy(() => import("./pages/DiscoverSearchPage"));
@@ -99,15 +110,15 @@ function Sidebar() {
   const [jbxOpen, setJbxOpen] = useState(false);
   const { t } = useTranslation();
   const navItems = [
-    { to: "/songs", icon: Music, label: t("nav.songs") },
-    { to: "/albums", icon: Disc2, label: t("nav.albums") },
-    { to: "/artists", icon: Mic2, label: t("nav.artists") },
+    { to: ROUTES.songs, icon: Music, label: t("nav.songs") },
+    { to: ROUTES.albums, icon: Disc2, label: t("nav.albums") },
+    { to: ROUTES.artists, icon: Mic2, label: t("nav.artists") },
     { type: "divider" as const },
-    { to: "/playlists", icon: ListMusic, label: t("nav.playlists") },
+    { to: ROUTES.playlists, icon: ListMusic, label: t("nav.playlists") },
   ];
   const navItemsAfter = [
-    { to: "/favorites", icon: Heart, label: t("nav.favorites") },
-    { to: "/history", icon: History, label: t("nav.history") },
+    { to: ROUTES.favorites, icon: Heart, label: t("nav.favorites") },
+    { to: ROUTES.history, icon: History, label: t("nav.history") },
   ];
 
   useEffect(() => {
@@ -118,18 +129,20 @@ function Sidebar() {
     loadJukeboxes();
   }, []);
 
-  const role = localStorage.getItem("role");
-  const isAdmin = role === "admin" || role === "super_admin";
-  const inPlaylist = location.pathname.startsWith("/playlists");
-  const inJukebox = location.pathname.startsWith("/jukebox");
+  const inPlaylist = location.pathname.startsWith(ROUTES.playlists);
+  const inJukebox = location.pathname.startsWith(ROUTES.jukebox);
   const currentPlaylistId = usePlayer((s) => s.currentPlaylistId);
   const playing = usePlayer((s) => s.playing);
   const anyJukeboxPlaying = jukeboxes.some((j) => j.is_playing);
   const anyPlaylistActive = currentPlaylistId !== null && playing;
+  const isAdminUser = isAdmin();
 
   return (
     <aside className="w-56 border-r border-zinc-800 flex flex-col bg-zinc-900/50 h-full pb-16">
-      <Link to="/songs" className="flex items-center gap-2 px-4 py-4 border-b border-zinc-800">
+      <Link
+        to={ROUTES.songs}
+        className="flex items-center gap-2 px-4 py-4 border-b border-zinc-800"
+      >
         <Logo />
         <span className="font-bold">Sonicore</span>
         <span className="text-xs text-zinc-500 self-end pb-0.5 ml-auto">{APP_VERSION}</span>
@@ -139,12 +152,12 @@ function Sidebar() {
         {navItems.map((item, i) => {
           if ("type" in item) return <div key={i} className="border-t border-zinc-800 my-2" />;
           const active =
-            item.to === "/playlists" ? inPlaylist : location.pathname.startsWith(item.to);
-          if (item.to === "/playlists") {
+            item.to === ROUTES.playlists ? inPlaylist : location.pathname.startsWith(item.to);
+          if (item.to === ROUTES.playlists) {
             return (
               <div key={item.to}>
                 <Link
-                  to="/playlists"
+                  to={ROUTES.playlists}
                   onClick={() => {
                     if (!plOpen) setPlOpen(true);
                   }}
@@ -173,9 +186,9 @@ function Sidebar() {
                     {playlists.map((p) => (
                       <Link
                         key={p.id}
-                        to={`/playlists/${p.id}`}
+                        to={`${ROUTES.playlists}/${p.id}`}
                         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                          location.pathname === `/playlists/${p.id}`
+                          location.pathname === `${ROUTES.playlists}/${p.id}`
                             ? "text-green-500 bg-green-600/10"
                             : "text-zinc-500 hover:text-white hover:bg-zinc-800"
                         }`}
@@ -209,7 +222,7 @@ function Sidebar() {
 
         <div>
           <Link
-            to="/jukebox"
+            to={ROUTES.jukebox}
             onClick={() => {
               if (!jbxOpen) setJbxOpen(true);
             }}
@@ -236,9 +249,9 @@ function Sidebar() {
               {jukeboxes.map((j) => (
                 <Link
                   key={j.id}
-                  to={`/jukebox/${j.id}`}
+                  to={`${ROUTES.jukebox}/${j.id}`}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                    location.pathname === `/jukebox/${j.id}`
+                    location.pathname === `${ROUTES.jukebox}/${j.id}`
                       ? "text-green-500 bg-green-600/10"
                       : "text-zinc-500 hover:text-white hover:bg-zinc-800"
                   }`}
@@ -253,9 +266,9 @@ function Sidebar() {
 
         <div className="border-t border-zinc-800 my-2" />
         <Link
-          to="/discover"
+          to={ROUTES.discover}
           className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-            location.pathname.startsWith("/discover")
+            location.pathname.startsWith(ROUTES.discover)
               ? "bg-green-600/20 text-green-500"
               : "text-zinc-400 hover:text-white hover:bg-zinc-800"
           }`}
@@ -281,35 +294,20 @@ function Sidebar() {
         ))}
 
         <div className="border-t border-zinc-800 my-2" />
-        <Link
-          to="/settings"
-          className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-            location.pathname === "/settings"
-              ? "bg-green-600/20 text-green-500"
-              : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          {t("nav.settings")}
-        </Link>
-      </nav>
-
-      {isAdmin && <div className="border-t border-zinc-800 mx-2" />}
-      <div className="px-2 py-2 space-y-1">
-        {isAdmin && (
+        {isAdminUser && (
           <Link
-            to="/admin"
+            to={ROUTES.settings}
             className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-              location.pathname === "/admin"
+              location.pathname.startsWith(ROUTES.settings)
                 ? "bg-green-600/20 text-green-500"
                 : "text-zinc-400 hover:text-white hover:bg-zinc-800"
             }`}
           >
-            <Shield className="w-4 h-4" />
-            {t("nav.administration")}
+            <Settings className="w-4 h-4" />
+            {t("nav.settings")}
           </Link>
         )}
-      </div>
+      </nav>
 
       <div className="border-t border-zinc-800 mx-2" />
       <div className="px-2 py-2 space-y-1">
@@ -323,10 +321,10 @@ function ProfileEntry() {
   const location = useLocation();
   const { user } = useAuth();
   if (!user) return null;
-  const active = location.pathname === "/profile";
+  const active = location.pathname === ROUTES.profile;
   return (
     <Link
-      to="/profile"
+      to={ROUTES.profile}
       title={user.username}
       className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
         active
@@ -342,6 +340,15 @@ function ProfileEntry() {
       <span className="flex-1 truncate">{user.username}</span>
     </Link>
   );
+}
+
+function SettingsIndex() {
+  // Resume the last visited tab; fall back to the system tab.
+  const saved = localStorage.getItem(SETTINGS_TAB_STORAGE_KEY);
+  const tab = Object.values(SETTINGS_TABS).includes(saved as SettingsTab)
+    ? (saved as SettingsTab)
+    : SETTINGS_TABS.system;
+  return <Navigate to={settingsPath(tab)} replace />;
 }
 
 function Layout() {
@@ -403,10 +410,10 @@ export default function App() {
   return (
     <Routes>
       <Route
-        path="/login"
+        path={ROUTES.login}
         element={
           token ? (
-            <Navigate to={hasLibraries ? "/songs" : "/settings"} replace />
+            <Navigate to={hasLibraries ? ROUTES.songs : ROUTES.settings} replace />
           ) : (
             <ErrorBoundary>
               <PageSuspense>
@@ -416,30 +423,50 @@ export default function App() {
           )
         }
       />
-      <Route path="/" element={token ? <Layout /> : <Navigate to="/login" replace />}>
-        <Route index element={<Navigate to="/songs" replace />} />
-        <Route path="songs" element={<SongsPage />} />
-        <Route path="albums" element={<AlbumsPage />} />
-        <Route path="albums/:albumId" element={<AlbumDetailPage />} />
-        <Route path="artists" element={<ArtistsPage />} />
-        <Route path="artists/:artistId" element={<ArtistDetailPage />} />
-        <Route path="playlists" element={<PlaylistsPage />} />
-        <Route path="playlists/:id" element={<PlaylistDetailPage />} />
-        <Route path="favorites" element={<FavoritesPage />} />
-        <Route path="history" element={<HistoryPage />} />
-        <Route path="discover" element={<DiscoverPage />} />
-        <Route path="discover/charts/:platform/:chartId" element={<DiscoverChartPage />} />
-        <Route path="discover/search/:platform" element={<DiscoverSearchPage />} />
-        <Route path="discover/artists/:platform/:artistId" element={<DiscoverArtistPage />} />
-        <Route path="discover/tracks/:platform/:trackId" element={<DiscoverTrackPage />} />
-        <Route path="jukebox" element={<JukeboxPage />} />
-        <Route path="jukebox/:id" element={<JukeboxDetailPage />} />
-        <Route path="player" element={<PlayerPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-        <Route path="admin" element={<AdminPage />} />
+      <Route
+        path={ROUTES.root}
+        element={token ? <Layout /> : <Navigate to={ROUTES.login} replace />}
+      >
+        <Route index element={<Navigate to={ROUTES.songs} replace />} />
+        <Route path={ROUTES.songs} element={<SongsPage />} />
+        <Route path={ROUTES.albums} element={<AlbumsPage />} />
+        <Route path={`${ROUTES.albums}/:albumId`} element={<AlbumDetailPage />} />
+        <Route path={ROUTES.artists} element={<ArtistsPage />} />
+        <Route path={`${ROUTES.artists}/:artistId`} element={<ArtistDetailPage />} />
+        <Route path={ROUTES.playlists} element={<PlaylistsPage />} />
+        <Route path={`${ROUTES.playlists}/:id`} element={<PlaylistDetailPage />} />
+        <Route path={ROUTES.favorites} element={<FavoritesPage />} />
+        <Route path={ROUTES.history} element={<HistoryPage />} />
+        <Route path={ROUTES.discover} element={<DiscoverPage />} />
+        <Route
+          path={`${ROUTES.discover}/charts/:platform/:chartId`}
+          element={<DiscoverChartPage />}
+        />
+        <Route path={`${ROUTES.discover}/search/:platform`} element={<DiscoverSearchPage />} />
+        <Route
+          path={`${ROUTES.discover}/artists/:platform/:artistId`}
+          element={<DiscoverArtistPage />}
+        />
+        <Route
+          path={`${ROUTES.discover}/tracks/:platform/:trackId`}
+          element={<DiscoverTrackPage />}
+        />
+        <Route path={ROUTES.jukebox} element={<JukeboxPage />} />
+        <Route path={`${ROUTES.jukebox}/:id`} element={<JukeboxDetailPage />} />
+        <Route path={ROUTES.player} element={<PlayerPage />} />
+        <Route path={ROUTES.settings} element={<SettingsPage />}>
+          <Route index element={<SettingsIndex />} />
+          <Route path={SETTINGS_TABS.system} element={<SystemTab />} />
+          <Route path={SETTINGS_TABS.libraries} element={<LibrariesTab />} />
+          <Route path={SETTINGS_TABS.devices} element={<DevicesTab />} />
+          <Route path={SETTINGS_TABS.sources} element={<SourcesTab />} />
+          <Route path={SETTINGS_TABS.notifications} element={<NotificationsTab />} />
+          <Route path={SETTINGS_TABS.users} element={<UsersTab />} />
+        </Route>
+        <Route path={ROUTES.profile} element={<ProfilePage />} />
+        <Route path={ROUTES.admin} element={<Navigate to={ROUTES.settings} replace />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to={ROUTES.root} replace />} />
     </Routes>
   );
 }

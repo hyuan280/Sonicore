@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../components/ui/button";
 import { SkipForward, Music, Play } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { formatDuration, performerNames, coverImageUrl } from "../lib/utils";
 import ArtistLink from "../components/ArtistLink";
 
@@ -74,7 +75,7 @@ export default function PlayerPage() {
                     ? ` — ${
                         t.albums[0].id ? (
                           <Link
-                            to={`/albums/${t.albums[0].id}`}
+                            to={`${ROUTES.albums}/${t.albums[0].id}`}
                             className="hover:text-white transition-colors"
                             onClick={(e) => e.stopPropagation()}
                           >

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { usePlaylists } from "../stores/playlists";
 import { usePlayer } from "../stores/player";
 import { Button } from "../components/ui/button";
@@ -75,7 +76,7 @@ export default function PlaylistsPage() {
             />
             <div
               className="flex-1 min-w-0 cursor-pointer"
-              onClick={() => navigate(`/playlists/${p.id}`)}
+              onClick={() => navigate(`${ROUTES.playlists}/${p.id}`)}
             >
               <div className="font-medium truncate">{p.name}</div>
               <div className="text-xs text-zinc-500">

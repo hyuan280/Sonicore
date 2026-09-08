@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import { usePlayer, type PlayerTrack } from "../stores/player";
 import { usePlaylists } from "../stores/playlists";
@@ -46,7 +47,7 @@ export default function PlaylistDetailPage() {
   const handleDelete = async () => {
     if (!id) return;
     await removePlaylist(id);
-    navigate("/playlists");
+    navigate(ROUTES.playlists);
   };
 
   const removeTrack = async (trackId: string) => {

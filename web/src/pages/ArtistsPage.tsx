@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import { Card, CardGrid } from "../components/ui/card";
 import {
@@ -227,7 +228,7 @@ export default function ArtistsPage() {
         {layout === "grid" ? (
           <CardGrid>
             {artists.map((a) => (
-              <Link key={a.id} to={`/artists/${a.id}`} className="block">
+              <Link key={a.id} to={`${ROUTES.artists}/${a.id}`} className="block">
                 <Card className="flex flex-col hover:bg-zinc-800/50 transition-colors">
                   <div className="aspect-square rounded-full bg-zinc-800 mb-3 flex items-center justify-center overflow-hidden">
                     {a.cover_image_id ? (
@@ -261,7 +262,7 @@ export default function ArtistsPage() {
             {artists.map((a) => (
               <Link
                 key={a.id}
-                to={`/artists/${a.id}`}
+                to={`${ROUTES.artists}/${a.id}`}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors"
               >
                 <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">

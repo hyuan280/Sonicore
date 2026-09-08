@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import { Card, CardGrid } from "../components/ui/card";
 import {
@@ -220,7 +221,7 @@ export default function AlbumsPage() {
         {layout === "grid" ? (
           <CardGrid>
             {albums.map((a) => (
-              <Link key={a.id} to={`/albums/${a.id}`} className="block">
+              <Link key={a.id} to={`${ROUTES.albums}/${a.id}`} className="block">
                 <Card className="hover:bg-zinc-800/50 transition-colors h-full p-0 overflow-hidden">
                   <div className="aspect-square flex items-center justify-center overflow-hidden bg-zinc-800">
                     {a.cover_image_id ? (
@@ -244,7 +245,7 @@ export default function AlbumsPage() {
                     <p className="font-medium text-sm truncate">{a.title || a.name}</p>
                     {a.artistId ? (
                       <Link
-                        to={`/artists/${a.artistId}`}
+                        to={`${ROUTES.artists}/${a.artistId}`}
                         className="text-xs text-zinc-400 truncate hover:text-white transition-colors block"
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -270,7 +271,7 @@ export default function AlbumsPage() {
             {albums.map((a) => (
               <Link
                 key={a.id}
-                to={`/albums/${a.id}`}
+                to={`${ROUTES.albums}/${a.id}`}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-zinc-800/50 transition-colors"
               >
                 <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">

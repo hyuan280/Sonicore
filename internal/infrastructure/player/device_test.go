@@ -25,10 +25,12 @@ Sink #1
 
 	assert.Equal(t, "alsa_output.pci-0000_00_1f.3.analog-stereo", devices[0].ID)
 	assert.Equal(t, "Built-in Audio Analog Stereo", devices[0].Name)
+	assert.Equal(t, "pulseaudio", devices[0].Driver)
 	assert.False(t, devices[0].IsDefault, "no default sink detected, nothing flagged")
 
 	assert.Equal(t, "alsa_output.usb-Device_00d9.analog-stereo", devices[1].ID)
 	assert.Equal(t, "USB Audio Device", devices[1].Name)
+	assert.Equal(t, "pulseaudio", devices[1].Driver)
 	assert.False(t, devices[1].IsDefault)
 }
 

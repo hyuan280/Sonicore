@@ -414,6 +414,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	admin.Use(rest.AdminOnly)
 	admin.HandleFunc("/users", adminHandler.ListUsers).Methods("GET")
 	admin.HandleFunc("/users/{id}/role", adminHandler.UpdateUserRole).Methods("PUT")
+	admin.HandleFunc("/users/{id}/avatar", adminHandler.GetUserAvatar).Methods("GET")
 	admin.HandleFunc("/settings", adminHandler.GetSettings).Methods("GET")
 	admin.HandleFunc("/settings", adminHandler.UpdateSettings).Methods("PUT")
 	admin.HandleFunc("/dirs", adminHandler.ListDirs).Methods("GET")

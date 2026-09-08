@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import PlatformTrackList, { type PlatformTrackItem } from "../components/PlatformTrackList";
 import PageNav from "../components/PageNav";
@@ -194,7 +195,7 @@ export default function DiscoverSearchPage() {
           {artists.map((a) => (
             <Link
               key={a.artist_id}
-              to={`/discover/artists/${platform}/${a.artist_id}`}
+              to={`${ROUTES.discover}/artists/${platform}/${a.artist_id}`}
               className="block"
             >
               <Card className="hover:bg-zinc-800/50 transition-colors h-full p-0 overflow-hidden">

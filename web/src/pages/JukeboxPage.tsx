@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { useJukebox } from "../stores/jukebox";
 import { api } from "../api/client";
 import { Button } from "../components/ui/button";
@@ -84,7 +85,10 @@ export default function JukeboxPage() {
             key={j.id}
             className="flex items-center gap-3 p-4 border border-zinc-800 rounded-xl bg-zinc-900/50 hover:bg-zinc-800/30 transition-colors group"
           >
-            <Link to={`/jukebox/${j.id}`} className="flex-1 min-w-0 flex items-center gap-3">
+            <Link
+              to={`${ROUTES.jukebox}/${j.id}`}
+              className="flex-1 min-w-0 flex items-center gap-3"
+            >
               <Turntable
                 className={`w-10 h-10 shrink-0 ${j.is_playing ? "text-green-500" : "text-zinc-600"}`}
               />

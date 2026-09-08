@@ -14,6 +14,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { usePlayer } from "../stores/player";
 import { api } from "../api/client";
 import { AddBtn, FavBtn, AddQueueBtn } from "./AddToPlaylist";
@@ -664,7 +665,7 @@ export default function TrackTable({
                   <span className="min-w-[120px] max-w-[280px] shrink-0 text-center hidden sm:block">
                     {t.albums?.[0]?.id ? (
                       <Link
-                        to={`/albums/${t.albums[0].id}`}
+                        to={`${ROUTES.albums}/${t.albums[0].id}`}
                         className="text-sm text-zinc-500 truncate hover:text-white transition-colors"
                         onClick={(e) => e.stopPropagation()}
                       >

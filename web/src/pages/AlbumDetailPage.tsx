@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import { usePlayer } from "../stores/player";
 import { Button } from "../components/ui/button";
@@ -97,7 +98,7 @@ export default function AlbumDetailPage() {
               <h1 className="text-3xl font-bold mt-1">{album.title}</h1>
               {album.artist && (
                 <Link
-                  to={`/artists/${album.artist_id}`}
+                  to={`${ROUTES.artists}/${album.artist_id}`}
                   className="text-sm text-zinc-300 mt-1 block hover:text-white transition-colors"
                 >
                   {album.artist}

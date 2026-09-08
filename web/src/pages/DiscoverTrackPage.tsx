@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import { translateApiError } from "../i18n/errorCodes";
 import { Music, ChevronLeft } from "lucide-react";
@@ -55,7 +56,7 @@ export default function DiscoverTrackPage() {
     return (
       <div className="px-6 pb-24 pt-6">
         <Link
-          to="/discover"
+          to={ROUTES.discover}
           className="flex items-center gap-1 text-sm text-zinc-400 hover:text-white transition-colors mb-3 w-fit"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -70,7 +71,7 @@ export default function DiscoverTrackPage() {
     return (
       <div className="px-6 pb-24 pt-6">
         <Link
-          to="/discover"
+          to={ROUTES.discover}
           className="flex items-center gap-1 text-sm text-zinc-400 hover:text-white transition-colors mb-3 w-fit"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -100,7 +101,7 @@ export default function DiscoverTrackPage() {
   return (
     <div className="px-6 pb-24">
       <Link
-        to="/discover"
+        to={ROUTES.discover}
         className="flex items-center gap-1 text-sm text-zinc-400 hover:text-white transition-colors mb-3 w-fit"
       >
         <ChevronLeft className="w-4 h-4" />
@@ -128,7 +129,7 @@ export default function DiscoverTrackPage() {
           <p className="text-sm text-zinc-400 mt-1">
             {track.artist_id ? (
               <Link
-                to={`/discover/artists/${encodeURIComponent(platform ?? "")}/${encodeURIComponent(track.artist_id)}`}
+                to={`${ROUTES.discover}/artists/${encodeURIComponent(platform ?? "")}/${encodeURIComponent(track.artist_id)}`}
                 className="hover:text-white transition-colors"
               >
                 {track.artist}

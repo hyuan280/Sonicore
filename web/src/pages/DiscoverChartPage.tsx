@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { api } from "../api/client";
 import PlatformTrackList, { type PlatformTrackItem } from "../components/PlatformTrackList";
 import PageNav from "../components/PageNav";
@@ -86,7 +87,7 @@ export default function DiscoverChartPage() {
     <div>
       <div className="sticky top-0 z-10 bg-black px-6 pt-6 pb-4">
         <Link
-          to="/discover"
+          to={ROUTES.discover}
           className="flex items-center gap-1 text-sm text-zinc-400 hover:text-white transition-colors mb-3 w-fit"
         >
           <ChevronLeft className="w-4 h-4" />

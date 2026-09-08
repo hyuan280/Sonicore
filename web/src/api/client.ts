@@ -132,6 +132,7 @@ export const api = {
     users: () => request("/api/admin/users"),
     updateRole: (id: string, role: string) =>
       request(`/api/admin/users/${id}/role`, { method: "PUT", body: JSON.stringify({ role }) }),
+    getUserAvatar: (id: string) => requestBlob(`/api/admin/users/${encodeURIComponent(id)}/avatar`),
     getSettings: () => request("/api/admin/settings"),
     updateSettings: (s: any) =>
       request("/api/admin/settings", { method: "PUT", body: JSON.stringify(s) }),
@@ -151,6 +152,8 @@ export const api = {
       request(
         `/api/data/tracks?page=${page}&per_page=${perPage}${libId ? `&libId=${encodeURIComponent(libId)}` : ""}`,
       ),
+    tracksQuery: (params: Record<string, string>) =>
+      request(`/api/data/tracks?${new URLSearchParams(params)}`),
     tracksByIds: (ids: string[]) =>
       request("/api/data/tracks/byids", { method: "POST", body: JSON.stringify({ ids }) }),
     artists: (page = 1, perPage = 9999) =>
@@ -298,6 +301,17 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ prefs }),
       }),
+  },
+  metadata: {
+    sources: () => request("/api/metadata/sources"),
+    searchTrack: (body: Record<string, unknown>) =>
+      request("/api/metadata/search/track", { method: "POST", body: JSON.stringify(body) }),
+    searchAlbum: (body: Record<string, unknown>) =>
+      request("/api/metadata/search/album", { method: "POST", body: JSON.stringify(body) }),
+    reidentify: (body: Record<string, unknown>) =>
+      request("/api/metadata/reidentify", { method: "POST", body: JSON.stringify(body) }),
+    save: (body: Record<string, unknown>) =>
+      request("/api/metadata/save", { method: "POST", body: JSON.stringify(body) }),
   },
   platform: {
     list: () => request("/api/plat/list"),

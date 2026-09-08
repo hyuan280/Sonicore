@@ -24,6 +24,7 @@ import {
   Music3,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { formatDuration, coverImageUrl, performerNames } from "../lib/utils";
 import ArtistLink from "../components/ArtistLink";
 import LyricsPanel from "../components/LyricsPanel";
@@ -623,7 +624,7 @@ export default function PlayerBar() {
                             {i > 0 && <span className="mx-0.5 text-zinc-600">/</span>}
                             {a.id ? (
                               <Link
-                                to={`/albums/${a.id}`}
+                                to={`${ROUTES.albums}/${a.id}`}
                                 className="hover:text-white transition-colors"
                                 onClick={(e) => e.stopPropagation()}
                               >

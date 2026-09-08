@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { useJukebox, type JukeboxStatus } from "../stores/jukebox";
 import { usePlayer } from "../stores/player";
 import { useLibrary } from "../stores/library";
@@ -178,7 +179,7 @@ export default function JukeboxDetailPage() {
   const handleDelete = async () => {
     if (!id) return;
     await delJbx(id);
-    navigate("/jukebox");
+    navigate(ROUTES.jukebox);
   };
 
   const handlePushQueue = async () => {

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 import { Music, Clock } from "lucide-react";
 import { formatDuration } from "../lib/utils";
 
@@ -85,7 +86,7 @@ export default function PlatformTrackList({
                 <span className="text-sm text-zinc-500">{i + 1}</span>
               </div>
               <Link
-                to={`/discover/tracks/${encodeURIComponent(tr.platform)}/${encodeURIComponent(tr.track_id)}`}
+                to={`${ROUTES.discover}/tracks/${encodeURIComponent(tr.platform)}/${encodeURIComponent(tr.track_id)}`}
                 onClick={(e) => e.stopPropagation()}
                 className="flex-1 min-w-[200px] text-sm truncate ml-3 hover:text-green-500 transition-colors"
               >
@@ -96,7 +97,7 @@ export default function PlatformTrackList({
               <span className="w-24 shrink-0 text-sm text-zinc-400 truncate text-center hidden sm:block">
                 {tr.artist_id ? (
                   <Link
-                    to={`/discover/artists/${encodeURIComponent(tr.platform)}/${encodeURIComponent(tr.artist_id)}`}
+                    to={`${ROUTES.discover}/artists/${encodeURIComponent(tr.platform)}/${encodeURIComponent(tr.artist_id)}`}
                     onClick={(e) => e.stopPropagation()}
                     className="hover:text-white transition-colors"
                   >

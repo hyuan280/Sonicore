@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ROUTES } from "../lib/constants";
 
 interface TrackArtist {
   artist_id: string;
@@ -24,7 +25,7 @@ export default function ArtistLink({ artists, className }: ArtistLinkProps) {
         <span key={a.artist_id}>
           {i > 0 && <span className="mx-0.5 text-zinc-600">/</span>}
           <Link
-            to={`/artists/${a.artist_id}`}
+            to={`${ROUTES.artists}/${a.artist_id}`}
             className="hover:text-white transition-colors"
             onClick={(e) => e.stopPropagation()}
           >
