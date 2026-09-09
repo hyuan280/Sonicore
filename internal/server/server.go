@@ -46,6 +46,12 @@ func writeCodedError(w http.ResponseWriter, status int, code domain.ErrorCode) {
 	})
 }
 
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
 type Server struct {
 	cfg    *config.Config
 	db     *sql.DB
@@ -432,6 +438,42 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	// Per-user notification preferences are self-service (not admin-only).
 	protected.HandleFunc("/notifications/user-prefs", notifHandler.GetUserPrefs).Methods("GET")
 	protected.HandleFunc("/notifications/user-prefs", notifHandler.UpdateUserPref).Methods("PUT")
+
+	// Plugin management (stub). The endpoints return empty data until the
+	// plugin manager lands; they exist so the frontend plugin UI works.
+	pluginsR := r.PathPrefix("/api/plugins").Subrouter()
+	pluginsR.Use(middleware.AuthMiddleware(jwtService))
+	pluginsR.Use(rest.AdminOnly)
+	pluginsR.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": []interface{}{}})
+	}).Methods("GET")
+	pluginsR.HandleFunc("/market", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": []interface{}{}})
+	}).Methods("GET")
+	pluginsR.HandleFunc("/market/{name}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"plugin": nil})
+	}).Methods("GET")
+	pluginsR.HandleFunc("/install", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{})
+	}).Methods("POST")
+	pluginsR.HandleFunc("/repos", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"repos": []interface{}{}})
+	}).Methods("GET")
+	pluginsR.HandleFunc("/repos", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{})
+	}).Methods("POST", "DELETE")
+	pluginsR.HandleFunc("/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{})
+	}).Methods("PUT")
+	pluginsR.HandleFunc("/{id}/config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{})
+	}).Methods("PUT")
+	pluginsR.HandleFunc("/{id}/update", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{})
+	}).Methods("POST")
+	pluginsR.HandleFunc("/{id}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{})
+	}).Methods("DELETE")
 
 	// Frontend static files (SPA)
 	distDir := cfg.Server.WebDir

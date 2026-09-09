@@ -13,6 +13,8 @@ import {
   SETTINGS_TABS,
   SETTINGS_TAB_STORAGE_KEY,
   settingsPath,
+  PLUGIN_TABS,
+  pluginsPath,
   type SettingsTab,
 } from "./lib/constants";
 import {
@@ -27,6 +29,7 @@ import {
   ChevronRight,
   Compass,
   UserRound,
+  Puzzle,
 } from "lucide-react";
 import i18n from "./i18n";
 import Logo from "./components/Logo";
@@ -101,6 +104,9 @@ const DiscoverChartPage = lazy(() => import("./pages/DiscoverChartPage"));
 const DiscoverSearchPage = lazy(() => import("./pages/DiscoverSearchPage"));
 const DiscoverArtistPage = lazy(() => import("./pages/DiscoverArtistPage"));
 const DiscoverTrackPage = lazy(() => import("./pages/DiscoverTrackPage"));
+const PluginsPage = lazy(() => import("./pages/plugins/PluginsPage"));
+const InstalledPluginsTab = lazy(() => import("./pages/plugins/InstalledTab"));
+const PluginMarketTab = lazy(() => import("./pages/plugins/MarketTab"));
 
 function Sidebar() {
   const location = useLocation();
@@ -296,6 +302,19 @@ function Sidebar() {
         <div className="border-t border-zinc-800 my-2" />
         {isAdminUser && (
           <Link
+            to={pluginsPath(PLUGIN_TABS.installed)}
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+              location.pathname.startsWith(ROUTES.plugins)
+                ? "bg-green-600/20 text-green-500"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+            }`}
+          >
+            <Puzzle className="w-4 h-4" />
+            {t("nav.plugins")}
+          </Link>
+        )}
+        {isAdminUser && (
+          <Link
             to={ROUTES.settings}
             className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
               location.pathname.startsWith(ROUTES.settings)
@@ -462,6 +481,11 @@ export default function App() {
           <Route path={SETTINGS_TABS.sources} element={<SourcesTab />} />
           <Route path={SETTINGS_TABS.notifications} element={<NotificationsTab />} />
           <Route path={SETTINGS_TABS.users} element={<UsersTab />} />
+        </Route>
+        <Route path={ROUTES.plugins} element={<PluginsPage />}>
+          <Route index element={<Navigate to={pluginsPath(PLUGIN_TABS.installed)} replace />} />
+          <Route path={PLUGIN_TABS.installed} element={<InstalledPluginsTab />} />
+          <Route path={PLUGIN_TABS.market} element={<PluginMarketTab />} />
         </Route>
         <Route path={ROUTES.profile} element={<ProfilePage />} />
         <Route path={ROUTES.admin} element={<Navigate to={ROUTES.settings} replace />} />

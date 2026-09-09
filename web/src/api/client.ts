@@ -333,4 +333,35 @@ export const api = {
         `/api/plat/${encodeURIComponent(name)}/artists/${encodeURIComponent(id)}/tracks?page=${page}&limit=${limit}`,
       ),
   },
+  plugins: {
+    installed: () => request("/api/plugins"),
+    setEnabled: (id: string, enabled: boolean) =>
+      request(`/api/plugins/${encodeURIComponent(id)}/enabled`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      }),
+    // Reserved for the plugin config editor UI (not wired yet).
+    updateConfig: (id: string, config: Record<string, unknown>) =>
+      request(`/api/plugins/${encodeURIComponent(id)}/config`, {
+        method: "PUT",
+        body: JSON.stringify({ config }),
+      }),
+    uninstall: (id: string) =>
+      request(`/api/plugins/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    update: (id: string) =>
+      request(`/api/plugins/${encodeURIComponent(id)}/update`, { method: "POST" }),
+    market: () => request("/api/plugins/market"),
+    // Reserved for the plugin detail page (not wired yet).
+    marketDetail: (name: string) => request(`/api/plugins/market/${encodeURIComponent(name)}`),
+    install: (name: string, repo: string) =>
+      request("/api/plugins/install", {
+        method: "POST",
+        body: JSON.stringify({ name, repo }),
+      }),
+    repos: () => request("/api/plugins/repos"),
+    addRepo: (url: string) =>
+      request("/api/plugins/repos", { method: "POST", body: JSON.stringify({ url }) }),
+    removeRepo: (url: string) =>
+      request(`/api/plugins/repos?url=${encodeURIComponent(url)}`, { method: "DELETE" }),
+  },
 };

@@ -1,4 +1,10 @@
+import type { ReactNode } from "react";
+
 export type Role = "super_admin" | "admin" | "user";
+
+export interface PluginsOutletContext {
+  setToolbar: (node: ReactNode | null) => void;
+}
 
 export interface User {
   id: string;
@@ -116,4 +122,37 @@ export interface NotifTestOptions {
   from_address: string;
   from_name: string;
   tls: boolean;
+}
+
+export type PluginStatus = "ok" | "disabled" | "error";
+
+export interface PluginInstance {
+  id: string;
+  name: string;
+  description?: string;
+  version: string;
+  kind: string;
+  source: string;
+  status: PluginStatus;
+  status_msg?: string;
+  updated_at?: string;
+}
+
+export interface PluginCatalogEntry {
+  name: string;
+  description?: string;
+  author?: string;
+  tags?: string[];
+  repo: string;
+  official?: boolean;
+  version: string;
+  downloads: number;
+  updated_at?: string;
+  installed?: boolean;
+}
+
+export interface PluginRepo {
+  name: string;
+  url: string;
+  official: boolean;
 }
