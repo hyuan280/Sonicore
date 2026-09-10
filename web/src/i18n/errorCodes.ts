@@ -15,6 +15,7 @@ import type { TFunction } from "i18next";
 // 800 – 899  admin
 // 900 – 999  download
 // 1000 – 1099  notification
+// 1100 – 1199  task
 
 export const ERROR_CODES = {
   // ---- common (1-99) ----
@@ -154,6 +155,10 @@ export const ERROR_CODES = {
   // ---- notification (1000-1099) ----
   NOTIFICATION_SEND_FAILED: 1000,
   NOTIFICATION_SAVE_PREFS_FAILED: 1001,
+
+  // ---- task (1100-1199) ----
+  TASK_NOT_FOUND: 1100,
+  TASK_ALREADY_RUNNING: 1101,
 } as const;
 
 const CODE_TO_I18N_KEY: Record<number, string> = {};
@@ -175,6 +180,7 @@ function getCategory(code: number): string {
   if (code <= 899) return "admin";
   if (code <= 999) return "download";
   if (code <= 1099) return "notification";
+  if (code <= 1199) return "task";
   return "common";
 }
 

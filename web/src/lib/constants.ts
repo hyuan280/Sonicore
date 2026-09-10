@@ -14,6 +14,7 @@ export const ROUTES = {
   player: "/player",
   settings: "/settings",
   plugins: "/plugins",
+  tasks: "/tasks",
   profile: "/profile",
   admin: "/admin",
 } as const;

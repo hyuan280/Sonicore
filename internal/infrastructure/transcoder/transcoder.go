@@ -85,32 +85,35 @@ func Init(dir string) error {
 			err = fmt.Errorf("transcoder cache dir: %w", mkErr)
 			return
 		}
-		go cacheCleaner()
 	})
 	return err
 }
 
-func cacheCleaner() {
-	for {
-		time.Sleep(24 * time.Hour)
-		if cacheDir == "" {
+// CleanCacheOnce performs a single pass of cache pruning, removing transcode
+// cache files whose mtime is older than 7 days. Scheduled by the central task
+// system instead of a self-managed loop.
+func CleanCacheOnce() error {
+	if cacheDir == "" {
+		return nil
+	}
+	now := time.Now()
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
 			continue
 		}
-		now := time.Now()
-		entries, _ := os.ReadDir(cacheDir)
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			if now.Sub(info.ModTime()) > 7*24*time.Hour {
-				os.Remove(filepath.Join(cacheDir, e.Name()))
-			}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > 7*24*time.Hour {
+			os.Remove(filepath.Join(cacheDir, e.Name()))
 		}
 	}
+	return nil
 }
 
 func cacheKey(filePath, quality string) string {

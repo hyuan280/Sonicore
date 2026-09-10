@@ -30,6 +30,7 @@ import {
   Compass,
   UserRound,
   Puzzle,
+  ListTodo,
 } from "lucide-react";
 import i18n from "./i18n";
 import Logo from "./components/Logo";
@@ -107,6 +108,7 @@ const DiscoverTrackPage = lazy(() => import("./pages/DiscoverTrackPage"));
 const PluginsPage = lazy(() => import("./pages/plugins/PluginsPage"));
 const InstalledPluginsTab = lazy(() => import("./pages/plugins/InstalledTab"));
 const PluginMarketTab = lazy(() => import("./pages/plugins/MarketTab"));
+const TasksPage = lazy(() => import("./pages/tasks/TasksPage"));
 
 function Sidebar() {
   const location = useLocation();
@@ -302,6 +304,19 @@ function Sidebar() {
         <div className="border-t border-zinc-800 my-2" />
         {isAdminUser && (
           <Link
+            to={ROUTES.tasks}
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+              location.pathname.startsWith(ROUTES.tasks)
+                ? "bg-green-600/20 text-green-500"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+            }`}
+          >
+            <ListTodo className="w-4 h-4" />
+            {t("nav.tasks")}
+          </Link>
+        )}
+        {isAdminUser && (
+          <Link
             to={pluginsPath(PLUGIN_TABS.installed)}
             className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
               location.pathname.startsWith(ROUTES.plugins)
@@ -482,6 +497,7 @@ export default function App() {
           <Route path={SETTINGS_TABS.notifications} element={<NotificationsTab />} />
           <Route path={SETTINGS_TABS.users} element={<UsersTab />} />
         </Route>
+        <Route path={ROUTES.tasks} element={<TasksPage />} />
         <Route path={ROUTES.plugins} element={<PluginsPage />}>
           <Route index element={<Navigate to={pluginsPath(PLUGIN_TABS.installed)} replace />} />
           <Route path={PLUGIN_TABS.installed} element={<InstalledPluginsTab />} />

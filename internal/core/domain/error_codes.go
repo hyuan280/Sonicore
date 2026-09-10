@@ -16,6 +16,7 @@ package domain
 //	800 – 899  admin
 //	900 – 999  download
 //	1000 – 1099  notification
+//	1100 – 1199  task
 type ErrorCode int
 
 // ---- common (1-99) ----
@@ -189,6 +190,13 @@ const (
 	ErrDownloadJobNotFound ErrorCode = 901
 )
 
+// ---- task (1100-1199) ----
+
+const (
+	ErrTaskNotFound       ErrorCode = 1100
+	ErrTaskAlreadyRunning ErrorCode = 1101
+)
+
 // Category returns the category label for the error code's range.
 func (c ErrorCode) Category() string {
 	switch {
@@ -214,6 +222,8 @@ func (c ErrorCode) Category() string {
 		return "download"
 	case c >= 1000 && c <= 1099:
 		return "notification"
+	case c >= 1100 && c <= 1199:
+		return "task"
 	default:
 		return "common"
 	}
@@ -354,6 +364,8 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrDownloadJobNotFound:      "DOWNLOAD_JOB_NOT_FOUND",
 	ErrNotificationSendFailed:   "NOTIFICATION_SEND_FAILED",
 	ErrNotificationSavePrefs:    "NOTIFICATION_SAVE_PREFS_FAILED",
+	ErrTaskNotFound:             "TASK_NOT_FOUND",
+	ErrTaskAlreadyRunning:       "TASK_ALREADY_RUNNING",
 }
 
 // errorCodeMessages maps each code to its default English fallback message.
@@ -474,4 +486,6 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrDownloadJobNotFound:      "Download job not found",
 	ErrNotificationSendFailed:   "Notification send failed",
 	ErrNotificationSavePrefs:    "Failed to save notification preferences",
+	ErrTaskNotFound:             "Task not found",
+	ErrTaskAlreadyRunning:       "Task is already running",
 }

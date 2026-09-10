@@ -6,6 +6,20 @@ export interface PluginsOutletContext {
   setToolbar: (node: ReactNode | null) => void;
 }
 
+export interface ScheduledTask {
+  id: string;
+  source: string;
+  provider: string;
+  name: string;
+  status: "idle" | "running" | "disabled";
+  enabled: boolean;
+  interval_seconds: number;
+  cron?: string;
+  next_run: string | null;
+  last_run?: string | null;
+  last_error?: string;
+}
+
 export interface User {
   id: string;
   username: string;

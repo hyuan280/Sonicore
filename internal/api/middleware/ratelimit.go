@@ -8,12 +8,11 @@ import (
 	"github.com/sonicore/server/internal/core/domain"
 )
 
-type rateLimiter struct {
+type RateLimiter struct {
 	mu       sync.Mutex
 	requests map[string]*rateEntry
 	limit    int
 	window   time.Duration
-	cleanup  time.Duration
 }
 
 type rateEntry struct {
@@ -21,18 +20,15 @@ type rateEntry struct {
 	windowStart time.Time
 }
 
-func NewRateLimiter(limit int, window time.Duration) *rateLimiter {
-	rl := &rateLimiter{
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	return &RateLimiter{
 		requests: make(map[string]*rateEntry),
 		limit:    limit,
 		window:   window,
-		cleanup:  window * 2,
 	}
-	go rl.cleanupLoop()
-	return rl
 }
 
-func (rl *rateLimiter) allow(key string) bool {
+func (rl *RateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -51,21 +47,21 @@ func (rl *rateLimiter) allow(key string) bool {
 	return entry.count <= rl.limit
 }
 
-func (rl *rateLimiter) cleanupLoop() {
-	for {
-		time.Sleep(rl.cleanup)
-		rl.mu.Lock()
-		cutoff := time.Now().Add(-rl.window)
-		for k, v := range rl.requests {
-			if v.windowStart.Before(cutoff) {
-				delete(rl.requests, k)
-			}
+// CleanupOnce performs a single pass of request-map pruning, dropping
+// entries whose window has expired. Scheduled by the central task system
+// instead of a self-managed loop.
+func (rl *RateLimiter) CleanupOnce() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	cutoff := time.Now().Add(-rl.window)
+	for k, v := range rl.requests {
+		if v.windowStart.Before(cutoff) {
+			delete(rl.requests, k)
 		}
-		rl.mu.Unlock()
 	}
 }
 
-func RateLimitMiddleware(limiter *rateLimiter) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// ClientIP verifies the TCP peer against trusted_proxies before

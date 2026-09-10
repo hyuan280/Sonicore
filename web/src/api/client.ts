@@ -364,4 +364,13 @@ export const api = {
     removeRepo: (url: string) =>
       request(`/api/plugins/repos?url=${encodeURIComponent(url)}`, { method: "DELETE" }),
   },
+  tasks: {
+    list: () => request("/api/tasks"),
+    run: (id: string) => request(`/api/tasks/${encodeURIComponent(id)}/run`, { method: "POST" }),
+    setEnabled: (id: string, enabled: boolean) =>
+      request(`/api/tasks/${encodeURIComponent(id)}/enabled`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      }),
+  },
 };

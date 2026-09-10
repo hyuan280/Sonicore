@@ -11,6 +11,7 @@
     "signOut": "退出登录",
     "discover": "发现",
     "plugins": "插件",
+    "tasks": "任务",
     "profile": "个人信息"
   },
   "auth": {
@@ -518,6 +519,10 @@
     "notification": {
       "NOTIFICATION_SEND_FAILED": "通知发送失败",
       "NOTIFICATION_SAVE_PREFS_FAILED": "保存通知偏好失败"
+    },
+    "task": {
+      "TASK_NOT_FOUND": "任务不存在",
+      "TASK_ALREADY_RUNNING": "任务正在执行中"
     }
   },
   "discover": {
@@ -591,5 +596,31 @@
     "repoRemove": "移除仓库",
     "repoRemoveConfirm": "确认移除仓库\"{{url}}\"？",
     "moreSettingsComing": "更多插件设置将显示在这里。"
+  },
+  "tasks": {
+    "title": "任务",
+    "source": "来源",
+    "provider": "提供者",
+    "source_system": "系统",
+    "source_plugin": "插件",
+    "provider_transcoder": "转码器",
+    "provider_middleware": "中间件",
+    "name": "任务名称",
+    "status": "任务状态",
+    "nextRun": "下一次执行时间",
+    "actions": "操作",
+    "statusIdle": "等待中",
+    "statusRunning": "执行中",
+    "statusDisabled": "已禁用",
+    "run": "执行",
+    "enable": "启用",
+    "disable": "禁用",
+    "relativeSeconds": "{{count}}秒钟",
+    "relativeHoursMinutes": "{{count}}小时{{minutes}}分钟",
+    "relativeHours": "{{count}}小时",
+    "relativeMinutes": "{{count}}分钟",
+    "dueNow": "即将执行",
+    "loadError": "加载任务列表失败",
+    "empty": "暂无已注册的定时任务"
   }
 }

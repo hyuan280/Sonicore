@@ -268,6 +268,20 @@ type ScanJob struct {
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
+type ScheduledTask struct {
+	ID          string     `json:"id"`
+	Source      string     `json:"source"`
+	Provider    string     `json:"provider"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"` // idle | running | disabled
+	Enabled     bool       `json:"enabled"`
+	IntervalSec int64      `json:"interval_seconds"`
+	Cron        string     `json:"cron,omitempty"`
+	NextRun     *time.Time `json:"next_run"`
+	LastRun     *time.Time `json:"last_run,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+}
+
 type RefreshToken struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`

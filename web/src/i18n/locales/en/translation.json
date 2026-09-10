@@ -11,6 +11,7 @@
     "signOut": "Sign out",
     "discover": "Discover",
     "plugins": "Plugins",
+    "tasks": "Tasks",
     "profile": "Profile"
   },
   "auth": {
@@ -518,6 +519,10 @@
     "notification": {
       "NOTIFICATION_SEND_FAILED": "Notification send failed",
       "NOTIFICATION_SAVE_PREFS_FAILED": "Failed to save notification preferences"
+    },
+    "task": {
+      "TASK_NOT_FOUND": "Task not found",
+      "TASK_ALREADY_RUNNING": "Task is already running"
     }
   },
   "discover": {
@@ -591,5 +596,31 @@
     "repoRemove": "Remove repository",
     "repoRemoveConfirm": "Remove repository \"{{url}}\"?",
     "moreSettingsComing": "More plugin settings will appear here."
+  },
+  "tasks": {
+    "title": "Tasks",
+    "source": "Source",
+    "provider": "Provider",
+    "source_system": "System",
+    "source_plugin": "Plugin",
+    "provider_transcoder": "Transcoder",
+    "provider_middleware": "Middleware",
+    "name": "Task name",
+    "status": "Status",
+    "nextRun": "Next run",
+    "actions": "Actions",
+    "statusIdle": "Idle",
+    "statusRunning": "Running",
+    "statusDisabled": "Disabled",
+    "run": "Run",
+    "enable": "Enable",
+    "disable": "Disable",
+    "relativeSeconds": "{{count}}s",
+    "relativeHoursMinutes": "{{count}}h {{minutes}}m",
+    "relativeHours": "{{count}}h",
+    "relativeMinutes": "{{count}}m",
+    "dueNow": "Due now",
+    "loadError": "Failed to load task list",
+    "empty": "No scheduled tasks registered"
   }
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/player"
 	"github.com/sonicore/server/internal/infrastructure/repository"
 	"github.com/sonicore/server/internal/infrastructure/secrets"
+	"github.com/sonicore/server/internal/infrastructure/task"
 	"github.com/sonicore/server/internal/infrastructure/transcoder"
 )
 
@@ -56,6 +57,7 @@ type Server struct {
 	cfg    *config.Config
 	db     *sql.DB
 	vk     *cache.Valkey
+	sched  *task.Scheduler
 	router *mux.Router
 	http   *http.Server
 }
@@ -209,9 +211,39 @@ func New(cfg *config.Config) (*Server, error) {
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
+	// Central task system: components register their periodic work here and
+	// the scheduler owns timing, execution and status reporting. The auth
+	// rate limiter is created up here (instead of inside registerRoutes) so
+	// its cleanup pass can be registered as a task.
+	sched := task.NewScheduler(task.NewSettingsStateStore(settingsRepo))
+	authLimiter := middleware.NewRateLimiter(10, time.Minute)
+	if err := sched.Register(task.Spec{
+		ID:       "transcode_cache_cleanup",
+		Source:   "system",
+		Provider: "transcoder",
+		Name:     "转码缓存清理",
+		Interval: 24 * time.Hour,
+	}, func(ctx context.Context) error {
+		return transcoder.CleanCacheOnce()
+	}); err != nil {
+		return nil, fmt.Errorf("register task transcode_cache_cleanup: %w", err)
+	}
+	if err := sched.Register(task.Spec{
+		ID:       "auth_ratelimit_cleanup",
+		Source:   "system",
+		Provider: "middleware",
+		Name:     "登录限流器清理",
+		Interval: 2 * time.Minute,
+	}, func(ctx context.Context) error {
+		authLimiter.CleanupOnce()
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("register task auth_ratelimit_cleanup: %w", err)
+	}
+
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -226,12 +258,13 @@ func New(cfg *config.Config) (*Server, error) {
 		cfg:    cfg,
 		db:     db,
 		vk:     vk,
+		sched:  sched,
 		router: router,
 		http:   httpSrv,
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -257,7 +290,6 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		})
 	}).Methods("GET")
 
-	authLimiter := middleware.NewRateLimiter(10, time.Minute)
 	authRateLimit := middleware.RateLimitMiddleware(authLimiter)
 
 	authHandler := rest.NewAuthHandler(db, jwtService, tokenStore, sessionStore, refreshExp)
@@ -439,6 +471,15 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	protected.HandleFunc("/notifications/user-prefs", notifHandler.GetUserPrefs).Methods("GET")
 	protected.HandleFunc("/notifications/user-prefs", notifHandler.UpdateUserPref).Methods("PUT")
 
+	// Task system: list / run-now / enable-disable (admin only).
+	taskHandler := rest.NewTaskHandler(taskSched)
+	tasksR := r.PathPrefix("/api/tasks").Subrouter()
+	tasksR.Use(middleware.AuthMiddleware(jwtService))
+	tasksR.Use(rest.AdminOnly)
+	tasksR.HandleFunc("", taskHandler.List).Methods("GET")
+	tasksR.HandleFunc("/{id}/run", taskHandler.Run).Methods("POST")
+	tasksR.HandleFunc("/{id}/enabled", taskHandler.SetEnabled).Methods("PUT")
+
 	// Plugin management (stub). The endpoints return empty data until the
 	// plugin manager lands; they exist so the frontend plugin UI works.
 	pluginsR := r.PathPrefix("/api/plugins").Subrouter()
@@ -553,6 +594,9 @@ func loggingMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) Start() error {
+	schedCtx, stopSched := context.WithCancel(context.Background())
+	go s.sched.Start(schedCtx)
+
 	go func() {
 		logger.Info("[server] listening on %s", s.http.Addr)
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -565,11 +609,16 @@ func (s *Server) Start() error {
 	<-quit
 
 	logger.Info("[server] shutting down...")
+	stopSched()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	s.vk.Close()
 	err := s.http.Shutdown(ctx)
+	// Join in-flight scheduled runs only after HTTP has drained: no further
+	// RunNow calls can arrive, and any run still going (some task functions
+	// ignore their ctx) must finish before logger.Close below.
+	s.sched.Shutdown()
 	logger.Close()
 	return err
 }
