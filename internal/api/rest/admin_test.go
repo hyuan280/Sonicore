@@ -174,7 +174,7 @@ func TestAdminUpdateUserRoleCannotTouchSuperAdmin(t *testing.T) {
 	h.UpdateUserRole(rec, req.WithContext(contextWithUserID(req.Context(), "super-1")))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "cannot change super admin")
+	assert.Contains(t, rec.Body.String(), "Cannot change super admin role")
 }
 
 func TestAdminUpdateUserRoleAdminCannotManageAdmin(t *testing.T) {
@@ -405,7 +405,7 @@ func TestAdminOnlyMiddleware(t *testing.T) {
 			handler.ServeHTTP(rec, req)
 			assert.Equal(t, tt.wantCode, rec.Code)
 			if tt.wantCode == http.StatusForbidden {
-				assert.Contains(t, rec.Body.String(), "admin access required")
+				assert.Contains(t, rec.Body.String(), "Admin access required")
 			}
 		})
 	}

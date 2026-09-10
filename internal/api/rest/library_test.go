@@ -60,7 +60,7 @@ func TestLibraryCreateMissingName(t *testing.T) {
 	h.Create(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "name is required")
+	assert.Contains(t, rec.Body.String(), "Name is required")
 }
 
 func TestLibraryCreateInvalidMode(t *testing.T) {
@@ -72,7 +72,7 @@ func TestLibraryCreateInvalidMode(t *testing.T) {
 	h.Create(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "must be database, sidecar, or both")
+	assert.Contains(t, rec.Body.String(), "Invalid metadata storage mode")
 }
 
 func TestLibraryCreateSuccess(t *testing.T) {
@@ -108,7 +108,7 @@ func TestLibraryCreateDBError(t *testing.T) {
 	h.Create(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "failed to create library")
+	assert.Contains(t, rec.Body.String(), "Failed to create library")
 }
 
 func TestLibraryList(t *testing.T) {
@@ -203,7 +203,7 @@ func TestLibraryAddMemberInvalidRole(t *testing.T) {
 	h.AddMember(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "role must be admin, contributor, or viewer")
+	assert.Contains(t, rec.Body.String(), "Invalid role")
 }
 
 func TestLibraryRemoveMemberSuccess(t *testing.T) {
@@ -264,7 +264,7 @@ func TestLibraryRemoveOwnerForbidden(t *testing.T) {
 	h.RemoveMember(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "cannot remove the owner")
+	assert.Contains(t, rec.Body.String(), "Cannot remove the owner")
 }
 
 func TestLibraryUpdateMemberRole(t *testing.T) {

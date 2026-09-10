@@ -64,9 +64,9 @@ func doJSONRequest(handler http.HandlerFunc, method, path, body string) *httptes
 }
 
 func expectUserFindByUsername(mock sqlmock.Sqlmock, username, email, hash string, role string) {
-	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-		AddRow("u-001", username, email, hash, role, time.Now(), time.Now())
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	rows := sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+		AddRow("u-001", username, email, hash, role, "", time.Now(), time.Now())
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs(username).
 		WillReturnRows(rows)
 }
@@ -77,10 +77,10 @@ func TestAuthRegisterSuccess(t *testing.T) {
 	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
 		WithArgs("allow_registration").
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("alice").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE email = \$1`).
 		WithArgs("alice@example.com").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM users`).
@@ -111,9 +111,9 @@ func TestAuthRegisterSecondUserIsRegular(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE email = \$1`).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM users`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
@@ -169,10 +169,10 @@ func TestAuthRegisterDuplicateUsername(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("alice").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-			AddRow("u-1", "alice", "a@b.c", "h", "user", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow("u-1", "alice", "a@b.c", "h", "user", "", time.Now(), time.Now()))
 
 	rec := doJSONRequest(handler.Register, http.MethodPost, "/api/auth/register",
 		`{"username":"alice","email":"a@b.c","password":"secret1"}`)
@@ -185,12 +185,12 @@ func TestAuthRegisterDuplicateEmail(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE email = \$1`).
 		WithArgs("a@b.c").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-			AddRow("u-1", "other", "a@b.c", "h", "user", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow("u-1", "other", "a@b.c", "h", "user", "", time.Now(), time.Now()))
 
 	rec := doJSONRequest(handler.Register, http.MethodPost, "/api/auth/register",
 		`{"username":"alice","email":"a@b.c","password":"secret1"}`)
@@ -231,7 +231,7 @@ func TestAuthLoginWrongPassword(t *testing.T) {
 func TestAuthLoginUserNotFound(t *testing.T) {
 	handler, _, mock, _ := newAuthHandler(t)
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("ghost").
 		WillReturnError(sql.ErrNoRows)
 
@@ -256,10 +256,10 @@ func TestAuthRefreshSuccess(t *testing.T) {
 	refreshToken := ts.Generate()
 	require.NoError(t, ts.Store(ctx, "u-001", refreshToken, time.Hour))
 
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = \$1`).
+	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = \$1`).
 		WithArgs("u-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "created_at", "updated_at"}).
-			AddRow("u-001", "alice", "a@b.c", "h", "user", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow("u-001", "alice", "a@b.c", "h", "user", "", time.Now(), time.Now()))
 
 	rec := doJSONRequest(handler.Refresh, http.MethodPost, "/api/auth/refresh",
 		`{"refresh_token":"`+refreshToken+`"}`)

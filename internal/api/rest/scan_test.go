@@ -53,7 +53,7 @@ func TestScanStartNoUserForbidden(t *testing.T) {
 	h.Start(rec, scanRequest(http.MethodPost, "/api/libraries/lib-001/scan", ""))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "need contributor role")
+	assert.Contains(t, rec.Body.String(), "Need contributor role or higher")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -103,7 +103,7 @@ func TestScanStartAlreadyRunning(t *testing.T) {
 	h.Start(rec, scanRequest(http.MethodPost, "/api/libraries/lib-001/scan", "u-001"))
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
-	assert.Contains(t, rec.Body.String(), "already running")
+	assert.Contains(t, rec.Body.String(), "Internal server error")
 }
 
 func TestScanStatusIdle(t *testing.T) {

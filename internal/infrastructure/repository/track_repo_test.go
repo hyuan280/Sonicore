@@ -128,8 +128,8 @@ func TestTrackRepoFindByIDWithRelations(t *testing.T) {
 	// LoadTrackAlbums
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
 		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}).
-			AddRow("t-001", "alb-1", 1, 1, "Album", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id", "year", "genre"}).
+			AddRow("t-001", "alb-1", 1, 1, "Album", nil, 0, ""))
 
 	// LoadTrackArtists
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
@@ -184,8 +184,8 @@ func TestTrackRepoFindByIDs(t *testing.T) {
 
 	// Bulk albums: only t-001 has one
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}).
-			AddRow("t-001", "alb-1", 1, 1, "Album", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id", "year", "genre"}).
+			AddRow("t-001", "alb-1", 1, 1, "Album", nil, 0, ""))
 
 	// Bulk artists: t-002 has one
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
@@ -214,7 +214,7 @@ func TestTrackRepoFindByArtistID(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_albums ta`)).
-		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"track_id", "album_id", "track_number", "disc_number", "title", "cover_image_id", "year", "genre"}))
 
 	got, err := repo.FindByArtistID(context.Background(), "a-1")
 	require.NoError(t, err)
@@ -321,12 +321,18 @@ func TestTrackRepoReplaceTrackAlbums(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT album_id FROM track_albums WHERE track_id = $1`)).
+		WithArgs("t-001").
+		WillReturnRows(sqlmock.NewRows([]string{"album_id"}).AddRow("alb-1"))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM track_albums WHERE track_id = $1`)).
 		WithArgs("t-001").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectPrepare(regexp.QuoteMeta(`INSERT INTO track_albums (track_id, album_id, track_number, disc_number)`))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO track_albums`)).
 		WithArgs("t-001", "alb-1", 1, 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums al`)).
+		WithArgs(sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -399,6 +405,9 @@ func TestTrackRepoBatchCreate(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO track_albums`)).
 		WithArgs("t-001", "alb-1", 1, 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE albums al`)).
+		WithArgs(sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

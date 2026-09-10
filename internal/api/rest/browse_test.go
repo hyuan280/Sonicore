@@ -71,7 +71,7 @@ func TestDataTracksForbidden(t *testing.T) {
 	h.Tracks(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "access denied")
+	assert.Contains(t, rec.Body.String(), "Access denied")
 }
 
 func TestDataTracksByLibrary(t *testing.T) {

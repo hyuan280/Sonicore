@@ -29,8 +29,16 @@ func TestErrorCodeCategory(t *testing.T) {
 		{"stream boundary high", ErrorCode(699), "stream"},
 		{"platform boundary low", ErrorCode(700), "platform"},
 		{"platform boundary high", ErrorCode(799), "platform"},
+		{"admin boundary low", ErrorCode(800), "admin"},
+		{"admin boundary high", ErrorCode(899), "admin"},
+		{"download boundary low", ErrorCode(900), "download"},
+		{"download boundary high", ErrorCode(999), "download"},
+		{"notification boundary low", ErrorCode(1000), "notification"},
+		{"notification boundary high", ErrorCode(1099), "notification"},
+		{"task boundary low", ErrorCode(1100), "task"},
+		{"task boundary high", ErrorCode(1199), "task"},
 		{"below range falls back to common", ErrorCode(0), "common"},
-		{"above range falls back to common", ErrorCode(800), "common"},
+		{"above range falls back to common", ErrorCode(9999), "common"},
 		{"negative falls back to common", ErrorCode(-1), "common"},
 	}
 

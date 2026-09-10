@@ -132,7 +132,7 @@ func TestUserChangePasswordWrongPassword(t *testing.T) {
 		`{"old_password":"wrong","new_password":"new-pass"}`, "u-001"))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "wrong password")
+	assert.Contains(t, rec.Body.String(), "Wrong password")
 }
 
 func TestUserChangePasswordInvalidBody(t *testing.T) {
@@ -160,7 +160,7 @@ func TestUserChangePasswordUpdateError(t *testing.T) {
 		`{"old_password":"old-pass","new_password":"new-pass-123"}`, "u-001"))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "failed to update password")
+	assert.Contains(t, rec.Body.String(), "Failed to update password")
 }
 
 func TestUserMeRenewGeneratesSession(t *testing.T) {
@@ -209,7 +209,7 @@ func TestUserMeRenewClientMismatchRevokesAll(t *testing.T) {
 	h.MeRenew(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assert.Contains(t, rec.Body.String(), "client mismatch")
+	assert.Contains(t, rec.Body.String(), "Client mismatch, please re-login")
 
 	_, err = h.sessionStore.Validate(ctx, sess)
 	require.Error(t, err, "session revoked")

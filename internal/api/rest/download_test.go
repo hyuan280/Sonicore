@@ -78,7 +78,7 @@ func TestDownloadCreateInvalidBody(t *testing.T) {
 	h.Create(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid request body")
+	assert.Contains(t, rec.Body.String(), "Invalid request body")
 }
 
 func TestDownloadCreateEmptyURL(t *testing.T) {
@@ -89,7 +89,7 @@ func TestDownloadCreateEmptyURL(t *testing.T) {
 	h.Create(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "url is required")
+	assert.Contains(t, rec.Body.String(), "URL is required")
 }
 
 func TestDownloadCreateForbidden(t *testing.T) {
@@ -109,7 +109,7 @@ func TestDownloadCreateForbidden(t *testing.T) {
 	h.Create(rec, req.WithContext(contextWithUserID(req.Context(), "u-001")))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "need contributor")
+	assert.Contains(t, rec.Body.String(), "Need contributor role or higher")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

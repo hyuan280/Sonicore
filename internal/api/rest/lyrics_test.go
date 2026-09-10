@@ -77,7 +77,7 @@ func TestLyricsGetMissingTrackID(t *testing.T) {
 	h.GetLyrics(rec, httptest.NewRequest(http.MethodGet, "/api/lyrics", nil))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "missing trackid")
+	assert.Contains(t, rec.Body.String(), "Track ID is required")
 }
 
 func TestLyricsGetTrackNotFound(t *testing.T) {
@@ -91,7 +91,7 @@ func TestLyricsGetTrackNotFound(t *testing.T) {
 	h.GetLyrics(rec, lyricsGetRequest("missing"))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "track not found")
+	assert.Contains(t, rec.Body.String(), "Track not found")
 }
 
 func TestLyricsGetFound(t *testing.T) {
@@ -187,7 +187,7 @@ func TestLyricsUpdateInvalidBody(t *testing.T) {
 		strings.NewReader("not-json")))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "invalid request body")
+	assert.Contains(t, rec.Body.String(), "Invalid request body")
 }
 
 func TestLyricsUpdateMissingTrackID(t *testing.T) {
@@ -198,7 +198,7 @@ func TestLyricsUpdateMissingTrackID(t *testing.T) {
 		strings.NewReader(`{"offset":1}`)))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "missing trackid")
+	assert.Contains(t, rec.Body.String(), "Track ID is required")
 }
 
 func TestLyricsUpdateTrackNotFound(t *testing.T) {
@@ -213,7 +213,7 @@ func TestLyricsUpdateTrackNotFound(t *testing.T) {
 		strings.NewReader(`{"trackid":"missing","offset":1}`)))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "track not found")
+	assert.Contains(t, rec.Body.String(), "Track not found")
 }
 
 func TestLyricsUpdateLoadError(t *testing.T) {
@@ -228,7 +228,7 @@ func TestLyricsUpdateLoadError(t *testing.T) {
 		strings.NewReader(`{"trackid":"t-001","offset":1}`)))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "failed to load track")
+	assert.Contains(t, rec.Body.String(), "Internal server error")
 }
 
 func TestLyricsUpdateOffsetError(t *testing.T) {
@@ -244,5 +244,5 @@ func TestLyricsUpdateOffsetError(t *testing.T) {
 		strings.NewReader(`{"trackid":"t-001","offset":1}`)))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "failed to update lyrics offset")
+	assert.Contains(t, rec.Body.String(), "Failed to update lyrics offset")
 }

@@ -270,7 +270,7 @@ func TestAddHistoryTrackNotFound(t *testing.T) {
 		`{"track_id":"missing"}`, "u-001"))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "track not found")
+	assert.Contains(t, rec.Body.String(), "Track not found")
 }
 
 func TestRemoveHistoryItems(t *testing.T) {
