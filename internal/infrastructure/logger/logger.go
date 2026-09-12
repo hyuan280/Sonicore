@@ -32,7 +32,10 @@ var (
 	levelVar = new(slog.LevelVar)
 	mu       sync.Mutex
 	logFile  *lumberjack.Logger
-	bufPool  = sync.Pool{
+	// initCfg caches the last Init config so per-plugin log sinks
+	// (OpenPluginLog) can reuse data dir and rotation settings.
+	initCfg *Config
+	bufPool = sync.Pool{
 		New: func() any {
 			b := make([]byte, 0, 256)
 			return &b
@@ -140,6 +143,8 @@ func Init(cfg Config) error {
 		return fmt.Errorf("invalid log level %q, must be one of: debug, info, warn, warning, error", cfg.Level)
 	}
 	levelVar.Set(lvl)
+	c := cfg
+	initCfg = &c
 
 	if !cfg.FileOutput && logFile != nil {
 		logFile.Close()
@@ -192,6 +197,47 @@ func Init(cfg Config) error {
 }
 
 var _ slog.Handler = (*consoleHandler)(nil)
+
+// PluginLogPath returns the on-disk path of a plugin's log file
+// ({dataDir}/log/plugins/{name}.log). Returns "" when the name is unsafe
+// (path traversal) so callers can refuse early.
+func PluginLogPath(dataDir, name string) string {
+	name = filepath.Base(name)
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+	return filepath.Join(dataDir, "log", "plugins", name+".log")
+}
+
+// OpenPluginLog returns a *slog.Logger for one plugin's logs: it writes to
+// {data_dir}/log/plugins/{name}.log with lumberjack rotation (global
+// settings) plus stderr. Plugin logs deliberately do NOT go into the main
+// sonicore.log file. The closer rotates/flushes on close.
+func OpenPluginLog(name string) (*slog.Logger, io.Closer, error) {
+	mu.Lock()
+	c := initCfg
+	mu.Unlock()
+	if c == nil {
+		return nil, nil, fmt.Errorf("logger not initialized")
+	}
+	path := PluginLogPath(c.DataDir, name)
+	if path == "" {
+		return nil, nil, fmt.Errorf("invalid plugin log name %q", name)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, nil, fmt.Errorf("create plugin log dir: %w", err)
+	}
+	lf := &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    c.MaxSize,
+		MaxAge:     c.MaxAge,
+		MaxBackups: c.MaxBackups,
+		LocalTime:  true,
+		Compress:   true,
+	}
+	handler := &consoleHandler{w: io.MultiWriter(os.Stderr, lf), level: levelVar}
+	return slog.New(handler), lf, nil
+}
 
 func SetLevel(level string) {
 	levelVar.Set(parseLevel(level))

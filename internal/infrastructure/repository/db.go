@@ -348,6 +348,36 @@ func RunMigrations(db *sql.DB) error {
 	INSERT INTO notification_category_prefs (category, roles, channels)
 		VALUES ('system', ARRAY['admin'], ARRAY['email'])
 		ON CONFLICT (category) DO NOTHING;
+
+	CREATE TABLE IF NOT EXISTS plugin_instances (
+		id          TEXT PRIMARY KEY,           -- plugin name (manifest)
+		name        TEXT NOT NULL,
+		version     TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		source      TEXT NOT NULL DEFAULT 'manual',
+		enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+		status      TEXT NOT NULL DEFAULT 'stopped',  -- ok|error|disabled|stopped
+		status_msg  TEXT NOT NULL DEFAULT '',
+		has_page    BOOLEAN NOT NULL DEFAULT FALSE,   -- get_page detected after load
+		installed   BOOLEAN NOT NULL DEFAULT TRUE,    -- soft-uninstall flag; new discoveries insert FALSE explicitly
+		dir         TEXT NOT NULL DEFAULT '',         -- actual plugin directory name (may differ from the manifest name)
+		installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE TABLE IF NOT EXISTS plugin_config (
+		plugin_id  TEXT PRIMARY KEY REFERENCES plugin_instances(id) ON DELETE CASCADE,
+		config     JSONB NOT NULL DEFAULT '{}',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE TABLE IF NOT EXISTS plugin_data (
+		plugin_id  TEXT NOT NULL REFERENCES plugin_instances(id) ON DELETE CASCADE,
+		key        TEXT NOT NULL,
+		value      JSONB NOT NULL DEFAULT 'null',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (plugin_id, key)
+	);
 	`
 
 	if _, err := db.Exec(schema); err != nil {

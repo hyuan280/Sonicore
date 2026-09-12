@@ -2,18 +2,26 @@ import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useOutletContext } from "react-router-dom";
 import { translateApiError } from "../../i18n/errorCodes";
-import { Card, CardGrid } from "../../components/ui/card";
+import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
+import { Modal } from "../../components/ui/modal";
+import { SchemaRenderer } from "../../components/ui/schema";
+import { DropdownMenu, MenuItem } from "../../components/ui/menu";
 import PluginToolbar from "./PluginToolbar";
+import LogsModal from "./LogsModal";
 import { api } from "../../api/client";
 import {
   Puzzle,
-  ChevronDown,
   Loader2,
   Trash2,
   RefreshCw,
   ShieldCheck,
   ShieldQuestion,
+  MoreVertical,
+  Settings,
+  LayoutDashboard,
+  History,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import {
@@ -21,31 +29,34 @@ import {
   PLUGIN_INSTALLED_FILTER_KEYS,
   PLUGIN_INSTALLED_SORT_KEYS,
 } from "../../lib/constants";
-import type { PluginInstance, PluginStatus, PluginsOutletContext } from "../../types";
+import type { PluginInstance, PluginStatus, UINode, PluginsOutletContext } from "../../types";
 
 const STATUS_ORDER: PluginStatus[] = ["ok", "disabled", "error"];
 
-function statusLabel(t: (k: string) => string, status: PluginStatus): string {
-  switch (status) {
-    case "ok":
-      return t("plugins.statusOk");
-    case "disabled":
-      return t("plugins.statusDisabled");
-    case "error":
-      return t("plugins.statusError");
-  }
-}
+const STATUS_COLORS: Record<PluginStatus, string> = {
+  ok: "bg-green-500",
+  disabled: "bg-zinc-600",
+  error: "bg-red-500",
+};
 
-function statusBadge(status: PluginStatus) {
-  const base = "text-xs px-2 py-0.5 rounded-full shrink-0";
-  switch (status) {
-    case "ok":
-      return <span className={cn(base, "bg-green-600/20 text-green-400")}>●</span>;
-    case "disabled":
-      return <span className={cn(base, "bg-zinc-700/60 text-zinc-400")}>●</span>;
-    case "error":
-      return <span className={cn(base, "bg-red-600/20 text-red-400")}>●</span>;
-  }
+const STATUS_LABEL_KEYS: Record<PluginStatus, string> = {
+  ok: "plugins.statusOk",
+  disabled: "plugins.statusDisabled",
+  error: "plugins.statusError",
+};
+
+// statusDot is the card's only status indicator: a colored dot. The text
+// label was removed from the card on purpose — the dot is enough, but it
+// keeps a readable label for accessibility (title/aria).
+function statusDot(status: PluginStatus, label: string) {
+  return (
+    <span
+      role="status"
+      title={label}
+      aria-label={label}
+      className={cn("w-2.5 h-2.5 rounded-full shrink-0", STATUS_COLORS[status])}
+    />
+  );
 }
 
 function sourceMeta(source: string): { icon: React.ReactNode; labelKey: string } {
@@ -73,7 +84,14 @@ export default function InstalledTab() {
   const [plugins, setPlugins] = useState<PluginInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // detail selects the plugin detail modal (data/config views). The enable
+  // switch lives in the modal's title row, so there is no separate settings
+  // dialog anymore.
+  const [detail, setDetail] = useState<{ id: string; view: "page" | "config" } | null>(null);
+  // historyId opens the version-history dialog of one plugin.
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  // logId opens the live log viewer of one plugin.
+  const [logId, setLogId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string[]>>({
     [PLUGIN_INSTALLED_FILTER_KEYS.status]: [],
@@ -137,15 +155,6 @@ export default function InstalledTab() {
     }
     return list;
   }, [plugins, search, filters, sortBy]);
-
-  const toggleExpanded = (id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const runAction = async (id: string, action: () => Promise<unknown>) => {
     setBusyIds((prev) => {
@@ -228,6 +237,10 @@ export default function InstalledTab() {
     return () => setToolbar(null);
   }, [toolbarNode, setToolbar]);
 
+  const detailPlugin = detail ? plugins.find((p) => p.id === detail.id) : undefined;
+  const historyPlugin = historyId ? plugins.find((p) => p.id === historyId) : undefined;
+  const logPlugin = logId ? plugins.find((p) => p.id === logId) : undefined;
+
   return (
     <div className="space-y-4">
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -243,24 +256,36 @@ export default function InstalledTab() {
         </p>
       )}
       {!loading && filtered.length > 0 && (
-        <CardGrid className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        // Even-division grid, same behavior as the reference project's
+        // JS-computed progressive grid (repeat(N, minmax(0, 1fr))) but done
+        // in pure CSS: auto-fill computes N from the 230px minimum, so each
+        // card is exactly 1/N of the page width (~230–300px on desktop).
+        // Shrinking the page narrows the cards first; once a column can no
+        // longer hold 230px it is dropped and the remaining cards widen to
+        // an even split again. auto-fill keeps the reserved slots when there
+        // are fewer cards than columns, so a lone card never stretches.
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((p) => {
-            const isExpanded = expanded.has(p.id);
-            const isBusy = busyIds.has(p.id);
             const sm = sourceMeta(p.source);
             return (
-              <Card key={p.id} className="p-0 overflow-hidden">
-                <button
-                  onClick={() => toggleExpanded(p.id)}
-                  className="w-full flex items-center gap-3 p-4 text-left cursor-pointer hover:bg-zinc-800/40 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
-                    <Puzzle className="w-5 h-5 text-green-500" />
+              <Card
+                key={p.id}
+                className="cursor-pointer hover:border-zinc-700 transition-all duration-200 hover:scale-[1.03] flex flex-col pb-0.5"
+                onClick={() => setDetail({ id: p.id, view: p.has_page ? "page" : "config" })}
+              >
+                <div className="flex items-start gap-3 mb-2">
+                  <div className="w-12 h-12 rounded-lg bg-zinc-800/60 flex items-center justify-center shrink-0">
+                    <Puzzle className="w-6 h-6 text-green-500" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium truncate">{p.name}</span>
-                      {statusBadge(p.status)}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-semibold truncate flex-1">{p.name}</span>
+                      {p.update_available && (
+                        <span className="text-[9px] font-bold text-orange-400 border border-orange-500/40 bg-orange-500/10 px-1 py-px rounded shrink-0">
+                          NEW
+                        </span>
+                      )}
+                      {statusDot(p.status, t(STATUS_LABEL_KEYS[p.status]))}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-zinc-500 mt-0.5">
                       <span>v{p.version}</span>
@@ -269,74 +294,421 @@ export default function InstalledTab() {
                         {sm.icon}
                         {t(sm.labelKey)}
                       </span>
-                      <span>·</span>
-                      <span>{statusLabel(t, p.status)}</span>
                     </div>
                   </div>
-                  <ChevronDown
-                    className={cn(
-                      "w-4 h-4 text-zinc-500 shrink-0 transition-transform",
-                      isExpanded && "rotate-180",
-                    )}
-                  />
-                </button>
-
-                {isExpanded && (
-                  <div className="border-t border-zinc-800 px-4 py-3 space-y-3">
-                    {p.status_msg && <p className="text-xs text-red-400">{p.status_msg}</p>}
-                    <div>
-                      <p className="text-xs text-zinc-400 mb-1">{t("plugins.config")}</p>
-                      <p className="text-sm text-zinc-500">{t("plugins.noConfigYet")}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {p.status === "disabled" ? (
-                        <Button
-                          size="sm"
-                          disabled={isBusy}
-                          onClick={() => runAction(p.id, () => api.plugins.setEnabled(p.id, true))}
-                        >
-                          {t("plugins.enable")}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={isBusy}
-                          onClick={() => runAction(p.id, () => api.plugins.setEnabled(p.id, false))}
-                        >
-                          {t("plugins.disable")}
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={isBusy}
-                        onClick={() => runAction(p.id, () => api.plugins.update(p.id))}
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        {t("plugins.update")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        disabled={isBusy}
-                        onClick={() => {
-                          if (confirm(t("plugins.uninstallConfirm", { name: p.name }))) {
-                            runAction(p.id, () => api.plugins.uninstall(p.id));
-                          }
-                        }}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        {t("plugins.uninstall")}
-                      </Button>
-                    </div>
-                  </div>
+                </div>
+                {p.description && (
+                  <p className="text-xs text-zinc-500 line-clamp-2 mb-2">{p.description}</p>
                 )}
+                <div className="mt-auto border-t border-zinc-800 pt-0.5 flex items-center gap-2">
+                  <span className="text-xs text-zinc-400 truncate flex-1">{p.author || "—"}</span>
+                  <DropdownMenu
+                    trigger={(toggle, open, ariaProps) => (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggle();
+                        }}
+                        {...ariaProps}
+                        aria-label={t("plugins.menuLabel")}
+                        className={`p-1 rounded-lg cursor-pointer transition-colors shrink-0 ${
+                          open
+                            ? "bg-zinc-700 text-white"
+                            : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                        }`}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+                    )}
+                  >
+                    {p.has_page && (
+                      <MenuItem
+                        icon={<LayoutDashboard className="w-4 h-4" />}
+                        onClick={() => setDetail({ id: p.id, view: "page" })}
+                      >
+                        {t("plugins.dataPanel")}
+                      </MenuItem>
+                    )}
+                    <MenuItem
+                      icon={<Settings className="w-4 h-4" />}
+                      onClick={() => setDetail({ id: p.id, view: "config" })}
+                    >
+                      {t("plugins.settings")}
+                    </MenuItem>
+                    <MenuItem
+                      icon={<ScrollText className="w-4 h-4" />}
+                      onClick={() => setLogId(p.id)}
+                    >
+                      {t("plugins.viewLogs")}
+                    </MenuItem>
+                    {p.update_available ? (
+                      <MenuItem
+                        icon={<RefreshCw className="w-4 h-4" />}
+                        disabled={busyIds.has(p.id)}
+                        onClick={() => setHistoryId(p.id)}
+                      >
+                        {t("plugins.update")}
+                      </MenuItem>
+                    ) : (
+                      <MenuItem
+                        icon={<History className="w-4 h-4" />}
+                        onClick={() => setHistoryId(p.id)}
+                      >
+                        {t("plugins.versionHistory")}
+                      </MenuItem>
+                    )}
+                    <MenuItem
+                      danger
+                      icon={<Trash2 className="w-4 h-4" />}
+                      disabled={busyIds.has(p.id)}
+                      onClick={() => {
+                        if (confirm(t("plugins.uninstallConfirm", { name: p.name }))) {
+                          runAction(p.id, () => api.plugins.uninstall(p.id));
+                        }
+                      }}
+                    >
+                      {t("plugins.uninstall")}
+                    </MenuItem>
+                  </DropdownMenu>
+                </div>
               </Card>
             );
           })}
-        </CardGrid>
+        </div>
       )}
+
+      {detailPlugin && detail && (
+        <PluginDetailModal
+          plugin={detailPlugin}
+          initialView={detail.view}
+          onClose={() => setDetail(null)}
+          onEnabledChanged={loadPlugins}
+        />
+      )}
+      {historyPlugin && (
+        <VersionHistoryModal
+          plugin={historyPlugin}
+          onClose={() => setHistoryId(null)}
+          onUpdated={loadPlugins}
+        />
+      )}
+      {logPlugin && <LogsModal plugin={logPlugin} onClose={() => setLogId(null)} />}
     </div>
   );
+}
+
+// VersionHistoryModal shows the plugin's changelog from the manifest
+// [[plugin.history]] entries. When an update is available the bottom of the
+// dialog offers an "update to latest version" action.
+function VersionHistoryModal({
+  plugin,
+  onClose,
+  onUpdated,
+}: {
+  plugin: PluginInstance;
+  onClose: () => void;
+  onUpdated: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [installing, setInstalling] = useState(false);
+  const [error, setError] = useState("");
+  const entries = plugin.history || [];
+
+  const install = async () => {
+    setInstalling(true);
+    setError("");
+    try {
+      await api.plugins.update(plugin.id);
+      await onUpdated();
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <Modal title={`${plugin.name} ${t("plugins.versionHistory")}`} onClose={onClose}>
+      <div className="space-y-3">
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        {entries.length === 0 ? (
+          <p className="text-sm text-zinc-500">{t("plugins.noHistory")}</p>
+        ) : (
+          entries.map((h, i) => (
+            <div key={i} className="border border-zinc-800 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">v{h.version}</span>
+                {h.date && <span className="text-xs text-zinc-500">{h.date}</span>}
+              </div>
+              {h.description && <p className="text-xs text-zinc-400 mt-1">{h.description}</p>}
+            </div>
+          ))
+        )}
+        {plugin.update_available && (
+          <div className="flex justify-end border-t border-zinc-800 pt-3">
+            <Button size="sm" onClick={install} disabled={installing}>
+              <RefreshCw className={cn("w-3.5 h-3.5", installing && "animate-spin")} />
+              {installing ? t("plugins.installing") : t("plugins.updateToLatest")}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// PluginDetailModal shows a plugin's data page (get_page assembly) and its
+// config form (get_form assembly). The data page is the default view; when
+// the plugin provides none, the config form is shown instead. Navigation
+// between the two lives in the bottom bar: the data view offers a settings
+// button on the left (→ config), the config view offers a data button on
+// the left (only when a page exists) and save on the right. The enable
+// switch sits in the modal's title row (headerAction), right before the
+// close button.
+function PluginDetailModal({
+  plugin,
+  initialView,
+  onClose,
+  onEnabledChanged,
+}: {
+  plugin: PluginInstance;
+  initialView?: "page" | "config";
+  onClose: () => void;
+  // onEnabledChanged reloads the plugin list after the toggle succeeded.
+  onEnabledChanged: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [form, setForm] = useState<UINode | null>(null);
+  const [page, setPage] = useState<UINode | null>(null);
+  const [view, setView] = useState<"page" | "config">("page");
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [initValues, setInitValues] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [toggleBusy, setToggleBusy] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [f, p, c] = await Promise.all([
+        api.plugins.getForm(plugin.id),
+        api.plugins.getPage(plugin.id),
+        api.plugins.getConfig(plugin.id),
+      ]);
+      setForm(f.schema || null);
+      setPage(p.schema || null);
+      setValues(c.config || {});
+      setInitValues(c.config || {});
+      setView(initialView === "config" || !p.schema ? "config" : "page");
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugin.id]);
+
+  const toggleEnabled = async () => {
+    setToggleBusy(true);
+    setError("");
+    const enabling = !plugin.enabled;
+    try {
+      await api.plugins.setEnabled(plugin.id, enabling);
+      await onEnabledChanged();
+      if (enabling) {
+        await load();
+      }
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setToggleBusy(false);
+    }
+  };
+
+  const refreshPage = async () => {
+    setPageLoading(true);
+    setError("");
+    try {
+      const p = await api.plugins.getPage(plugin.id);
+      setPage(p.schema || null);
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setPageLoading(false);
+    }
+  };
+
+  // Deep-compare via JSON: config values may be objects/arrays whose
+  // references change on every onChange (e.g. VSelect multiple), so a
+  // shallow !== would misreport them as dirty.
+  const dirty = form
+    ? collectModels(form).some(
+        (key) => JSON.stringify(values[key]) !== JSON.stringify(initValues[key]),
+      )
+    : false;
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await api.plugins.updateConfig(plugin.id, values);
+      setInitValues(values);
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  let modalTitle = plugin.name;
+  if (view === "config") {
+    modalTitle = `${plugin.name} ${t("plugins.settings")}`;
+  }
+
+  // renderContent picks the body view without nested ternaries:
+  // loading → disabled notice → data page → config form.
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center py-6">
+          <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+        </div>
+      );
+    }
+    if (!plugin.enabled) {
+      return (
+        <p className="text-sm text-zinc-500 py-6 text-center">{t("plugins.pluginDisabled")}</p>
+      );
+    }
+    if (view === "page") {
+      if (page) {
+        return <SchemaRenderer node={page} />;
+      }
+      return <p className="text-sm text-zinc-500 py-2">{t("plugins.noPageData")}</p>;
+    }
+    if (form) {
+      return (
+        <SchemaRenderer
+          node={form}
+          values={values}
+          onChange={(key, value) => {
+            setValues((prev) => ({ ...prev, [key]: value }));
+            setError("");
+          }}
+          disabled={saving}
+        />
+      );
+    }
+    return <p className="text-sm text-zinc-500">{t("plugins.noConfigYet")}</p>;
+  };
+
+  return (
+    <Modal
+      title={modalTitle}
+      titleExtra={
+        error ? (
+          <p className="text-xs text-red-400 max-w-60 truncate" title={error}>
+            {error}
+          </p>
+        ) : undefined
+      }
+      onClose={onClose}
+      className="max-w-3xl"
+      contentClassName="pb-1"
+      headerAction={
+        <button
+          type="button"
+          role="switch"
+          aria-checked={!!plugin.enabled}
+          title={t("plugins.enableSwitch")}
+          onClick={toggleEnabled}
+          disabled={toggleBusy}
+          className={cn(
+            "w-11 h-6 rounded-full transition-colors relative shrink-0 cursor-pointer disabled:opacity-50",
+            plugin.enabled ? "bg-green-600" : "bg-zinc-700",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all",
+              plugin.enabled ? "left-[22px]" : "left-0.5",
+            )}
+          />
+        </button>
+      }
+    >
+      <div className="space-y-4">
+        {plugin.status_msg && <p className="text-xs text-red-400">{plugin.status_msg}</p>}
+
+        {renderContent()}
+
+        {!loading && plugin.enabled && (
+          <div className="flex items-center justify-between border-t border-zinc-800 pt-1">
+            {view === "page" ? (
+              <>
+                <Button size="sm" variant="ghost" onClick={() => setView("config")}>
+                  <Settings className="w-3.5 h-3.5" />
+                  {t("plugins.settings")}
+                </Button>
+                {page && (
+                  <Button size="sm" onClick={refreshPage} disabled={pageLoading}>
+                    <RefreshCw className={cn("w-3.5 h-3.5", pageLoading && "animate-spin")} />
+                    {t("plugins.refresh")}
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  {page && (
+                    <Button size="sm" variant="ghost" onClick={() => setView("page")}>
+                      <LayoutDashboard className="w-3.5 h-3.5" />
+                      {t("plugins.pageData")}
+                    </Button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {dirty && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setValues(initValues)}
+                      disabled={saving}
+                    >
+                      {t("admin.revert")}
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={save} disabled={saving || !dirty}>
+                    {saving ? t("common.saving") : t("common.save")}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// collectModels walks a UI tree and returns every field model (config
+// key), used for dirty detection.
+function collectModels(node: UINode): string[] {
+  const out: string[] = [];
+  const walk = (n: UINode) => {
+    if (typeof n.props?.model === "string" && n.props.model !== "") {
+      out.push(n.props.model);
+    }
+    (n.content || []).forEach(walk);
+  };
+  walk(node);
+  return out;
 }

@@ -1,3 +1,5 @@
+import type { PluginConfigResponse } from "../types";
+
 const BASE = "";
 
 // fetchWithAuth performs a fetch with the stored bearer token and, on 401,
@@ -49,7 +51,7 @@ async function request(path: string, opts: RequestInit = {}): Promise<any> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    const err: any = new Error(body.error || res.statusText);
+    const err: any = new Error(body.error || statusText(res));
     err.status = res.status;
     err.error = body.error;
     err.code = body.code;
@@ -58,6 +60,92 @@ async function request(path: string, opts: RequestInit = {}): Promise<any> {
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+// statusText gives a readable label for HTTP failures. Browsers derive
+// res.statusText from the status line, but dev proxies (Vite) often send an
+// empty one, which previously surfaced as "Unknown" — so gateway errors get
+// their standard names explicitly.
+function statusText(res: Response): string {
+  const gateway: Record<number, string> = {
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    504: "Gateway Timeout",
+  };
+  return gateway[res.status] || res.statusText || `HTTP ${res.status}`;
+}
+
+// pluginLogsStream opens the SSE log stream of one plugin. onOpen fires
+// when the stream is established (even with zero log lines), onLine for
+// every log line (tail 50 first, then new lines), onGap when the resume
+// cursor could not be located (some logs were skipped), onError when the
+// server reports a stream error. cursor (the timestamp of the last record
+// the client saw) resumes the stream right after that line. It uses
+// fetchWithAuth because the browser's EventSource API cannot send the
+// Authorization header; the caller cancels via the passed AbortSignal.
+export async function pluginLogsStream(
+  id: string,
+  handlers: {
+    onOpen?: () => void;
+    onLine: (line: string) => void;
+    onGap?: () => void;
+    onError?: (message: string) => void;
+  },
+  signal: AbortSignal,
+  cursor?: string,
+): Promise<void> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  const res = await fetchWithAuth(`/api/plugins/${encodeURIComponent(id)}/logs/stream${qs}`, {
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`log stream failed: ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let opened = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    if (!opened) {
+      opened = true;
+      handlers.onOpen?.();
+    }
+    let idx: number;
+    while ((idx = buf.indexOf("\n\n")) !== -1) {
+      const raw = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      let eventType = "";
+      const dataLines: string[] = [];
+      for (const l of raw.split("\n")) {
+        if (l.startsWith("event:")) {
+          eventType = l.slice(6).trim();
+        } else if (l.startsWith("data:")) {
+          // Multiple data: lines in one event are joined with \n per the
+          // SSE spec — that's how multi-line log records arrive.
+          dataLines.push(l.slice(5).replace(/^ /, ""));
+        }
+        // ": ping" keepalive comments are skipped.
+      }
+      if (eventType === "error") {
+        handlers.onError?.(dataLines.join("\n"));
+        continue;
+      }
+      if (eventType === "gap") {
+        handlers.onGap?.();
+        continue;
+      }
+      // Every event with at least one data: line is a log line (an empty
+      // line value is preserved so blank lines can be skipped by the
+      // assembler, not here).
+      if (dataLines.length > 0) {
+        handlers.onLine(dataLines.join("\n"));
+      }
+    }
+  }
 }
 
 // refreshInFlight merges concurrent refresh attempts into one request. The
@@ -284,6 +372,11 @@ export const api = {
   },
   notifications: {
     channels: () => request("/api/notifications/channels"),
+    setChannelEnabled: (type: string, enabled: boolean) =>
+      request(`/api/notifications/channels/${encodeURIComponent(type)}/enabled`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      }),
     test: (channel: string, to: string[], config?: Record<string, unknown>) =>
       request("/api/notifications/test", {
         method: "POST",
@@ -335,19 +428,26 @@ export const api = {
   },
   plugins: {
     installed: () => request("/api/plugins"),
+    uninstalled: () => request("/api/plugins/uninstalled"),
+    installPlugin: (id: string) =>
+      request(`/api/plugins/${encodeURIComponent(id)}/install`, { method: "POST" }),
+    uninstall: (id: string) =>
+      request(`/api/plugins/${encodeURIComponent(id)}/uninstall`, { method: "POST" }),
+    remove: (id: string) => request(`/api/plugins/${encodeURIComponent(id)}`, { method: "DELETE" }),
     setEnabled: (id: string, enabled: boolean) =>
       request(`/api/plugins/${encodeURIComponent(id)}/enabled`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       }),
-    // Reserved for the plugin config editor UI (not wired yet).
     updateConfig: (id: string, config: Record<string, unknown>) =>
       request(`/api/plugins/${encodeURIComponent(id)}/config`, {
         method: "PUT",
         body: JSON.stringify({ config }),
       }),
-    uninstall: (id: string) =>
-      request(`/api/plugins/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    getConfig: (id: string) =>
+      request(`/api/plugins/${encodeURIComponent(id)}/config`) as Promise<PluginConfigResponse>,
+    getForm: (id: string) => request(`/api/plugins/${encodeURIComponent(id)}/form`),
+    getPage: (id: string) => request(`/api/plugins/${encodeURIComponent(id)}/page`),
     update: (id: string) =>
       request(`/api/plugins/${encodeURIComponent(id)}/update`, { method: "POST" }),
     market: () => request("/api/plugins/market"),

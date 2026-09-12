@@ -2,12 +2,12 @@ import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useOutletContext } from "react-router-dom";
 import { translateApiError } from "../../i18n/errorCodes";
-import { Card, CardGrid } from "../../components/ui/card";
+import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Modal } from "../../components/ui/modal";
 import PluginToolbar from "./PluginToolbar";
 import { api } from "../../api/client";
-import { Puzzle, Download, Loader2, ShieldCheck, ShieldQuestion, Tag, User } from "lucide-react";
+import { Puzzle, Download, Loader2, ShieldCheck, ShieldQuestion } from "lucide-react";
 import type { PluginCatalogEntry, PluginsOutletContext } from "../../types";
 
 function installLabel(
@@ -17,7 +17,7 @@ function installLabel(
 ): string {
   if (installing === entry.name) return t("plugins.installing");
   if (entry.installed) return t("plugins.installed");
-  return t("plugins.install");
+  return t("plugins.installPlugin");
 }
 
 const DEFAULT_FILTERS = { author: [], tag: [], repo: [] };
@@ -194,48 +194,55 @@ export default function MarketTab() {
         </p>
       )}
       {!loading && filtered.length > 0 && (
-        <CardGrid className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((p) => (
             <Card
               key={`${p.repo}:${p.name}`}
-              className="cursor-pointer hover:border-zinc-700 transition-colors"
+              className="cursor-pointer hover:border-zinc-700 transition-all duration-200 hover:scale-[1.03] flex flex-col pb-0.5"
               onClick={() => setSelected(p)}
             >
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
-                  <Puzzle className="w-5 h-5 text-green-500" />
+              <div className="flex items-start gap-3 mb-2">
+                <div className="w-12 h-12 rounded-lg bg-zinc-800/60 flex items-center justify-center shrink-0">
+                  <Puzzle className="w-6 h-6 text-green-500" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{p.name}</div>
-                  <div className="text-xs text-zinc-500 truncate flex items-center gap-1">
-                    <User className="w-3 h-3" />
-                    {p.author || t("common.unknown")}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-semibold truncate flex-1">{p.name}</span>
+                    {p.installed && (
+                      <span className="text-[10px] px-1.5 py-px rounded-full bg-green-600/20 text-green-400 shrink-0">
+                        {t("plugins.installed")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-zinc-500 mt-0.5">
+                    <span>v{p.version}</span>
+                    <span>·</span>
+                    <span className="flex items-center gap-1 truncate">
+                      {p.official ? (
+                        <ShieldCheck className="w-3 h-3 text-green-500 shrink-0" />
+                      ) : (
+                        <ShieldQuestion className="w-3 h-3 text-yellow-500 shrink-0" />
+                      )}
+                      {p.author || t("common.unknown")}
+                    </span>
                   </div>
                 </div>
-                {p.installed && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-600/20 text-green-400 shrink-0">
-                    {t("plugins.installed")}
-                  </span>
-                )}
               </div>
               {p.description && (
-                <p className="text-xs text-zinc-400 line-clamp-2 mb-3">{p.description}</p>
+                <p className="text-xs text-zinc-500 line-clamp-2 mb-2">{p.description}</p>
               )}
-              <div className="flex items-center gap-2 text-xs text-zinc-500">
-                {p.tags && p.tags.length > 0 && (
-                  <span className="flex items-center gap-1 truncate">
-                    <Tag className="w-3 h-3 shrink-0" />
-                    {p.tags.join(", ")}
-                  </span>
-                )}
-                <span className="ml-auto flex items-center gap-1 shrink-0">
+              <div className="mt-auto border-t border-zinc-800 pt-0.5 flex items-center gap-2">
+                <span className="text-xs text-zinc-400 truncate flex-1">
+                  {p.tags && p.tags.length > 0 ? p.tags.join(", ") : "—"}
+                </span>
+                <span className="flex items-center gap-1 text-xs text-zinc-500 shrink-0">
                   <Download className="w-3 h-3" />
                   {p.downloads}
                 </span>
               </div>
             </Card>
           ))}
-        </CardGrid>
+        </div>
       )}
 
       {selected && (

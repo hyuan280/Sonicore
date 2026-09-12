@@ -8,10 +8,24 @@ interface ModalProps {
   title?: string;
   onClose: () => void;
   className?: string;
+  // titleExtra renders right after the title on the left side.
+  titleExtra?: React.ReactNode;
+  // headerAction renders in the title row, right before the close button.
+  headerAction?: React.ReactNode;
+  // contentClassName overrides the body wrapper classes (default px-5 pb-5).
+  contentClassName?: string;
   children: React.ReactNode;
 }
 
-export function Modal({ title, onClose, className, children }: ModalProps) {
+export function Modal({
+  title,
+  onClose,
+  className,
+  titleExtra,
+  headerAction,
+  contentClassName,
+  children,
+}: ModalProps) {
   const { t } = useTranslation();
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -85,23 +99,29 @@ export function Modal({ title, onClose, className, children }: ModalProps) {
         )}
       >
         <div className="flex items-center justify-between px-5 pt-4 pb-2">
-          {title ? (
-            <h3 id={titleId} className="font-bold text-lg">
-              {title}
-            </h3>
-          ) : (
-            <span />
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("common.close")}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3 min-w-0">
+            {title ? (
+              <h3 id={titleId} className="font-bold text-lg shrink-0">
+                {title}
+              </h3>
+            ) : (
+              <span />
+            )}
+            {titleExtra}
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            {headerAction}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("common.close")}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="px-5 pb-5">{children}</div>
+        <div className={cn("px-5 pb-5", contentClassName)}>{children}</div>
       </div>
     </div>,
     document.body,

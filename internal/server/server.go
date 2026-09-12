@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -36,6 +37,7 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/secrets"
 	"github.com/sonicore/server/internal/infrastructure/task"
 	"github.com/sonicore/server/internal/infrastructure/transcoder"
+	pluginmgr "github.com/sonicore/server/internal/plugin"
 )
 
 func writeCodedError(w http.ResponseWriter, status int, code domain.ErrorCode) {
@@ -54,12 +56,13 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 }
 
 type Server struct {
-	cfg    *config.Config
-	db     *sql.DB
-	vk     *cache.Valkey
-	sched  *task.Scheduler
-	router *mux.Router
-	http   *http.Server
+	cfg     *config.Config
+	db      *sql.DB
+	vk      *cache.Valkey
+	sched   *task.Scheduler
+	router  *mux.Router
+	http    *http.Server
+	plugins *pluginmgr.Manager
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -207,14 +210,12 @@ func New(cfg *config.Config) (*Server, error) {
 
 	notifService := service.NewNotificationService(cfg.Notification, repository.NewUserRepo(db), repository.NewSettingsRepo(db), enc, repository.NewNotificationPrefRepo(db))
 
-	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers, notifService)
-	downloadManager := download.NewManager(db)
-	wsHub := ws.NewHub()
-
 	// Central task system: components register their periodic work here and
 	// the scheduler owns timing, execution and status reporting. The auth
 	// rate limiter is created up here (instead of inside registerRoutes) so
-	// its cleanup pass can be registered as a task.
+	// its cleanup pass can be registered as a task. Plugin-declared
+	// schedules are registered into the same scheduler by the plugin
+	// manager, so it must exist before plugin discovery starts.
 	sched := task.NewScheduler(task.NewSettingsStateStore(settingsRepo))
 	authLimiter := middleware.NewRateLimiter(10, time.Minute)
 	if err := sched.Register(task.Spec{
@@ -241,9 +242,31 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("register task auth_ratelimit_cleanup: %w", err)
 	}
 
+	// Plugin system: discover plugins under {data_dir}/plugins, launch the
+	// enabled ones and register their notifier adapters. A single plugin
+	// failing to start never aborts server startup (it is marked errored).
+	// Plugin channels are wired through the generic notification channel
+	// control, so the notification subsystem cannot tell plugins apart from
+	// built-in channels.
+	pluginManager := pluginmgr.NewManager(
+		filepath.Join(cfg.Data.DataDir, "plugins"),
+		pluginmgr.NewRepo(db),
+		notifService.RegisterNotifier,
+		notifService.RegisterChannelController,
+		notifService.UnregisterNotifier,
+		sched,
+	)
+	if err := pluginManager.Start(context.Background()); err != nil {
+		logger.Warn("[plugin] plugin manager start: %v", err)
+	}
+
+	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers, notifService)
+	downloadManager := download.NewManager(db)
+	wsHub := ws.NewHub()
+
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter, pluginManager)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -255,16 +278,17 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:    cfg,
-		db:     db,
-		vk:     vk,
-		sched:  sched,
-		router: router,
-		http:   httpSrv,
+		cfg:     cfg,
+		db:      db,
+		vk:      vk,
+		sched:   sched,
+		router:  router,
+		http:    httpSrv,
+		plugins: pluginManager,
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter, pluginManager *pluginmgr.Manager) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -463,6 +487,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	notif.Use(middleware.AuthMiddleware(jwtService))
 	notif.Use(rest.AdminOnly)
 	notif.HandleFunc("/channels", notifHandler.ListChannels).Methods("GET")
+	notif.HandleFunc("/channels/{type}/enabled", notifHandler.SetChannelEnabled).Methods("PUT")
 	notif.HandleFunc("/test", notifHandler.SendTest).Methods("POST")
 	notif.HandleFunc("/preferences", notifHandler.GetPreferences).Methods("GET")
 	notif.HandleFunc("/preferences", notifHandler.UpdatePreferences).Methods("PUT")
@@ -480,41 +505,31 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	tasksR.HandleFunc("/{id}/run", taskHandler.Run).Methods("POST")
 	tasksR.HandleFunc("/{id}/enabled", taskHandler.SetEnabled).Methods("PUT")
 
-	// Plugin management (stub). The endpoints return empty data until the
-	// plugin manager lands; they exist so the frontend plugin UI works.
+	// Plugin management (admin-only). Installed-plugin data is real
+	// (discovered from {data_dir}/plugins, persisted in plugin_instances);
+	// market/repo endpoints stay stubbed until the marketplace lands.
+	pluginHandler := rest.NewPluginHandler(pluginManager)
 	pluginsR := r.PathPrefix("/api/plugins").Subrouter()
 	pluginsR.Use(middleware.AuthMiddleware(jwtService))
 	pluginsR.Use(rest.AdminOnly)
-	pluginsR.HandleFunc("", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": []interface{}{}})
-	}).Methods("GET")
-	pluginsR.HandleFunc("/market", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": []interface{}{}})
-	}).Methods("GET")
-	pluginsR.HandleFunc("/market/{name}", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"plugin": nil})
-	}).Methods("GET")
-	pluginsR.HandleFunc("/install", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-	}).Methods("POST")
-	pluginsR.HandleFunc("/repos", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"repos": []interface{}{}})
-	}).Methods("GET")
-	pluginsR.HandleFunc("/repos", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-	}).Methods("POST", "DELETE")
-	pluginsR.HandleFunc("/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-	}).Methods("PUT")
-	pluginsR.HandleFunc("/{id}/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-	}).Methods("PUT")
-	pluginsR.HandleFunc("/{id}/update", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-	}).Methods("POST")
-	pluginsR.HandleFunc("/{id}", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-	}).Methods("DELETE")
+	pluginsR.HandleFunc("", pluginHandler.List).Methods("GET")
+	pluginsR.HandleFunc("/uninstalled", pluginHandler.UninstalledList).Methods("GET")
+	pluginsR.HandleFunc("/market", pluginHandler.Market).Methods("GET")
+	pluginsR.HandleFunc("/market/{name}", pluginHandler.MarketDetail).Methods("GET")
+	pluginsR.HandleFunc("/install", pluginHandler.Install).Methods("POST")
+	pluginsR.HandleFunc("/repos", pluginHandler.Repos).Methods("GET")
+	pluginsR.HandleFunc("/repos", pluginHandler.AddRepo).Methods("POST")
+	pluginsR.HandleFunc("/repos", pluginHandler.RemoveRepo).Methods("DELETE")
+	pluginsR.HandleFunc("/{id}/enabled", pluginHandler.SetEnabled).Methods("PUT")
+	pluginsR.HandleFunc("/{id}/config", pluginHandler.GetConfig).Methods("GET")
+	pluginsR.HandleFunc("/{id}/config", pluginHandler.SetConfig).Methods("PUT")
+	pluginsR.HandleFunc("/{id}/form", pluginHandler.GetForm).Methods("GET")
+	pluginsR.HandleFunc("/{id}/page", pluginHandler.GetPage).Methods("GET")
+	pluginsR.HandleFunc("/{id}/install", pluginHandler.InstallPlugin).Methods("POST")
+	pluginsR.HandleFunc("/{id}/uninstall", pluginHandler.Uninstall).Methods("POST")
+	pluginsR.HandleFunc("/{id}/update", pluginHandler.Update).Methods("POST")
+	pluginsR.HandleFunc("/{id}/logs/stream", pluginHandler.LogsStream).Methods("GET")
+	pluginsR.HandleFunc("/{id}", pluginHandler.Delete).Methods("DELETE")
 
 	// Frontend static files (SPA)
 	distDir := cfg.Server.WebDir
@@ -610,11 +625,19 @@ func (s *Server) Start() error {
 
 	logger.Info("[server] shutting down...")
 	stopSched()
+	// End long-lived connections (SSE log streams today; the WebSocket hub
+	// can join later) so http.Shutdown never waits for them.
+	rest.CancelLongConns()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	s.vk.Close()
 	err := s.http.Shutdown(ctx)
+	// Stop plugins only after HTTP has drained: in-flight requests (plugin
+	// data pages, notification channels) still depend on the processes, and
+	// plugin shutdown needs its own time budget so it never eats the whole
+	// ctx before http.Shutdown.
+	s.plugins.Stop()
 	// Join in-flight scheduled runs only after HTTP has drained: no further
 	// RunNow calls can arrive, and any run still going (some task functions
 	// ignore their ctx) must finish before logger.Close below.

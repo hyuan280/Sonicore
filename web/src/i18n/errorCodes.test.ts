@@ -69,6 +69,7 @@ describe("errorCodes 前后端一致性", () => {
       [800, 899, "admin"],
       [900, 999, "download"],
       [1000, 1099, "notification"],
+      [1100, 1199, "task"],
     ];
     for (const [code] of goCodes) {
       const cat = categories.find(([lo, hi]) => code >= lo && code <= hi);

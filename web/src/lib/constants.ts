@@ -22,6 +22,7 @@ export const ROUTES = {
 export const PLUGIN_TABS = {
   installed: "installed",
   market: "market",
+  uninstalled: "uninstalled",
 } as const;
 
 export type PluginTab = (typeof PLUGIN_TABS)[keyof typeof PLUGIN_TABS];

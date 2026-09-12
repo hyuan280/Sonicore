@@ -100,6 +100,11 @@ export function DropdownMenu({ trigger, align = "right", className, children }: 
             ref={panelRef}
             role="menu"
             onKeyDown={onPanelKeyDown}
+            // The panel is portaled, but React events still bubble through
+            // the React tree — stop them here too so clicks on the panel's
+            // padding/background never reach a clickable parent (e.g. a
+            // plugin card's onClick).
+            onClick={(e) => e.stopPropagation()}
             style={pos}
             className={cn(
               "fixed z-50 bg-zinc-800 rounded-lg shadow-xl py-1 border border-zinc-700/50 min-w-44",
@@ -120,11 +125,13 @@ export function MenuItem({
   onClick,
   icon,
   danger,
+  disabled,
   children,
 }: {
   onClick?: () => void;
   icon?: React.ReactNode;
   danger?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   const { close } = useContext(MenuContext);
@@ -132,12 +139,17 @@ export function MenuItem({
     <button
       type="button"
       role="menuitem"
-      onClick={() => {
+      disabled={disabled}
+      onClick={(e) => {
+        // The panel is portaled, but React events still bubble through the
+        // React tree — stop them so a menu inside a clickable card doesn't
+        // also trigger the card's onClick.
+        e.stopPropagation();
         onClick?.();
         close();
       }}
       className={cn(
-        "w-full text-left px-3 py-2 text-sm cursor-pointer flex items-center gap-2",
+        "w-full text-left px-3 py-2 text-sm cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
         danger ? "text-red-400 hover:text-red-300" : "text-zinc-300 hover:text-white",
         "hover:bg-zinc-700/60",
       )}
@@ -170,7 +182,10 @@ export function MenuCheckbox({
       type="button"
       role="menuitemcheckbox"
       aria-checked={checked}
-      onClick={onToggle}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
       className="w-full text-left px-3 py-2 text-sm cursor-pointer flex items-center gap-2 text-zinc-300 hover:text-white hover:bg-zinc-700/60"
     >
       <span
@@ -201,7 +216,8 @@ export function MenuRadio({
       type="button"
       role="menuitemradio"
       aria-checked={checked}
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         onSelect();
         close();
       }}

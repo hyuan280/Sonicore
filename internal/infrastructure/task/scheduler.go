@@ -235,6 +235,21 @@ func (s *Scheduler) RunNow(id string) error {
 	return nil
 }
 
+// Remove deletes a registered task (e.g. a plugin unloaded its schedules).
+// Removing a missing task is not an error.
+func (s *Scheduler) Remove(id string) {
+	s.mu.Lock()
+	_, ok := s.tasks[id]
+	if ok {
+		delete(s.tasks, id)
+	}
+	s.mu.Unlock()
+	if ok {
+		s.signal()
+		logger.Info("[task] removed: %s", id)
+	}
+}
+
 // SetEnabled enables or disables a task and persists the state. Disabling
 // clears the next run; enabling reschedules from now. The check, in-memory
 // update and persist all happen under one lock so concurrent calls cannot

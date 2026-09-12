@@ -108,6 +108,7 @@ const DiscoverTrackPage = lazy(() => import("./pages/DiscoverTrackPage"));
 const PluginsPage = lazy(() => import("./pages/plugins/PluginsPage"));
 const InstalledPluginsTab = lazy(() => import("./pages/plugins/InstalledTab"));
 const PluginMarketTab = lazy(() => import("./pages/plugins/MarketTab"));
+const UninstalledPluginsTab = lazy(() => import("./pages/plugins/UninstalledTab"));
 const TasksPage = lazy(() => import("./pages/tasks/TasksPage"));
 
 function Sidebar() {
@@ -502,6 +503,7 @@ export default function App() {
           <Route index element={<Navigate to={pluginsPath(PLUGIN_TABS.installed)} replace />} />
           <Route path={PLUGIN_TABS.installed} element={<InstalledPluginsTab />} />
           <Route path={PLUGIN_TABS.market} element={<PluginMarketTab />} />
+          <Route path={PLUGIN_TABS.uninstalled} element={<UninstalledPluginsTab />} />
         </Route>
         <Route path={ROUTES.profile} element={<ProfilePage />} />
         <Route path={ROUTES.admin} element={<Navigate to={ROUTES.settings} replace />} />

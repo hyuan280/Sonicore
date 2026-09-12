@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, NavLink, Outlet } from "react-router-dom";
-import { MoreVertical, Puzzle, Store, LibraryBig, Settings2 } from "lucide-react";
+import { MoreVertical, Puzzle, Store, LibraryBig, Settings2, PackageOpen } from "lucide-react";
 import { isAdmin, useAuth } from "../../stores/auth";
 import { ROUTES, PLUGIN_TABS, pluginsPath } from "../../lib/constants";
 import { DropdownMenu, MenuItem } from "../../components/ui/menu";
@@ -29,6 +29,11 @@ function PluginsPageInner() {
       to: pluginsPath(PLUGIN_TABS.market),
       icon: Store,
       label: t("plugins.tabs.market"),
+    },
+    {
+      to: pluginsPath(PLUGIN_TABS.uninstalled),
+      icon: PackageOpen,
+      label: t("plugins.tabs.uninstalled"),
     },
   ];
 

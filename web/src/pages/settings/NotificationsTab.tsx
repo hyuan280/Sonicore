@@ -6,13 +6,14 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card } from "../../components/ui/card";
 import { api } from "../../api/client";
-import { Bell, Plus, Pen, Trash2, Settings, Loader2 } from "lucide-react";
+import { Bell, Plus, Pen, Trash2, Settings, Loader2, Puzzle } from "lucide-react";
 import type { NotifTestOptions } from "../../types";
 
 export default function NotificationsTab() {
   return (
     <div className="space-y-4">
       <NotificationChannelPrefs />
+      <ChannelSwitches />
       <EmailNotificationSettings />
     </div>
   );
@@ -375,6 +376,137 @@ function NotificationChannelPrefs() {
 
       {error && <p className="text-xs text-red-400">{error}</p>}
       {success && <p className="text-xs text-green-400">{success}</p>}
+    </Card>
+  );
+}
+
+// ChannelSwitches lists every notification channel with its enable state
+// and a test button. Plugin-provided channels appear here through the same
+// notifications API as built-in ones — the UI does not distinguish where a
+// channel comes from. The email channel is configured in its own card
+// below (SMTP form), so it is skipped here.
+function ChannelSwitches() {
+  const { t } = useTranslation();
+  const user = useAuth((s) => s.user);
+  const [channels, setChannels] = useState<{ type: string; name: string; enabled: boolean }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<Set<string>>(new Set());
+  // Per-channel feedback: concurrent operations on different channels must
+  // not overwrite each other's error/success messages.
+  const [channelMsg, setChannelMsg] = useState<
+    Record<string, { error: string; success: string | null }>
+  >({});
+  const [loadError, setLoadError] = useState("");
+
+  const reload = async () => {
+    const d = await api.notifications.channels();
+    setChannels(d.channels || []);
+  };
+
+  useEffect(() => {
+    reload()
+      .catch((err: unknown) => setLoadError(translateApiError(t, err)))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const run = async (type: string, action: () => Promise<unknown>, onDone?: () => void) => {
+    setBusy((prev) => {
+      const next = new Set(prev);
+      next.add(type);
+      return next;
+    });
+    setChannelMsg((prev) => ({ ...prev, [type]: { error: "", success: null } }));
+    try {
+      await action();
+      await reload();
+      onDone?.();
+    } catch (err: unknown) {
+      setChannelMsg((prev) => ({
+        ...prev,
+        [type]: { error: translateApiError(t, err), success: null },
+      }));
+    } finally {
+      setBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(type);
+        return next;
+      });
+    }
+  };
+
+  if (loading) return null;
+  const switches = channels.filter((c) => c.type !== "email");
+  if (switches.length === 0) {
+    if (!loadError) return null;
+    return (
+      <Card className="space-y-3">
+        <h3 className="font-medium flex items-center gap-2">
+          <Puzzle className="w-4 h-4" /> {t("plugins.channelSection")}
+        </h3>
+        <p className="text-xs text-red-400">{loadError}</p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="space-y-3">
+      <h3 className="font-medium flex items-center gap-2">
+        <Puzzle className="w-4 h-4" /> {t("plugins.channelSection")}
+      </h3>
+      <div className="space-y-2">
+        {switches.map((c) => {
+          const msg = channelMsg[c.type];
+          return (
+            <div
+              key={c.type}
+              className="flex items-center justify-between gap-3 p-3 rounded-lg bg-zinc-800/50"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{c.name}</p>
+                <p className="text-xs text-zinc-500 truncate">{t("plugins.channelDesc")}</p>
+                {msg?.error && <p className="text-xs text-red-400 mt-0.5">{msg.error}</p>}
+                {msg?.success && <p className="text-xs text-green-400 mt-0.5">{msg.success}</p>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy.has(c.type) || !c.enabled || !user?.email}
+                  onClick={() =>
+                    run(
+                      c.type,
+                      () => api.notifications.test(c.type, [user?.email || ""]),
+                      () =>
+                        setChannelMsg((prev) => ({
+                          ...prev,
+                          [c.type]: { error: "", success: t("plugins.testSent") },
+                        })),
+                    )
+                  }
+                >
+                  {t("plugins.test")}
+                </Button>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={c.enabled}
+                  aria-label={c.name}
+                  disabled={busy.has(c.type)}
+                  onClick={() =>
+                    run(c.type, () => api.notifications.setChannelEnabled(c.type, !c.enabled))
+                  }
+                  className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${c.enabled ? "bg-green-600" : "bg-zinc-700"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${c.enabled ? "translate-x-6" : ""}`}
+                  />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </Card>
   );
 }

@@ -76,6 +76,22 @@ func TestRegisterValidation(t *testing.T) {
 	require.Len(t, s.List(), 2)
 }
 
+func TestRemove(t *testing.T) {
+	s := NewScheduler(nil)
+	require.NoError(t, s.Register(Spec{ID: "t", Name: "t", Interval: time.Hour}, noopFn()))
+	require.Len(t, s.List(), 1)
+
+	s.Remove("missing") // no-op
+	require.Len(t, s.List(), 1)
+
+	s.Remove("t")
+	require.Empty(t, s.List(), "removed task must disappear from the list")
+
+	// Re-register after removal works (plugin re-enabled).
+	require.NoError(t, s.Register(Spec{ID: "t", Name: "t", Interval: time.Hour}, noopFn()))
+	require.Len(t, s.List(), 1)
+}
+
 func TestIntervalNextRun(t *testing.T) {
 	s := NewScheduler(nil)
 	before := time.Now()

@@ -145,11 +145,26 @@ export interface PluginInstance {
   name: string;
   description?: string;
   version: string;
-  kind: string;
   source: string;
+  author?: string;
+  enabled?: boolean;
   status: PluginStatus;
   status_msg?: string;
   updated_at?: string;
+  // Detected by the host after each plugin load (no per-plugin get_page
+  // requests needed in the frontend).
+  has_page?: boolean;
+  // Version history (changelog) from the manifest [[plugin.history]].
+  history?: PluginHistoryEntry[];
+  // Set when the host detects a newer version (needs the marketplace;
+  // always absent for now).
+  update_available?: boolean;
+}
+
+export interface PluginHistoryEntry {
+  version: string;
+  date?: string;
+  description: string;
 }
 
 export interface PluginCatalogEntry {
@@ -169,4 +184,20 @@ export interface PluginRepo {
   name: string;
   url: string;
   official: boolean;
+}
+
+export interface PluginConfigResponse {
+  config: Record<string, unknown>;
+}
+
+// UINode is one node of the plugin-provided UI assembly tree. The
+// vocabulary is Vuetify's (component names from the Vuetify docs: VForm,
+// VRow, VCol, VSwitch, VTextField, VTextarea, VSelect, VCheckbox, VAlert,
+// VCard, VCardTitle, VCardText, VTable, VDivider, ...); form fields bind
+// to the plugin's config keys via props.model. VSelect uses the official
+// items format [{title, value}]; VTable is a simplified columns/rows table.
+export interface UINode {
+  component: string;
+  props?: Record<string, unknown>;
+  content?: UINode[];
 }

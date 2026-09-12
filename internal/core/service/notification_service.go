@@ -18,9 +18,14 @@ import (
 	"github.com/sonicore/server/internal/infrastructure/secrets"
 )
 
+// ErrChannelNotFound marks a channel type without a registered controller
+// (a client input error; the REST layer maps it to 404).
+var ErrChannelNotFound = errors.New("channel not found")
+
 type NotificationService struct {
 	cfg           config.NotificationConfig
 	notifiers     map[domain.ChannelType]port.Notifier
+	channelCtrl   map[domain.ChannelType]func(context.Context, bool) error
 	users         port.UserRepository
 	settingsRepo  *repository.SettingsRepo
 	prefRepo      port.NotificationPrefRepository
@@ -34,6 +39,7 @@ func NewNotificationService(cfg config.NotificationConfig, users port.UserReposi
 	svc := &NotificationService{
 		cfg:          cfg,
 		notifiers:    make(map[domain.ChannelType]port.Notifier),
+		channelCtrl:  make(map[domain.ChannelType]func(context.Context, bool) error),
 		users:        users,
 		settingsRepo: settingsRepo,
 		enc:          enc,
@@ -42,6 +48,21 @@ func NewNotificationService(cfg config.NotificationConfig, users port.UserReposi
 	emailCfg := svc.loadEmailConfig(context.Background())
 	svc.emailSender = emailpkg.NewSender(emailCfg)
 	svc.notifiers[domain.ChannelEmail] = svc.emailSender
+	// The built-in email channel is controlled through the same generic
+	// path as plugin channels: enable state lives in server settings.
+	svc.channelCtrl[domain.ChannelEmail] = func(ctx context.Context, enabled bool) error {
+		// settingsRepo may be nil (constructor tolerates it elsewhere);
+		// without a store there is nothing to persist, so treat the
+		// toggle as a no-op instead of panicking.
+		if svc.settingsRepo == nil {
+			return nil
+		}
+		if err := svc.settingsRepo.Set(ctx, "notification_email_enabled", strconv.FormatBool(enabled)); err != nil {
+			return err
+		}
+		svc.ReloadEmailConfig(ctx)
+		return nil
+	}
 	svc.categoryPrefs = make(map[domain.NotificationCategory]domain.CategoryPreference)
 	if err := svc.LoadCategoryPrefs(context.Background()); err != nil {
 		logger.Error("[notification] failed to load category prefs, using built-in defaults: %v", err)
@@ -73,20 +94,51 @@ func (s *NotificationService) RegisterNotifier(n port.Notifier) {
 	s.notifiers[n.ChannelType()] = n
 }
 
+// UnregisterNotifier removes a channel (e.g. an uninstalled plugin) so it
+// disappears from the channel list.
+func (s *NotificationService) UnregisterNotifier(ch domain.ChannelType) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.notifiers, ch)
+	delete(s.channelCtrl, ch)
+}
+
+// RegisterChannelController installs the enable/disable control for a
+// channel. Every channel — built-in (email) or plugin-provided — is
+// controlled through the same SetChannelEnabled path; the notification
+// service never cares where a channel comes from.
+func (s *NotificationService) RegisterChannelController(ch domain.ChannelType, fn func(context.Context, bool) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelCtrl[ch] = fn
+}
+
+// SetChannelEnabled enables or disables one channel regardless of its
+// origin (built-in email or plugin).
+func (s *NotificationService) SetChannelEnabled(ctx context.Context, ch domain.ChannelType, enabled bool) error {
+	s.mu.RLock()
+	fn, ok := s.channelCtrl[ch]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrChannelNotFound, ch)
+	}
+	return fn(ctx, enabled)
+}
+
+// Channels returns every registered channel with its current enabled state
+// (including disabled ones, so the UI can toggle them uniformly).
 func (s *NotificationService) Channels() []ChannelInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var out []ChannelInfo
+	out := make([]ChannelInfo, 0, len(s.notifiers))
 	for _, n := range s.notifiers {
-		if !n.Enabled() {
-			continue
-		}
 		out = append(out, ChannelInfo{
 			Type:    n.ChannelType(),
 			Name:    n.Name(),
-			Enabled: true,
+			Enabled: n.Enabled(),
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
 	return out
 }
 
