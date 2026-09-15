@@ -2,42 +2,29 @@ import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useOutletContext } from "react-router-dom";
 import { translateApiError } from "../../i18n/errorCodes";
-import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Modal } from "../../components/ui/modal";
 import { SchemaRenderer } from "../../components/ui/schema";
-import { DropdownMenu, MenuItem } from "../../components/ui/menu";
+import { MenuItem } from "../../components/ui/menu";
 import PluginToolbar from "./PluginToolbar";
 import LogsModal from "./LogsModal";
+import { PluginCard, sourceInfo } from "./PluginCard";
+import { useRepoOfficialMap } from "../../hooks/useRepoOfficialMap";
 import { api } from "../../api/client";
 import {
-  Puzzle,
   Loader2,
   Trash2,
   RefreshCw,
-  ShieldCheck,
-  ShieldQuestion,
-  MoreVertical,
   Settings,
   LayoutDashboard,
   History,
   ScrollText,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import {
-  PLUGIN_SOURCE,
-  PLUGIN_INSTALLED_FILTER_KEYS,
-  PLUGIN_INSTALLED_SORT_KEYS,
-} from "../../lib/constants";
+import { PLUGIN_INSTALLED_FILTER_KEYS, PLUGIN_INSTALLED_SORT_KEYS } from "../../lib/constants";
 import type { PluginInstance, PluginStatus, UINode, PluginsOutletContext } from "../../types";
 
 const STATUS_ORDER: PluginStatus[] = ["ok", "disabled", "error"];
-
-const STATUS_COLORS: Record<PluginStatus, string> = {
-  ok: "bg-green-500",
-  disabled: "bg-zinc-600",
-  error: "bg-red-500",
-};
 
 const STATUS_LABEL_KEYS: Record<PluginStatus, string> = {
   ok: "plugins.statusOk",
@@ -45,43 +32,11 @@ const STATUS_LABEL_KEYS: Record<PluginStatus, string> = {
   error: "plugins.statusError",
 };
 
-// statusDot is the card's only status indicator: a colored dot. The text
-// label was removed from the card on purpose — the dot is enough, but it
-// keeps a readable label for accessibility (title/aria).
-function statusDot(status: PluginStatus, label: string) {
-  return (
-    <span
-      role="status"
-      title={label}
-      aria-label={label}
-      className={cn("w-2.5 h-2.5 rounded-full shrink-0", STATUS_COLORS[status])}
-    />
-  );
-}
-
-function sourceMeta(source: string): { icon: React.ReactNode; labelKey: string } {
-  if (source === PLUGIN_SOURCE.official) {
-    return {
-      icon: <ShieldCheck className="w-3 h-3 text-green-500" />,
-      labelKey: "plugins.sourceOfficial",
-    };
-  }
-  if (source === PLUGIN_SOURCE.third_party) {
-    return {
-      icon: <ShieldCheck className="w-3 h-3 text-zinc-500" />,
-      labelKey: "plugins.sourceThirdParty",
-    };
-  }
-  return {
-    icon: <ShieldQuestion className="w-3 h-3 text-yellow-500" />,
-    labelKey: "plugins.sourceUnverified",
-  };
-}
-
 export default function InstalledTab() {
   const { t } = useTranslation();
   const { setToolbar } = useOutletContext<PluginsOutletContext>();
   const [plugins, setPlugins] = useState<PluginInstance[]>([]);
+  const repoOfficial = useRepoOfficialMap();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   // detail selects the plugin detail modal (data/config views). The enable
@@ -266,62 +221,30 @@ export default function InstalledTab() {
         // are fewer cards than columns, so a lone card never stretches.
         <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
           {filtered.map((p) => {
-            const sm = sourceMeta(p.source);
+            const sm = sourceInfo(p.source, repoOfficial.get(p.source));
             return (
-              <Card
+              <PluginCard
                 key={p.id}
-                className="cursor-pointer hover:border-zinc-700 transition-all duration-200 hover:scale-[1.03] flex flex-col pb-0.5"
+                name={p.name}
+                version={p.version}
+                verified={sm.kind}
+                sourceLabel={sm.isLocal ? t("plugins.sourceLocal") : p.source}
+                status={p.status}
+                statusLabel={t(STATUS_LABEL_KEYS[p.status])}
+                description={p.description}
+                author={p.author}
+                downloads={p.downloads}
+                badge={
+                  p.update_available ? (
+                    <span className="text-[9px] font-bold text-orange-400 border border-orange-500/40 bg-orange-500/10 px-1 py-px rounded shrink-0">
+                      NEW
+                    </span>
+                  ) : undefined
+                }
+                menuLabel={t("plugins.menuLabel")}
                 onClick={() => setDetail({ id: p.id, view: p.has_page ? "page" : "config" })}
-              >
-                <div className="flex items-start gap-3 mb-2">
-                  <div className="w-12 h-12 rounded-lg bg-zinc-800/60 flex items-center justify-center shrink-0">
-                    <Puzzle className="w-6 h-6 text-green-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-semibold truncate flex-1">{p.name}</span>
-                      {p.update_available && (
-                        <span className="text-[9px] font-bold text-orange-400 border border-orange-500/40 bg-orange-500/10 px-1 py-px rounded shrink-0">
-                          NEW
-                        </span>
-                      )}
-                      {statusDot(p.status, t(STATUS_LABEL_KEYS[p.status]))}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-zinc-500 mt-0.5">
-                      <span>v{p.version}</span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1">
-                        {sm.icon}
-                        {t(sm.labelKey)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                {p.description && (
-                  <p className="text-xs text-zinc-500 line-clamp-2 mb-2">{p.description}</p>
-                )}
-                <div className="mt-auto border-t border-zinc-800 pt-0.5 flex items-center gap-2">
-                  <span className="text-xs text-zinc-400 truncate flex-1">{p.author || "—"}</span>
-                  <DropdownMenu
-                    trigger={(toggle, open, ariaProps) => (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggle();
-                        }}
-                        {...ariaProps}
-                        aria-label={t("plugins.menuLabel")}
-                        className={`p-1 rounded-lg cursor-pointer transition-colors shrink-0 ${
-                          open
-                            ? "bg-zinc-700 text-white"
-                            : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-                        }`}
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
-                    )}
-                  >
+                menuItems={
+                  <>
                     {p.has_page && (
                       <MenuItem
                         icon={<LayoutDashboard className="w-4 h-4" />}
@@ -370,9 +293,9 @@ export default function InstalledTab() {
                     >
                       {t("plugins.uninstall")}
                     </MenuItem>
-                  </DropdownMenu>
-                </div>
-              </Card>
+                  </>
+                }
+              />
             );
           })}
         </div>

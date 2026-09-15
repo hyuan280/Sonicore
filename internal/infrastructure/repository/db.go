@@ -361,9 +361,25 @@ func RunMigrations(db *sql.DB) error {
 		has_page    BOOLEAN NOT NULL DEFAULT FALSE,   -- get_page detected after load
 		installed   BOOLEAN NOT NULL DEFAULT TRUE,    -- soft-uninstall flag; new discoveries insert FALSE explicitly
 		dir         TEXT NOT NULL DEFAULT '',         -- actual plugin directory name (may differ from the manifest name)
+		update_available BOOLEAN NOT NULL DEFAULT FALSE, -- newer version exists in its source repo
 		installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
+
+	CREATE TABLE IF NOT EXISTS plugin_repos (
+		url        TEXT PRIMARY KEY,
+		name       TEXT NOT NULL DEFAULT '',          -- from the repo.json "name" field
+		official   BOOLEAN NOT NULL DEFAULT FALSE,
+		enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+		added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		last_sync  TIMESTAMPTZ,
+		last_error TEXT NOT NULL DEFAULT ''
+	);
+
+	-- TEMP migration while the marketplace is in development: dev databases
+	-- created before the update_available column must survive restarts.
+	-- Remove these once the feature is done (fresh CREATE covers it).
+	ALTER TABLE plugin_instances ADD COLUMN IF NOT EXISTS update_available BOOLEAN NOT NULL DEFAULT FALSE;
 
 	CREATE TABLE IF NOT EXISTS plugin_config (
 		plugin_id  TEXT PRIMARY KEY REFERENCES plugin_instances(id) ON DELETE CASCADE,

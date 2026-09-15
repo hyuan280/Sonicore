@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { translateApiError } from "../../i18n/errorCodes";
 import { Modal } from "../../components/ui/modal";
@@ -16,6 +16,14 @@ export function RepoSettingsModal({ onClose }: { onClose: () => void }) {
   const [newUrl, setNewUrl] = useState("");
   const [adding, setAdding] = useState(false);
   const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
+  // Guards async setState after the modal unmounts (closing mid-request).
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -57,10 +65,15 @@ export function RepoSettingsModal({ onClose }: { onClose: () => void }) {
     setError("");
     try {
       await api.plugins.addRepo(url);
-      setRepos((prev) =>
-        prev.some((r) => r.url === url) ? prev : [...prev, { name: url, url, official: false }],
-      );
       setNewUrl("");
+      // Refresh the list only after a successful add; a failure here must not
+      // surface as an add failure (the add already succeeded).
+      try {
+        const d = await api.plugins.repos();
+        if (mountedRef.current) setRepos(d?.repos || []);
+      } catch {
+        // ignore — the list stays as-is; reopening the modal refreshes it.
+      }
     } catch (err) {
       setError(translateApiError(t, err));
     } finally {

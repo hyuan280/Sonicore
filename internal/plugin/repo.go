@@ -40,20 +40,25 @@ const (
 // they are merged from the manifest by Manager.List/ListUninstalled. Dir is
 // host-internal (never sent to the frontend).
 type Instance struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name"`
-	Description string                   `json:"description,omitempty"`
-	Version     string                   `json:"version"`
-	Source      string                   `json:"source"`
-	Author      string                   `json:"author,omitempty"`
-	Enabled     bool                     `json:"enabled"`
-	Status      string                   `json:"status"`
-	StatusMsg   string                   `json:"status_msg,omitempty"`
-	HasPage     bool                     `json:"has_page"`
-	Installed   bool                     `json:"installed,omitempty"`
-	History     []pluginsdk.HistoryEntry `json:"history,omitempty"`
-	Dir         string                   `json:"-"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+	ID              string                   `json:"id"`
+	Name            string                   `json:"name"`
+	Description     string                   `json:"description,omitempty"`
+	Version         string                   `json:"version"`
+	Source          string                   `json:"source"`
+	Author          string                   `json:"author,omitempty"`
+	Enabled         bool                     `json:"enabled"`
+	Status          string                   `json:"status"`
+	StatusMsg       string                   `json:"status_msg,omitempty"`
+	HasPage         bool                     `json:"has_page"`
+	Installed       bool                     `json:"installed,omitempty"`
+	History         []pluginsdk.HistoryEntry `json:"history,omitempty"`
+	UpdateAvailable bool                     `json:"update_available,omitempty"`
+	// Downloads is the plugin's download count from the marketplace cache.
+	// It is not a plugin_instances column: it is filled in by the market
+	// when serving the list (nil → omitted from JSON).
+	Downloads *int      `json:"downloads,omitempty"`
+	Dir       string    `json:"-"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Repo persists plugin instances and their configuration.
@@ -67,8 +72,10 @@ func NewRepo(db *sql.DB) *Repo {
 
 // Upsert inserts the instance on first discovery and refreshes the static
 // manifest fields afterwards. Lifecycle state (installed/enabled/status) is
-// preserved across restarts. New discovery rows are inserted as NOT
-// installed (installed=false): the admin installs plugins explicitly.
+// preserved across restarts, and the source (ownership: local vs. a market
+// repo) is preserved too — rediscovery must never demote a market-installed
+// plugin to "local". New discovery rows are inserted as NOT installed
+// (installed=false): the admin installs plugins explicitly.
 func (r *Repo) Upsert(ctx context.Context, inst *Instance) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO plugin_instances (id, name, version, description, source, dir, installed, installed_at, updated_at)
@@ -77,7 +84,6 @@ func (r *Repo) Upsert(ctx context.Context, inst *Instance) error {
 			name = EXCLUDED.name,
 			version = EXCLUDED.version,
 			description = EXCLUDED.description,
-			source = EXCLUDED.source,
 			dir = EXCLUDED.dir,
 			updated_at = NOW()`,
 		inst.ID, inst.Name, inst.Version, inst.Description, inst.Source, inst.Dir)
@@ -100,7 +106,7 @@ func (r *Repo) ListUninstalled(ctx context.Context) ([]Instance, error) {
 
 func (r *Repo) list(ctx context.Context, installed bool) ([]Instance, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, updated_at
+		SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, update_available, updated_at
 		FROM plugin_instances WHERE installed = $1 ORDER BY name`, installed)
 	if err != nil {
 		return nil, fmt.Errorf("list plugin instances: %w", err)
@@ -111,7 +117,7 @@ func (r *Repo) list(ctx context.Context, installed bool) ([]Instance, error) {
 	for rows.Next() {
 		var i Instance
 		if err := rows.Scan(&i.ID, &i.Name, &i.Version, &i.Description,
-			&i.Source, &i.Enabled, &i.Status, &i.StatusMsg, &i.HasPage, &i.Installed, &i.Dir, &i.UpdatedAt); err != nil {
+			&i.Source, &i.Enabled, &i.Status, &i.StatusMsg, &i.HasPage, &i.Installed, &i.Dir, &i.UpdateAvailable, &i.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan plugin instance: %w", err)
 		}
 		out = append(out, i)
@@ -160,6 +166,16 @@ func (r *Repo) SetInstalled(ctx context.Context, id string, installed bool) erro
 		return fmt.Errorf("set plugin installed: %w", err)
 	}
 	return nil
+}
+
+// GetSource returns the plugin's source (a repo name, "local" or "manual").
+func (r *Repo) GetSource(ctx context.Context, id string) (string, error) {
+	var source string
+	err := r.db.QueryRowContext(ctx, `SELECT source FROM plugin_instances WHERE id = $1`, id).Scan(&source)
+	if err != nil {
+		return "", fmt.Errorf("get plugin source: %w", err)
+	}
+	return source, nil
 }
 
 // GetRuntimeState returns the persisted lifecycle state plus the actual

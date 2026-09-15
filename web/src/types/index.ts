@@ -159,6 +159,9 @@ export interface PluginInstance {
   // Set when the host detects a newer version (needs the marketplace;
   // always absent for now).
   update_available?: boolean;
+  // Download count from the marketplace cache (absent for local/manual
+  // plugins whose source is not a configured repo).
+  downloads?: number;
 }
 
 export interface PluginHistoryEntry {
@@ -175,15 +178,21 @@ export interface PluginCatalogEntry {
   repo: string;
   official?: boolean;
   version: string;
-  downloads: number;
+  downloads?: number;
   updated_at?: string;
   installed?: boolean;
+  update_available?: boolean;
+  history?: PluginHistoryEntry[];
 }
 
 export interface PluginRepo {
   name: string;
   url: string;
   official: boolean;
+  enabled?: boolean;
+  added_at?: string;
+  last_sync?: string;
+  last_error?: string;
 }
 
 export interface PluginConfigResponse {

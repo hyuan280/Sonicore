@@ -285,6 +285,15 @@
     "logging": "Logging",
     "logLevel": "Log Level",
     "logLevelDesc": "Change the log output level at runtime",
+    "githubToken": "GitHub Token",
+    "githubTokenDesc": "Optional GitHub token used to raise the API rate limit when fetching plugin download counts",
+    "githubTokenSet": "Configured",
+    "githubTokenConfigured": "Configured (leave empty to keep)",
+    "githubTokenDiscard": "Discard",
+    "githubTokenDiscardConfirm": "Discard the saved GitHub token?",
+    "githubTokenShow": "Show or hide token",
+    "githubTokenRequired": "Token is required",
+    "githubTokenBroken": "The saved token cannot be read (the secret may have been rotated); enter it again",
     "notification": "Notification Platforms",
     "notificationEmail": "Email",
     "notificationEmailDesc": "SMTP email notifications for scan results and system alerts",
@@ -391,7 +400,8 @@
       "TOO_MANY_REQUESTS": "Too many requests",
       "MISSING_AUTH_HEADER": "Missing authorization header",
       "INVALID_AUTH_FORMAT": "Invalid authorization format",
-      "INVALID_TOKEN": "Invalid or expired token"
+      "INVALID_TOKEN": "Invalid or expired token",
+      "CONFLICT": "Conflict"
     },
     "auth": {
       "CREDENTIALS_REQUIRED": "Username and password are required",
@@ -510,7 +520,8 @@
       "ADMIN_SAVE_SETTINGS_FAILED": "Failed to save settings",
       "ADMIN_READ_DIRECTORY_FAILED": "Failed to read directory",
       "ADMIN_ACCESS_REQUIRED": "Admin access required",
-      "ADMIN_ENCRYPT_SECRET_FAILED": "Failed to encrypt secret"
+      "ADMIN_ENCRYPT_SECRET_FAILED": "Failed to encrypt secret",
+      "ADMIN_TOKEN_CONFLICT": "Cannot set and clear the token in one request"
     },
     "download": {
       "DOWNLOAD_URL_REQUIRED": "URL is required",
@@ -576,6 +587,7 @@
     "sourceOfficial": "Official",
     "sourceThirdParty": "Third-party",
     "sourceUnverified": "Unverified",
+    "sourceLocal": "local",
     "config": "Configuration",
     "noConfigYet": "No configuration available yet",
     "pageData": "Data",
@@ -639,6 +651,7 @@
     "source_plugin": "Plugin",
     "provider_transcoder": "Transcoder",
     "provider_middleware": "Middleware",
+    "provider_plugin": "Plugin",
     "name": "Task name",
     "status": "Status",
     "nextRun": "Next run",

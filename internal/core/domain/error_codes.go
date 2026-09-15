@@ -31,6 +31,7 @@ const (
 	ErrMissingAuthHeader ErrorCode = 7
 	ErrInvalidAuthFormat ErrorCode = 8
 	ErrInvalidToken      ErrorCode = 9
+	ErrConflict          ErrorCode = 10
 )
 
 // ---- auth (100-199) ----
@@ -174,6 +175,7 @@ const (
 	ErrAdminReadDirectory    ErrorCode = 811
 	ErrAdminAccessRequired   ErrorCode = 812
 	ErrAdminEncryptSecret    ErrorCode = 813
+	ErrAdminTokenConflict    ErrorCode = 814
 )
 
 // ---- notification (1000-1099) ----
@@ -257,6 +259,7 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrMissingAuthHeader:        "MISSING_AUTH_HEADER",
 	ErrInvalidAuthFormat:        "INVALID_AUTH_FORMAT",
 	ErrInvalidToken:             "INVALID_TOKEN",
+	ErrConflict:                 "CONFLICT",
 	ErrAuthCredentialsRequired:  "CREDENTIALS_REQUIRED",
 	ErrAuthInvalidCredentials:   "INVALID_CREDENTIALS",
 	ErrAuthRegistrationDisabled: "REGISTRATION_DISABLED",
@@ -360,6 +363,7 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrAdminReadDirectory:       "ADMIN_READ_DIRECTORY_FAILED",
 	ErrAdminAccessRequired:      "ADMIN_ACCESS_REQUIRED",
 	ErrAdminEncryptSecret:       "ADMIN_ENCRYPT_SECRET_FAILED",
+	ErrAdminTokenConflict:       "ADMIN_TOKEN_CONFLICT",
 	ErrDownloadURLRequired:      "DOWNLOAD_URL_REQUIRED",
 	ErrDownloadJobNotFound:      "DOWNLOAD_JOB_NOT_FOUND",
 	ErrNotificationSendFailed:   "NOTIFICATION_SEND_FAILED",
@@ -379,6 +383,7 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrMissingAuthHeader:        "Missing authorization header",
 	ErrInvalidAuthFormat:        "Invalid authorization format",
 	ErrInvalidToken:             "Invalid or expired token",
+	ErrConflict:                 "Conflict",
 	ErrAuthCredentialsRequired:  "Username and password are required",
 	ErrAuthInvalidCredentials:   "Invalid username or password",
 	ErrAuthRegistrationDisabled: "Registration is disabled",
@@ -482,6 +487,7 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrAdminReadDirectory:       "Failed to read directory",
 	ErrAdminAccessRequired:      "Admin access required",
 	ErrAdminEncryptSecret:       "Failed to encrypt secret",
+	ErrAdminTokenConflict:       "Cannot set and clear the token in one request",
 	ErrDownloadURLRequired:      "URL is required",
 	ErrDownloadJobNotFound:      "Download job not found",
 	ErrNotificationSendFailed:   "Notification send failed",

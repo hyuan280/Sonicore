@@ -214,7 +214,7 @@ func TestAdminUpdateUserRoleActorNotFound(t *testing.T) {
 func TestAdminGetSettings(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "subsonic_jukebox_id"} {
+	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "subsonic_jukebox_id", "plugins_github_token"} {
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
 			WithArgs(k).
 			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
@@ -228,6 +228,7 @@ func TestAdminGetSettings(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"metadata_musicbrainz_enabled":true`)
 	assert.Contains(t, rec.Body.String(), `"metadata_netease_enabled":true`)
 	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":true`)
+	assert.Contains(t, rec.Body.String(), `"plugins_github_token_set":true`)
 	assert.NotContains(t, rec.Body.String(), "MUSIC_U", "raw cookie never returned")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -241,8 +242,8 @@ func TestAdminUpdateSettingsPartial(t *testing.T) {
 		WithArgs("allow_registration", "false").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	// then 7 reads for the response
-	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id"} {
+	// then 8 reads for the response
+	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id", "plugins_github_token"} {
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
 			WithArgs(k).
 			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(""))
@@ -280,7 +281,7 @@ func TestAdminUpdateSettingsEncryptsCookie(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	// response reads: cookie comes back encrypted → cookie_set true
-	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id"} {
+	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id", "plugins_github_token"} {
 		val := ""
 		if k == "platforms_netease_cookie" {
 			val = stored
@@ -307,7 +308,7 @@ func TestAdminGetSettingsReportsBrokenCookie(t *testing.T) {
 	// A stored cookie that no longer decrypts (e.g. after a secret rotation
 	// or corruption) must surface as broken, not as "configured". Query order
 	// mirrors GetSettings' reads.
-	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "platforms_netease_rate_limit", "subsonic_jukebox_id"} {
+	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "platforms_netease_rate_limit", "subsonic_jukebox_id", "plugins_github_token"} {
 		val := ""
 		if k == "platforms_netease_cookie" {
 			val = "enc:v1:not-valid"
@@ -332,6 +333,48 @@ func TestAdminUpdateSettingsCookieClearConflict(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
 		strings.NewReader(`{"platforms_netease_cookie":"MUSIC_U=abc","platforms_netease_cookie_clear":true}`)))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUpdateSettingsEncryptsGitHubToken(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	stored, err := h.enc.Encrypt("ghp_secret-token")
+	require.NoError(t, err)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
+		WithArgs("plugins_github_token", prefixArg{prefix: "enc:v1:"}).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id", "plugins_github_token"} {
+		val := ""
+		if k == "plugins_github_token" {
+			val = stored
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
+			WithArgs(k).
+			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(val))
+	}
+
+	rec := httptest.NewRecorder()
+	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
+		strings.NewReader(`{"plugins_github_token":"ghp_secret-token"}`)))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"plugins_github_token_set":true`)
+	assert.Contains(t, rec.Body.String(), `"plugins_github_token_error":false`)
+	assert.NotContains(t, rec.Body.String(), "ghp_secret-token", "plaintext never echoed")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAdminUpdateSettingsTokenClearConflict(t *testing.T) {
+	h, _ := newAdminHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
+		strings.NewReader(`{"plugins_github_token":"ghp_abc","plugins_github_token_clear":true}`)))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

@@ -285,6 +285,15 @@
     "logging": "日志管理",
     "logLevel": "日志级别",
     "logLevelDesc": "运行时修改日志输出级别",
+    "githubToken": "GitHub Token",
+    "githubTokenDesc": "可选的 GitHub 令牌，用于提升获取插件下载次数时的 API 速率限制",
+    "githubTokenSet": "已配置",
+    "githubTokenConfigured": "已配置（留空保持不变）",
+    "githubTokenDiscard": "废弃",
+    "githubTokenDiscardConfirm": "废弃已保存的 GitHub Token？",
+    "githubTokenShow": "显示或隐藏 Token",
+    "githubTokenRequired": "请输入 Token",
+    "githubTokenBroken": "已保存的 Token 无法读取（密钥可能已变更），请重新输入",
     "notification": "通知平台",
     "notificationEmail": "邮箱",
     "notificationEmailDesc": "SMTP 邮件通知，用于扫描结果和系统告警",
@@ -391,7 +400,8 @@
       "TOO_MANY_REQUESTS": "请求过于频繁",
       "MISSING_AUTH_HEADER": "缺少授权头",
       "INVALID_AUTH_FORMAT": "授权格式无效",
-      "INVALID_TOKEN": "令牌无效或已过期"
+      "INVALID_TOKEN": "令牌无效或已过期",
+      "CONFLICT": "冲突"
     },
     "auth": {
       "CREDENTIALS_REQUIRED": "用户名和密码为必填",
@@ -510,7 +520,8 @@
       "ADMIN_SAVE_SETTINGS_FAILED": "保存设置失败",
       "ADMIN_READ_DIRECTORY_FAILED": "读取目录失败",
       "ADMIN_ACCESS_REQUIRED": "需要管理员权限",
-      "ADMIN_ENCRYPT_SECRET_FAILED": "加密密钥失败"
+      "ADMIN_ENCRYPT_SECRET_FAILED": "加密密钥失败",
+      "ADMIN_TOKEN_CONFLICT": "无法同时设置和清除 Token"
     },
     "download": {
       "DOWNLOAD_URL_REQUIRED": "URL 不能为空",
@@ -576,6 +587,7 @@
     "sourceOfficial": "官方",
     "sourceThirdParty": "第三方",
     "sourceUnverified": "未验证",
+    "sourceLocal": "本地",
     "config": "配置",
     "noConfigYet": "暂无可用配置",
     "pageData": "数据",
@@ -639,6 +651,7 @@
     "source_plugin": "插件",
     "provider_transcoder": "转码器",
     "provider_middleware": "中间件",
+    "provider_plugin": "插件",
     "name": "任务名称",
     "status": "任务状态",
     "nextRun": "下一次执行时间",

@@ -35,11 +35,11 @@ func TestRepoUpsert(t *testing.T) {
 func TestRepoList(t *testing.T) {
 	repo, mock := newMockRepo(t)
 	updated := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	mock.ExpectQuery("SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, updated_at").
+	mock.ExpectQuery("SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, update_available, updated_at").
 		WithArgs(true).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "version", "description", "source", "enabled", "status", "status_msg", "has_page", "installed", "dir", "updated_at",
-		}).AddRow("demo", "demo", "1.0.0", "desc", "local", true, "ok", "", true, true, "demo-dir", updated))
+			"id", "name", "version", "description", "source", "enabled", "status", "status_msg", "has_page", "installed", "dir", "update_available", "updated_at",
+		}).AddRow("demo", "demo", "1.0.0", "desc", "local", true, "ok", "", true, true, "demo-dir", false, updated))
 
 	list, err := repo.List(context.Background())
 	require.NoError(t, err)
@@ -56,11 +56,11 @@ func TestRepoList(t *testing.T) {
 
 func TestRepoListUninstalled(t *testing.T) {
 	repo, mock := newMockRepo(t)
-	mock.ExpectQuery("SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, updated_at").
+	mock.ExpectQuery("SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, update_available, updated_at").
 		WithArgs(false).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "version", "description", "source", "enabled", "status", "status_msg", "has_page", "installed", "dir", "updated_at",
-		}).AddRow("demo", "demo", "1.0.0", "desc", "local", true, "stopped", "", false, false, "demo-dir", time.Now()))
+			"id", "name", "version", "description", "source", "enabled", "status", "status_msg", "has_page", "installed", "dir", "update_available", "updated_at",
+		}).AddRow("demo", "demo", "1.0.0", "desc", "local", true, "stopped", "", false, false, "demo-dir", false, time.Now()))
 
 	list, err := repo.ListUninstalled(context.Background())
 	require.NoError(t, err)
@@ -208,11 +208,11 @@ func TestRepoListMergeFromManifest(t *testing.T) {
 		},
 	}
 
-	mock.ExpectQuery("SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, updated_at").
+	mock.ExpectQuery("SELECT id, name, version, description, source, enabled, status, status_msg, has_page, installed, dir, update_available, updated_at").
 		WithArgs(true).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "version", "description", "source", "enabled", "status", "status_msg", "has_page", "installed", "dir", "updated_at",
-		}).AddRow("demo", "demo", "1.0.0", "desc", "local", true, "ok", "", true, true, "demo-dir", time.Now()))
+			"id", "name", "version", "description", "source", "enabled", "status", "status_msg", "has_page", "installed", "dir", "update_available", "updated_at",
+		}).AddRow("demo", "demo", "1.0.0", "desc", "local", true, "ok", "", true, true, "demo-dir", false, time.Now()))
 
 	list, err := m.List(context.Background())
 	require.NoError(t, err)

@@ -3,7 +3,16 @@ import { useTranslation } from "react-i18next";
 import { translateApiError } from "../../i18n/errorCodes";
 import { Card } from "../../components/ui/card";
 import { api } from "../../api/client";
-import { Shield, Turntable, ChevronDown, Loader2 } from "lucide-react";
+import {
+  Shield,
+  Turntable,
+  ChevronDown,
+  Loader2,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Trash2,
+} from "lucide-react";
 import type { JukeboxInfo } from "../../stores/jukebox";
 
 export default function SystemTab() {
@@ -16,6 +25,8 @@ export default function SystemTab() {
   const [logLevelInit, setLogLevelInit] = useState("info");
   const [logLevelSaving, setLogLevelSaving] = useState(false);
   const [logLevelError, setLogLevelError] = useState("");
+  const [githubTokenSet, setGithubTokenSet] = useState(false);
+  const [githubTokenError, setGithubTokenError] = useState(false);
   const [error, setError] = useState("");
 
   // Load once on mount. Deliberately not keyed on `t` so a language switch
@@ -29,6 +40,8 @@ export default function SystemTab() {
         setSubsonicJukeboxId(s.subsonic_jukebox_id || "");
         setLogLevel(s.log_level || "info");
         setLogLevelInit(s.log_level || "info");
+        setGithubTokenSet(!!s.plugins_github_token_set);
+        setGithubTokenError(!!s.plugins_github_token_error);
       })
       .catch((err: unknown) => setError(translateApiError(t, err)))
       .finally(() => setLoading(false));
@@ -113,7 +126,131 @@ export default function SystemTab() {
         subsonicJukeboxId={subsonicJukeboxId}
         onSaved={setSubsonicJukeboxId}
       />
+
+      <GitHubTokenSetting
+        tokenSet={githubTokenSet}
+        tokenError={githubTokenError}
+        onSaved={setGithubTokenSet}
+      />
     </div>
+  );
+}
+
+function GitHubTokenSetting({
+  tokenSet,
+  tokenError,
+  onSaved,
+}: {
+  tokenSet: boolean;
+  tokenError: boolean;
+  onSaved: (set: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const [token, setToken] = useState("");
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    const trimmed = token.trim();
+    if (trimmed === "") {
+      setError(t("admin.githubTokenRequired"));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.admin.updateSettings({ plugins_github_token: trimmed });
+      setToken("");
+      setShow(false);
+      onSaved(true);
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const discard = async () => {
+    if (!confirm(t("admin.githubTokenDiscardConfirm"))) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.admin.updateSettings({ plugins_github_token_clear: true });
+      setToken("");
+      setShow(false);
+      onSaved(false);
+    } catch (err: unknown) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <h2 className="font-medium flex items-center gap-2">
+        <KeyRound className="w-4 h-4" /> {t("admin.githubToken")}
+        {tokenSet && (
+          <span className="text-xs text-green-400 ml-auto">{t("admin.githubTokenSet")}</span>
+        )}
+      </h2>
+      <p className="text-xs text-zinc-500">{t("admin.githubTokenDesc")}</p>
+      {tokenError && <p className="text-xs text-amber-400">{t("admin.githubTokenBroken")}</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="relative">
+        <input
+          type={show ? "text" : "password"}
+          value={token}
+          autoComplete="off"
+          onChange={(e) => {
+            const next = e.target.value;
+            setToken(next);
+            if (next === "") setShow(false);
+            setError("");
+          }}
+          placeholder={tokenSet ? t("admin.githubTokenConfigured") : "ghp_..."}
+          disabled={saving}
+          className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 pr-24 text-sm focus:outline-none focus:border-green-500 disabled:opacity-50"
+        />
+        {token !== "" && (
+          <button
+            type="button"
+            onClick={() => setShow(!show)}
+            aria-label={t("admin.githubTokenShow")}
+            disabled={saving}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
+          >
+            {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        {tokenSet && token === "" && (
+          <button
+            type="button"
+            onClick={discard}
+            aria-label={t("admin.githubTokenDiscard")}
+            disabled={saving}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-1 rounded text-xs text-red-400 hover:text-red-300 hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
+          >
+            <span className="whitespace-nowrap">{t("admin.githubTokenDiscard")}</span>
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {token !== "" && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-green-600 hover:bg-green-500 px-3 py-2 text-sm font-medium text-white cursor-pointer disabled:opacity-50"
+          >
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {t("settings.update")}
+          </button>
+        </div>
+      )}
+    </Card>
   );
 }
 

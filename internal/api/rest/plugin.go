@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -18,16 +19,15 @@ import (
 	pluginmgr "github.com/sonicore/server/internal/plugin"
 )
 
-// PluginHandler serves the admin plugin-management API. Market/repo
-// endpoints are reserved stubs until the marketplace lands; installed
-// plugin data is real (discovered from the plugins dir, persisted in
-// plugin_instances).
+// PluginHandler serves the admin plugin-management API: installed plugin
+// lifecycle plus the marketplace (repos, catalog, install/update).
 type PluginHandler struct {
-	mgr *pluginmgr.Manager
+	mgr    *pluginmgr.Manager
+	market *pluginmgr.Market
 }
 
-func NewPluginHandler(mgr *pluginmgr.Manager) *PluginHandler {
-	return &PluginHandler{mgr: mgr}
+func NewPluginHandler(mgr *pluginmgr.Manager, market *pluginmgr.Market) *PluginHandler {
+	return &PluginHandler{mgr: mgr, market: market}
 }
 
 func (h *PluginHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +35,9 @@ func (h *PluginHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
+	}
+	if err := h.market.EnrichDownloads(r.Context(), list); err != nil {
+		logger.Warn("[plugin] enrich download counts: %v", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": list})
 }
@@ -46,6 +49,9 @@ func (h *PluginHandler) UninstalledList(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 		return
+	}
+	if err := h.market.EnrichDownloads(r.Context(), list); err != nil {
+		logger.Warn("[plugin] enrich download counts: %v", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": list})
 }
@@ -355,38 +361,154 @@ func writePluginActionError(w http.ResponseWriter, err error) {
 	writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
 }
 
-// Update is reserved: releases/updates arrive with the plugin marketplace.
+// Update runs the plugin update flow: download the newest version from its
+// source repo, verify, swap the directory and restart when it was enabled.
 func (h *PluginHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if err := h.market.UpdatePlugin(r.Context(), mux.Vars(r)["id"]); err != nil {
+		if errors.Is(err, pluginmgr.ErrAlreadyUpToDate) {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "detail": "already up to date"})
+			return
+		}
+		writeMarketError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// Market returns the plugin catalog. Reserved stub until the marketplace
-// lands.
+// Market returns the merged catalog of every enabled repository (served
+// from the repo cache, never live-fetched per request).
 func (h *PluginHandler) Market(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": []interface{}{}})
+	entries, err := h.market.Catalog(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"plugins": entries})
 }
 
-// MarketDetail is a reserved stub (see Market).
+// MarketDetail returns one plugin across all repos (official repos win
+// ties; nil when unknown).
 func (h *PluginHandler) MarketDetail(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"plugin": nil})
+	entry, err := h.market.Detail(r.Context(), mux.Vars(r)["name"])
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"plugin": entry})
 }
 
-// Install is a reserved stub (see Market).
+type marketInstallRequest struct {
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+}
+
+// Install downloads and installs a plugin from the marketplace.
 func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
+	var req marketInstallRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Repo = strings.TrimSpace(req.Repo)
+	if req.Name == "" || req.Repo == "" {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	if err := h.market.Install(r.Context(), req.Name, req.Repo); err != nil {
+		writeMarketError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// Repos lists configured plugin repositories. Reserved stub.
+// Repos lists configured plugin repositories.
 func (h *PluginHandler) Repos(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{"repos": []interface{}{}})
+	repos, err := h.market.Repos(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"repos": repos})
 }
 
-// AddRepo is a reserved stub (see Repos).
+type addRepoRequest struct {
+	URL string `json:"url"`
+}
+
+// AddRepo fetches and validates the repo.json at url, then stores the repo.
 func (h *PluginHandler) AddRepo(w http.ResponseWriter, r *http.Request) {
+	var req addRepoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	req.URL = strings.TrimSpace(req.URL)
+	if !validRepoURL(req.URL) {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	if err := h.market.AddRepo(r.Context(), req.URL); err != nil {
+		if errors.Is(err, pluginmgr.ErrInvalidRepoJSON) {
+			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+			return
+		}
+		writeMarketError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// RemoveRepo is a reserved stub (see Repos).
+// RemoveRepo deletes a repository (official repos refuse removal).
 func (h *PluginHandler) RemoveRepo(w http.ResponseWriter, r *http.Request) {
+	url := r.URL.Query().Get("url")
+	if url == "" {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	if err := h.market.RemoveRepo(r.Context(), url); err != nil {
+		writeMarketError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// validRepoURL gates the admin-entered repository URL. It only rejects missing
+// hosts and userinfo; the first hop is deliberately NOT restricted to public
+// addresses, because the admin may point at a self-hosted repository on a
+// private network. Redirects from that URL are vetted by the market client's
+// CheckRedirect, and the download_url inside repo.json is re-vetted on the
+// market's download path.
+func validRepoURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
+}
+
+// writeMarketError maps market sentinel errors to HTTP codes: unknown
+// repos/plugins are 404, invalid client input 400, state conflicts 409,
+// everything else 500 (including upstream data problems like a checksum
+// mismatch).
+func writeMarketError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, sql.ErrNoRows),
+		errors.Is(err, pluginmgr.ErrRepoNotFound),
+		errors.Is(err, pluginmgr.ErrPluginNotFoundInRepo),
+		errors.Is(err, pluginmgr.ErrNotInstalled):
+		writeCodedError(w, http.StatusNotFound, domain.ErrNotFound)
+	case errors.Is(err, pluginmgr.ErrInvalidPluginName):
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+	case errors.Is(err, pluginmgr.ErrPluginDirConflict),
+		errors.Is(err, pluginmgr.ErrOfficialRepoUndeletable),
+		errors.Is(err, pluginmgr.ErrNoRepoSource),
+		errors.Is(err, pluginmgr.ErrRepoDisabled),
+		errors.Is(err, pluginmgr.ErrRepoNameConflict),
+		errors.Is(err, pluginmgr.ErrAlreadyInstalled),
+		errors.Is(err, pluginmgr.ErrRepoExists):
+		writeCodedError(w, http.StatusConflict, domain.ErrConflict)
+	default:
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
+	}
 }

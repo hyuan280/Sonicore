@@ -248,9 +248,11 @@ func New(cfg *config.Config) (*Server, error) {
 	// Plugin channels are wired through the generic notification channel
 	// control, so the notification subsystem cannot tell plugins apart from
 	// built-in channels.
+	pluginsDir := filepath.Join(cfg.Data.DataDir, "plugins")
+	pluginRepo := pluginmgr.NewRepo(db)
 	pluginManager := pluginmgr.NewManager(
-		filepath.Join(cfg.Data.DataDir, "plugins"),
-		pluginmgr.NewRepo(db),
+		pluginsDir,
+		pluginRepo,
 		notifService.RegisterNotifier,
 		notifService.RegisterChannelController,
 		notifService.UnregisterNotifier,
@@ -260,13 +262,55 @@ func New(cfg *config.Config) (*Server, error) {
 		logger.Warn("[plugin] plugin manager start: %v", err)
 	}
 
+	// Marketplace: built-in official repos are seeded from
+	// plugin.OfficialRepos (never overwriting admin edits); a scheduled
+	// task syncs every configured repo and flags installed plugins with a
+	// newer upstream version. The first sync runs once at startup so the
+	// market tab is populated without waiting for the interval.
+	marketSvc := pluginmgr.NewMarket(pluginsDir, filepath.Join(cfg.Data.CacheDir, "plugins"), pluginRepo, pluginManager)
+	// Wire the runtime GitHub token (admin settings) into the marketplace so
+	// download-count lookups can use an authenticated GitHub API (higher rate
+	// limit). The stored value is encrypted at rest; decrypt at the point of use.
+	marketSvc.SetGitHubTokenProvider(func() string {
+		raw := cachedSettings.get(settingsRepo, "plugins_github_token")
+		if raw == "" {
+			return ""
+		}
+		dec, err := enc.Decrypt(raw)
+		if err != nil {
+			logger.Info("[server] decrypt github token: %v", err)
+			return ""
+		}
+		return dec
+	})
+	if err := marketSvc.SeedOfficialRepos(context.Background()); err != nil {
+		logger.Warn("[plugin-market] seed official repos: %v", err)
+	}
+	if err := sched.Register(task.Spec{
+		ID:       "plugin_repo_sync",
+		Source:   "system",
+		Provider: "plugin",
+		Name:     "插件仓库同步",
+		Interval: 6 * time.Hour,
+	}, marketSvc.Sync); err != nil {
+		return nil, fmt.Errorf("register task plugin_repo_sync: %w", err)
+	}
+	go func() {
+		if err := marketSvc.Sync(context.Background()); err != nil {
+			logger.Warn("[plugin-market] initial repo sync: %v", err)
+		}
+		if err := marketSvc.Reconcile(context.Background()); err != nil {
+			logger.Warn("[plugin-market] reconcile: %v", err)
+		}
+	}()
+
 	scannerService := service.NewScannerService(db, cfg.Data.ImagesDir, cfg.Data.LyricsDir, mbCfg, mbClient, neteaseProvider, cfg.Metadata.NeteaseEnabled, covers, notifService)
 	downloadManager := download.NewManager(db)
 	wsHub := ws.NewHub()
 
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter, pluginManager)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter, pluginManager, marketSvc)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -288,7 +332,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter, pluginManager *pluginmgr.Manager) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter, pluginManager *pluginmgr.Manager, marketSvc *pluginmgr.Market) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -508,7 +552,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	// Plugin management (admin-only). Installed-plugin data is real
 	// (discovered from {data_dir}/plugins, persisted in plugin_instances);
 	// market/repo endpoints stay stubbed until the marketplace lands.
-	pluginHandler := rest.NewPluginHandler(pluginManager)
+	pluginHandler := rest.NewPluginHandler(pluginManager, marketSvc)
 	pluginsR := r.PathPrefix("/api/plugins").Subrouter()
 	pluginsR.Use(middleware.AuthMiddleware(jwtService))
 	pluginsR.Use(rest.AdminOnly)

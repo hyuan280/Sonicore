@@ -75,6 +75,19 @@ func (h *AdminHandler) cookieBroken(raw string) bool {
 	return false
 }
 
+// tokenBroken reports whether the stored GitHub token exists but cannot be
+// decrypted (secret rotation, corruption). Mirrors cookieBroken.
+func (h *AdminHandler) tokenBroken(raw string) bool {
+	if raw == "" || h.enc == nil {
+		return false
+	}
+	if _, err := h.enc.Decrypt(raw); err != nil {
+		logger.Error("[admin] github token decrypt failed: %v", err)
+		return true
+	}
+	return false
+}
+
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userRepo.ListAll(r.Context())
 	if err != nil {
@@ -198,11 +211,13 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
+	githubToken, _ := h.settingsRepo.Get(r.Context(), "plugins_github_token")
 	// A stored cookie that no longer decrypts (secret rotation, corruption)
 	// is reported so ops can distinguish "not configured" from "configured
 	// but unreadable" — the provider silently degrades to anonymous in the
 	// latter case.
 	cookieBroken := h.cookieBroken(neCookie)
+	tokenBroken := h.tokenBroken(githubToken)
 	resp := map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
@@ -214,6 +229,8 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_cookie_error":  cookieBroken,
 		"subsonic_jukebox_id":             subJukebox,
 		"log_level":                       logLevel,
+		"plugins_github_token_set":        githubToken != "" && !tokenBroken,
+		"plugins_github_token_error":      tokenBroken,
 	}
 	h.mergeNotificationSettings(r.Context(), resp)
 	writeJSON(w, http.StatusOK, resp)
@@ -230,6 +247,8 @@ type updateSettingsRequest struct {
 	NeteaseRateLimit          *string `json:"platforms_netease_rate_limit,omitempty"`
 	SubsonicJukeboxID         *string `json:"subsonic_jukebox_id,omitempty"`
 	LogLevel                  *string `json:"log_level,omitempty"`
+	GitHubToken               *string `json:"plugins_github_token,omitempty"`
+	GitHubTokenClear          *bool   `json:"plugins_github_token_clear,omitempty"`
 	NotificationEmailEnabled  *bool   `json:"notification_email_enabled,omitempty"`
 	NotificationEmailSMTPHost *string `json:"notification_email_smtp_host,omitempty"`
 	NotificationEmailSMTPPort *string `json:"notification_email_smtp_port,omitempty"`
@@ -252,6 +271,11 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.NeteaseCookie != nil && req.NeteaseCookieClear != nil &&
 		*req.NeteaseCookieClear && *req.NeteaseCookie != "" {
 		writeCodedError(w, http.StatusBadRequest, domain.ErrAdminCookieConflict)
+		return
+	}
+	if req.GitHubToken != nil && req.GitHubTokenClear != nil &&
+		*req.GitHubTokenClear && *req.GitHubToken != "" {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrAdminTokenConflict)
 		return
 	}
 
@@ -315,6 +339,23 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writes["log_level"] = *req.LogLevel
+	}
+	if req.GitHubToken != nil {
+		// An empty value keeps the existing token (the client never holds the
+		// raw credential, so it cannot resend it); only a non-empty value
+		// overwrites, and a clear is requested explicitly.
+		if *req.GitHubToken != "" {
+			enc, err := h.encryptSecret(*req.GitHubToken)
+			if err != nil {
+				logger.Error("[admin] encrypt plugins_github_token: %v", err)
+				writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminEncryptSecret)
+				return
+			}
+			writes["plugins_github_token"] = enc
+		}
+	}
+	if req.GitHubTokenClear != nil && *req.GitHubTokenClear {
+		writes["plugins_github_token"] = ""
 	}
 	notifDirty := false
 	if req.NotificationEmailEnabled != nil {
@@ -395,7 +436,9 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
+	githubToken, _ := h.settingsRepo.Get(r.Context(), "plugins_github_token")
 	cookieBroken := h.cookieBroken(neCookie)
+	tokenBroken := h.tokenBroken(githubToken)
 	resp := map[string]interface{}{
 		"allow_registration":              allowReg == "true",
 		"metadata_musicbrainz_enabled":    mbEnabled == "true",
@@ -407,6 +450,8 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"platforms_netease_cookie_error":  cookieBroken,
 		"subsonic_jukebox_id":             subJukebox,
 		"log_level":                       logLevel,
+		"plugins_github_token_set":        githubToken != "" && !tokenBroken,
+		"plugins_github_token_error":      tokenBroken,
 	}
 	h.mergeNotificationSettings(r.Context(), resp)
 	writeJSON(w, http.StatusOK, resp)

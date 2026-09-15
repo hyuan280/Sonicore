@@ -57,6 +57,10 @@ type Manager struct {
 	manifests map[string]*pluginsdk.Manifest
 	stopCh    chan struct{}
 	stopOnce  sync.Once
+	// locks holds one mutex per plugin id, serializing enable/disable and
+	// update for the same plugin so an update's directory swap can never race
+	// a restart of the old binary.
+	locks sync.Map
 }
 
 type runningPlugin struct {
@@ -570,9 +574,21 @@ func (m *Manager) Stop() {
 	}
 }
 
+// pluginLock returns the per-plugin mutex serializing enable/disable and
+// update for one plugin.
+func (m *Manager) pluginLock(id string) *sync.Mutex {
+	v, _ := m.locks.LoadOrStore(id, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
 // SetEnabled enables or disables one plugin. Disabling stops its process;
-// enabling starts it again.
+// enabling starts it again. The whole operation runs under the plugin's lock,
+// so an enable can never race a concurrent update's directory swap.
 func (m *Manager) SetEnabled(ctx context.Context, id string, enabled bool) error {
+	lk := m.pluginLock(id)
+	lk.Lock()
+	defer lk.Unlock()
+
 	if err := m.repo.SetEnabled(ctx, id, enabled); err != nil {
 		return err
 	}
