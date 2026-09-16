@@ -14,7 +14,7 @@
 - `Track` 结构体 (`domain.go:103`) — `CoverImageID *string`
 - `Album` (`domain.go:82`) / `Artist` (`domain.go:68`) — 均有 `CoverImageID`
 - 扫描器通过 `CoverExtractor` 从音频文件提取内嵌封面，写入 `images` 表 + 缩略图
-- `cover.go` 提供 `/api/data/cover` 端点，支持 `track` / `album` / `artist` 类型
+- `rest/cover.go` 提供 `GET /api/c/{session}/{imageId}` 端点，支持 `track` / `album` / `artist` 类型封面（含 size 变体）
 
 ---
 
@@ -44,22 +44,24 @@ CREATE TABLE IF NOT EXISTS track_albums (
 
 ### 现状 ✅ 已完成
 
-**通过 MBID 分组 + `track_version_groups` 关联表实现。**
+**通过多源 external_id 分组 + `track_version_groups` 关联表实现。**
 
-- `tracks.mbid`（Recording MBID）作为分组键
+- `tracks.external_id` + `tracks.metadata_source` 作为分组键（多源：`musicbrainz` / `netease` / `user`）
+- `tracks.external_ids`（JSONB）记录跨源别名，用于归并匹配
 - `tracks.version` 字段语义：
   - `0` — 独版（无其他版本），列表正常显示
   - `1` — 多版本组中的默认版本（列表显示）
   - `2+` — 非默认版本（列表隐藏，可通过 ID 访问）
 - `tracks.version_label` — 版本描述，从文件路径自动提取
-- `track_version_groups (mbid, library_id, track_id)` 关联表，跨库记录同 MBID 的 track
+- `track_version_groups (metadata_source, external_id, library_id, track_id)` 关联表，跨库记录同源同 external_id 的 track
 
 ```sql
 CREATE TABLE IF NOT EXISTS track_version_groups (
-    mbid       VARCHAR(36) NOT NULL,
-    library_id VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
-    track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-    PRIMARY KEY (mbid, track_id)
+    metadata_source VARCHAR(20) NOT NULL DEFAULT 'musicbrainz',
+    external_id     VARCHAR(36) NOT NULL,
+    library_id      VARCHAR(26) NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    track_id        VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    PRIMARY KEY (metadata_source, external_id, track_id)
 );
 ```
 
@@ -76,7 +78,7 @@ CREATE TABLE IF NOT EXISTS track_version_groups (
 - 浏览列表只显示默认版本，附加 `versions` 数组
 - 添加队列按钮（`AddQueueBtn`）：多版本时弹出候选列表
 - 播放栏版本切换按钮（`V1`）：播放中即时切换版本
-- 管理界面可编辑 `version_label`；MBID 修改后自动重排版本组
+- 管理界面可编辑 `version_label`；`external_id` 修改后自动重排版本组
 
 ---
 
@@ -96,7 +98,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 );
 ```
 
-- 角色枚举：`performer` / `album_artist` / `composer` / `lyricist` / `arranger` / `producer` / `conductor` / `remixer`
+- 角色枚举：`performer` / `album_artist` / `composer` / `lyricist` / `arranger`（扫描器自动提取）；`producer` / `conductor` / `remixer` 前端可展示、暂未自动提取
 - `TrackArtists []*TrackArtist` 支持一首歌多个艺人、多个角色
 - 前端 `ArtistLink` 按角色展示，歌手详情页按角色分组显示
 
@@ -108,7 +110,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 
 **同一首歌的不同格式文件仍是独立 Track 记录，但已通过版本分组关联。**
 
-- `album/01-song.flac` 和 `album/01-song.mp3`（同 MBID）：
+- `album/01-song.flac` 和 `album/01-song.mp3`（同 `metadata_source` + `external_id`）：
   - 两条 Track 记录，不同路径、哈希、格式、位率
   - 通过 `resolveVersions` 归并为同一版本组
   - 默认选择高品质格式（flac > alac > wav > aiff > mp3 > ...）
@@ -159,11 +161,12 @@ CREATE TABLE IF NOT EXISTS track_artists (
 ### `users`
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| id | VARCHAR(26) PK | 雪花 ID |
+| id | VARCHAR(26) PK | 自定义 26 位 ID（13 位毫秒时间戳 + 随机十六进制） |
 | username | VARCHAR(64) UNIQUE | 登录名 |
 | email | VARCHAR(255) UNIQUE | 邮箱 |
 | password_hash | VARCHAR(255) | bcrypt 哈希 |
 | role | VARCHAR(20) | `super_admin` / `admin` / `user`（全局角色） |
+| avatar / avatar_format | BYTEA / VARCHAR(10) | 头像二进制 + 格式 |
 | created_at / updated_at | TIMESTAMPTZ | |
 
 ### `library_members` — 库级权限
@@ -194,11 +197,12 @@ CREATE TABLE IF NOT EXISTS track_artists (
 | 字段 | 说明 |
 |------|------|
 | owner_type / owner_id | 多态归属：`track` / `album` / `artist` |
+| library_id | 仅 `track` 封面绑定库；album/artist 封面共享（为 NULL） |
 | source | 来源（embedded 等） |
 | path / format / width / height / size / hash | 文件元信息 |
 | variants | JSONB，缩略图变体（如 64px） |
 
-物理文件存于 `{data_dir}/images/{library_id}/`，DB 仅记录元数据。
+物理文件存于 `{data_dir}/images/`（track 封面按 `library_id` 分区，album/artist 封面共享）；DB 仅记录元数据。
 
 ## 9. 播放列表
 
@@ -222,7 +226,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 | user_id / item_type / item_id | 联合主键，`item_type` = `track` / `album` / `artist` |
 | library_id | 冗余，用于库级清理 |
 
-**多版本联动**：收藏/取消收藏 track 时，通过 `expandTrackVersions` 扩展到同 MBID 的全部版本（仅限用户有权限的库）；列表展示时 `DISTINCT ON (mbid)` 去重，只显示默认版本。
+**多版本联动**：收藏/取消收藏 track 时，通过 `expandTrackVersions` 扩展到同 external_id 的全部版本（仅限用户有权限的库）；列表展示时按 `external_ids` 去重，只显示默认版本。
 
 ### `play_history` — 播放历史
 | 字段 | 说明 |
@@ -243,7 +247,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 | 字段 | 说明 |
 |------|------|
 | user_id / file_hash | 联合主键 |
-| track_mbid / title / artist / album / album_artist / track_number / disc_number / year / genre | 用户手工纠正的元数据 |
+| metadata_source / external_id / title / artist / album / album_artist / track_number / disc_number / year / genre | 用户手工纠正的元数据 |
 
 设计：按**文件哈希**而非 track ID 关联，扫描时以用户元数据覆盖文件标签（`scanner.go:140` 附近），即使 track 被删除重建也能保留用户纠错。
 
@@ -253,7 +257,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 | 字段 | 说明 |
 |------|------|
 | library_id | 所属库 |
-| type / status | `full` / `overwrite` 等；`pending` / `running` / `done` / `error` |
+| type / status | `full`；`pending` / `running` / `completed` / `failed` |
 | total_files / scanned / new_tracks / updated_tracks / deleted_tracks / errors | 进度统计 |
 | created_at / completed_at | 生命周期 |
 
@@ -265,7 +269,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 | status / progress / error | 执行状态 |
 | metadata | JSONB |
 
-> 注意：download 框架暂无内置源（AGENTS.md 标记为 WIP）。
+> 内置源：`DirectSource`（HTTP 直链下载）。更多音源（YouTube/SoundCloud 等）待接入。
 
 ## 12. Jukebox 硬件播放
 
@@ -279,6 +283,7 @@ CREATE TABLE IF NOT EXISTS track_artists (
 ### `jukeboxes` — 服务器端播放器
 | 字段 | 说明 |
 |------|------|
+| name | Jukebox 显示名 |
 | device_id / device_name / device_config_id / device_driver | 绑定设备 |
 | volume / play_mode | 音量与循环模式 |
 | **queue / shuffle_order** | JSONB 数组（track ID 列表） |
@@ -294,7 +299,43 @@ CREATE TABLE IF NOT EXISTS track_artists (
 ### `server_settings` — 全局 KV
 | 字段 | 说明 |
 |------|------|
-| key / value | 如 `allow_registration` 是否开放注册 |
+| key / value | 如 `allow_registration` 是否开放注册；另存运行时开关（元数据源、NetEase Cookie、日志级别等） |
+
+## 14. 通知系统
+
+### `notification_category_prefs` — 通知类别偏好（全局）
+| 字段 | 说明 |
+|------|------|
+| category | 类别（`scan` / `system` 等） |
+| roles / channels | TEXT[]，触发角色 / 通知渠道（如 `email`） |
+
+### `user_notification_prefs` — 用户通知偏好
+| 字段 | 说明 |
+|------|------|
+| user_id / category | 联合主键 |
+| enabled | 是否启用 |
+| channels / roles | TEXT[]，覆盖默认渠道 / 角色 |
+
+## 15. 插件系统
+
+### `plugin_instances` — 已安装插件
+| 字段 | 说明 |
+|------|------|
+| id | 插件名（manifest），主键 |
+| name / version / description / source | 基本信息 |
+| enabled / status / status_msg | 启用；`ok` / `error` / `disabled` / `stopped` |
+| has_page / installed / dir | 是否含页面 / 软卸载标记 / 实际目录名 |
+| update_available | 源仓库是否有更新版本 |
+
+### `plugin_repos` — 插件仓库
+| 字段 | 说明 |
+|------|------|
+| url | 仓库地址（主键） |
+| name / official / enabled | 名称 / 是否官方 / 启用 |
+| last_sync / last_error | 最近同步状态 |
+
+### `plugin_config` — 插件配置（JSONB，`plugin_id` 主键）
+### `plugin_data` — 插件数据 KV（JSONB，`(plugin_id, key)` 主键）
 
 ---
 
@@ -305,7 +346,7 @@ users 1──N libraries 1──N tracks 1──N track_artists N──1 artists
                      │         │
                      │         ├──N track_albums N──1 albums
                      │         │
-                     │         └──N track_version_groups (按 mbid 分组)
+                     │         └──N track_version_groups (按 metadata_source+external_id 分组)
                      │
                      ├──N library_members N──N users
                      │
@@ -316,6 +357,10 @@ users 1──N play_history
 users 1──N playlists (track_ids JSONB)
 users 1──N user_metadata (file_hash)
 users 1──N jukeboxes 1──1 audio_devices
+users 1──N user_notification_prefs
+
+plugin_instances 1──1 plugin_config
+plugin_instances 1──N plugin_data
 ```
 
 ## 关键设计取舍总结

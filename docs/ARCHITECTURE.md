@@ -23,7 +23,7 @@
 | **UI 组件** | TailwindCSS v4 + Lucide React | 轻量可定制 |
 | **状态管理** | Zustand 5 | 轻量、TS 友好 |
 | **路由** | React Router v7 | SPA 路由 |
-| **流媒体** | HTTP Range Requests（直传） | 零转码，浏览器原生播放 |
+| **流媒体** | HTTP Range Requests（直传）+ ffmpeg 转码 | 原生编码零转码直传，非原生编码转码（AAC/FLAC 缓存 + MSE） |
 | **音频元数据** | ffprobe (静态二进制) | 只读读取，支持所有主流格式 |
 | **服务端播放** | ffplay | 可选的 ALSA/PulseAudio 输出 |
 | **容器化** | Docker + Docker Compose | 一键部署，PostgreSQL + Redis 开箱即用 |
@@ -41,6 +41,11 @@
 | JWT 认证 | `golang.org/x/crypto + 自定义` |
 | 音频探测 | ffprobe 外部进程调用 |
 | 音频播放 | ffplay 外部进程调用（服务端 jukebox） |
+| 音频转码 | ffmpeg 外部进程调用 |
+| 插件系统 | `github.com/hashicorp/go-plugin` |
+| 定时任务 | `github.com/robfig/cron/v3` |
+| 日志轮转 | `gopkg.in/natefinch/lumberjack` |
+| 封面图像 | `golang.org/x/image` |
 
 ---
 
@@ -86,12 +91,20 @@
 +---------------------------v---------------------------------------+
 |                     基础设施层 (Infrastructure)                     |
 |   +--------+ +----------+ +----------+ +----------------------+   |
-|   | lib/pq | | Download | | Metadata | | Storage              |   |
-|   | +PGSQL | | Source   | | Provider | | (Local / 预留 S3)    |   |
-|   +--------+ | (接口)   | | (ffprobe)| +----------------------+   |
+|   | lib/pq | | Scanner  | | Metadata | |      Transcoder      |   |
+|   | +PGSQL | |  Engine  | | Provider | |       (ffmpeg)       |   |
 |   +--------+ +----------+ +----------+ +----------------------+   |
-|   | ffprobe | | Scanner  | | JWT Auth | | Player Engine        |   |
-|   | +ffplay | | Engine   | | +bcrypt  | | (ffplay 服务端)      |   |
+|   +--------+ +----------+ +----------+ +----------------------+   |
+|   | Redis  | | Download | | JWT Auth | |    Player Engine     |   |
+|   |(valkey)| |  Source  | | +bcrypt  | |       (ffplay)       |   |
+|   +--------+ +----------+ +----------+ +----------------------+   |
+|   +--------+ +----------+ +----------+ +----------------------+   |
+|   |  Task  | |  Lyrics  | | Secrets  | |        Plugin        |   |
+|   | (cron) | |  Store   | |  +SSRF   | |     (go-plugin)      |   |
+|   +--------+ +----------+ +----------+ +----------------------+   |
+|   +--------+ +----------+ +----------+ +----------------------+   |
+|   | Notify | | Storage  | | External | |                      |   |
+|   |(email) | | (Local)  | |(NetEase) | |                      |   |
 |   +--------+ +----------+ +----------+ +----------------------+   |
 +--------------------------------------------------------------------+
 ```
@@ -113,9 +126,11 @@ Metadata Pipeline (只读扫描):
   - 嵌入式标签: title, artist, album, track, disc, year, genre
   - 扩展字段: composer, comment, MusicBrainz Track ID
   - 封面检测: 通过 stream.codec_type=video 识别内嵌封面
+  - MusicBrainz 源: MBID 精确匹配 → 文件名模糊匹配
+  - NetEase 源: 排行榜/搜索匹配（需启用 + Cookie）
+  - 用户手动源: Web UI 手动指定外部 ID
 
 未来规划:
-  - MusicBrainz Provider (MBID 精确匹配 → 文件名模糊匹配)
   - AcoustID Provider (Chromaprint 指纹 → AcoustID → MB)
   - 侧车文件 (sidecar) 写入 .sonicore/<file>.json
 
@@ -131,8 +146,8 @@ Image 存储策略:
     文件命名: {type}_{owner_id}.{format}    (例: album_01HABCDE123.jpg)
 
   HTTP 服务:
-    GET /api/images/:id  → 原图
-    (缩略图预留，待实现)
+    GET /api/c/{session}/{imageId}  → 封面（支持 size 参数多尺寸变体）
+    (缩略图通过 variant 机制按需生成)
 ```
 
 ### 4.2 下载管理（可扩展源接口）
@@ -152,10 +167,9 @@ DownloadSource 接口:
   - 下载管理器: 状态管理 (queued → running → completed/failed)
 
 内置 Source:
-  - 无内置实现，接口已定义
+  - DirectSource — HTTP 直链下载
 
 未来可能源:
-  - DirectURLSource — HTTP 直链下载
   - YouTube/SoundCloud/Bandcamp — yt-dlp 包装
   - QobuzSource — API 集成
 
@@ -170,6 +184,8 @@ DownloadSource 接口:
 ```
 User 模型:
   - ID, Username, Email, PasswordHash
+  - 全局角色 Role: super_admin | admin | user
+    (super_admin/admin 可访问管理端、插件、任务、通知等端点)
   - 可拥有多个 Library
   - 可被邀请加入其他用户的 Library
 
@@ -230,20 +246,28 @@ Scanner Pipeline (Per Library):
 
 ```
 Stream Request → 会话令牌认证 →
-  → Track 查询 → 文件存在性校验 →
-  → 直接输出: 原生格式，HTTP Range，零转码
+  → Track 查询 → 权限校验 →
+  → 编码判断:
+    ├── 浏览器原生编码 (mp3/aac/flac/opus/ogg/pcm) → 直传: HTTP Range，零转码
+    └── 其他编码 / 码率超限 → ffmpeg 转码 (AAC 256/320k 或 FLAC)
 
 Stream URL 格式:
-  /api/s/{session}/{id}      — 基于会话令牌的流媒体
+  /api/s/{session}/{id}?quality=standard|high|lossless
+  /api/s/{session}/{id}/transcode-status    — 查询转码缓存是否就绪
+
+转码策略:
+  - 兼容编码且码率不超目标 → 直接 http.ServeFile 输出
+  - 否则 → ffmpeg 转码为分段 MP4 (fragmented MP4, MSE 友好)
+  - 结果写入磁盘缓存 ({cache_dir}/transcode/)，7 天自动清理
+  - 转码与缓存写入解耦，客户端断开不中断缓存写入
 
 响应头:
   Content-Type: audio/{format}
   Content-Length: {file_size}
   Accept-Ranges: bytes
-  (无转码，直接 http.ServeFile 输出)
 
 客户端:
-  浏览器 <audio> 标签原生播放
+  浏览器 <audio> 原生播放 / MSE (Media Source Extensions) 流式
 ```
 
 ### 4.6 播放器 (Player)
@@ -281,15 +305,18 @@ Player Engine (ffplay 后台进程):
   - 音量控制
   - WebSocket 实时推送状态
 
-Jukebox API:
-  GET  /api/jukebox/status      播放状态+当前队列
-  POST /api/jukebox/play/{id}   播放指定曲目
-  POST /api/jukebox/stop        停止
-  POST /api/jukebox/next        下一曲
-  PUT  /api/jukebox/volume      音量
-  PUT  /api/jukebox/loop        循环模式
-  GET  /api/jukebox/queue       查看队列
-  POST /api/jukebox/queue       添加队列
+Jukebox API (多引擎，每引擎独立控制):
+  POST   /api/jukeboxes                创建 Jukebox
+  GET    /api/jukeboxes                列出 Jukebox
+  GET    /api/jukeboxes/{id}           详情
+  POST   /api/jukeboxes/{id}/play/{trackId}   播放指定曲目
+  POST   /api/jukeboxes/{id}/stop      停止
+  POST   /api/jukeboxes/{id}/next      下一曲
+  PUT    /api/jukeboxes/{id}/volume    音量
+  PUT    /api/jukeboxes/{id}/mode      播放模式
+  GET/POST/DELETE /api/jukeboxes/{id}/queue   队列管理
+  GET    /api/audio/devices            可用音频设备
+  GET/POST /api/audio/device/configs   音频设备配置 CRUD
 ```
 
 ---
@@ -297,11 +324,21 @@ Jukebox API:
 ## 5. 数据模型
 
 ```go
+type Role string
+
+const (
+  RoleSuperAdmin Role = "super_admin"
+  RoleAdmin      Role = "admin"
+  RoleUser       Role = "user"
+)
+
 type User struct {
   ID           string
   Username     string
   Email        string
   PasswordHash string
+  Role         Role      // 全局角色 super_admin | admin | user
+  AvatarFormat string
   CreatedAt    time.Time
   UpdatedAt    time.Time
 }
@@ -314,6 +351,7 @@ type Library struct {
   MetadataStorageMode   string    // "database" (当前仅此模式)
   ScanInterval          string    // Cron 表达式，预留
   LastScannedAt         *time.Time
+  LastScanErrors        int
   TrackCount            int
   Duration              float64
   CreatedAt             time.Time
@@ -331,64 +369,88 @@ type LibraryMember struct {
 }
 
 type Artist struct {
-  ID           string
-  LibraryID    string
-  Name         string
-  SortName     string
-  MBID         string
-  Biography    string
-  CoverImageID *string    // 非空表示有封面，值为自身 ID（标记作用），封面文件路径由实体类型+ID 构造
-  AlbumCount   int
-  CreatedAt    time.Time
-  UpdatedAt    time.Time
+  ID             string
+  Name           string
+  SortName       string
+  ExternalID     string            // 主外部 ID（命名空间见 MetadataSource）
+  MetadataSource string            // musicbrainz | netease | user
+  ExternalIDs    map[string]string // 跨源别名表
+  Country        string
+  Biography      string
+  CoverImageID   *string
+  TrackCount     int
+  Roles          []string
+  CreatedAt      time.Time
+  UpdatedAt      time.Time
 }
 
 type Album struct {
-  ID           string
-  LibraryID    string
-  Title        string
-  ArtistID     string
-  MBID         string
-  Year         int
-  Genre        string
-  CoverImageID *string    // 非空表示有封面，值为自身 ID（标记作用），封面文件路径由实体类型+ID 构造
-  SongCount    int
-  Duration     float64
-  CreatedAt    time.Time
-  UpdatedAt    time.Time
+  ID             string
+  Title          string
+  ArtistID       string
+  ExternalID     string
+  MetadataSource string
+  ExternalIDs    map[string]string
+  Country        string
+  Year           int
+  Genre          string
+  CoverImageID   *string
+  SongCount      int
+  Duration       float64
+  CreatedAt      time.Time
+  UpdatedAt      time.Time
 
   Artist *Artist
 }
 
-type Track struct {
-  ID           string
-  LibraryID    string
-  Title        string
-  AlbumID      string
-  ArtistID     string
-  TrackNumber  int
-  DiscNumber   int
-  Duration     float64
-  BitRate      int
-  SampleRate   int
-  Channels     int
-  FilePath     string
-  FileSize     int64
-  FileFormat   string    // mp3, flac, ogg, m4a, wav, dsf
-  MBID         string
-  AcoustID     string
-  Hash         string    // SHA256 of audio data
-  HasLyrics    bool
-  Lyrics       string
-  Heat         int       // 热度（待实现）
-  PlayCount    int
-  LastPlayedAt *time.Time
-  Metadata     *TrackMetadata  // JSONB 扩展元数据
-  CreatedAt    time.Time
-  UpdatedAt    time.Time
+type TrackAlbum struct {
+  TrackID     string
+  AlbumID     string
+  TrackNumber int
+  DiscNumber  int
+  Album       *Album
+}
 
-  Album  *Album
-  Artist *Artist
+type TrackArtist struct {
+  TrackID   string
+  ArtistID  string
+  Role      string    // 主唱/伴唱等
+  SortOrder int
+  Artist    *Artist
+}
+
+type Track struct {
+  ID             string
+  LibraryID      string
+  Title          string
+  CoverImageID   *string
+  Duration       float64
+  BitRate        int
+  SampleRate     int
+  Channels       int
+  FilePath       string
+  FileSize       int64
+  FileFormat     string    // mp3, flac, ogg, m4a, wav, dsf
+  AudioCodec     string    // 实际音频编码（转码决策依据）
+  ExternalID     string    // 主外部 ID
+  MetadataSource string
+  ExternalIDs    map[string]string
+  AcoustID       string
+  Hash           string    // SHA256 of audio data
+  LyricsMask     int       // 歌词来源位掩码（内嵌/侧边/网络/用户）
+  LyricsOffset   float64
+  Heat           int       // 热度（待实现）
+  PlayCount      int
+  LastPlayedAt   *time.Time
+  Metadata       *TrackMetadata  // JSONB 扩展元数据
+  Version        int
+  VersionLabel   string          // 多版本描述
+  CreatedAt      time.Time
+  UpdatedAt      time.Time
+
+  Albums  []*TrackAlbum
+  Artist  *Artist
+  Artists []*TrackArtist
 }
 
 type TrackMetadata struct {
@@ -477,24 +539,69 @@ type RefreshToken struct {
   CreatedAt time.Time
 }
 
+type Jukebox struct {
+  ID             string
+  Name           string
+  DeviceID       string
+  DeviceConfigID string
+  DeviceName     string
+  DeviceDriver   string    // pulseaudio | alsa | mpd | ...
+  Volume         float64
+  PlayMode       string
+  Queue          []string
+  QueueIdx       int
+  ShuffleOrder   []int
+  ShuffleIdx     int
+  PathMapping    map[string]string
+  CreatedAt      time.Time
+  UpdatedAt      time.Time
+}
+
+type AudioDeviceConfig struct {
+  ID         string
+  Name       string
+  DeviceType string    // local | mpd | airplay | ...
+  DeviceID   string
+  Driver     string
+  Config     map[string]string
+  CreatedAt  time.Time
+  UpdatedAt  time.Time
+}
+
 type Favorite struct {
   UserID    string
   ItemType  string    // track | album | artist
   ItemID    string
+  LibraryID *string
   CreatedAt time.Time
 }
 
 type PlayHistory struct {
-  ID       string
-  UserID   string
-  TrackID  string
-  PlayedAt time.Time
+  ID        string
+  UserID    string
+  TrackID   string
+  LibraryID string
+  PlayedAt  time.Time
 }
 
 type UserSetting struct {
   UserID string
   Key    string
   Value  string
+}
+
+type ScheduledTask struct {
+  ID          string
+  Source      string
+  Provider    string
+  Name        string
+  Status      string    // idle | running | disabled
+  Enabled     bool
+  IntervalSec int64
+  Cron        string
+  NextRun     *time.Time
+  LastRun     *time.Time
+  LastError   string
 }
 ```
 
@@ -514,70 +621,83 @@ type UserSetting struct {
 |------|------|
 | `GET /ping` | 服务存活检查 |
 | `GET /api/health` | 详细健康检查 |
+| `GET /api/auth/registration-status` | 注册开关状态 |
 | `POST /api/auth/register` | 注册 |
 | `POST /api/auth/login` | 登录 |
 | `POST /api/auth/refresh` | 刷新令牌 |
 | `POST /api/auth/logout` | 登出 |
-| `GET /api/user/me` | 当前用户信息 |
+| `GET/POST /api/user/me` | 当前用户信息 / 续期 |
 | `PUT /api/user/password` | 修改密码 |
+| `GET/PUT /api/user/avatar` | 头像 |
 | `POST /api/libraries` | 创建音乐库 |
 | `GET /api/libraries` | 列出我的库 |
-| `GET /api/libraries/:id` | 库详情 |
-| `DELETE /api/libraries/:id` | 删除库 |
-| `GET /api/libraries/:id/members` | 成员列表 |
-| `POST /api/libraries/:id/members` | 添加成员 |
-| `DELETE /api/libraries/:id/members/:userId` | 移除成员 |
-| `PUT /api/libraries/:id/members/:userId` | 修改角色 |
-| `POST /api/libraries/:id/scan` | 触发扫描 |
-| `GET /api/libraries/:id/scan/status` | 扫描进度 |
-| `GET /api/data/:libId/tracks` | 曲目列表 (分页) |
-| `GET /api/data/:libId/artists` | 艺术家列表 (分页) |
-| `GET /api/data/:libId/artists/:artistId` | 艺术家详情 |
-| `GET /api/data/:libId/albums` | 专辑列表 (分页) |
-| `GET /api/data/:libId/albums/:albumId` | 专辑详情 |
-| `GET /api/s/:session/:id` | 流媒体 (会话令牌) |
-| `GET /api/user/favorites` | 收藏列表 |
-| `POST /api/user/favorites` | 添加收藏 |
-| `DELETE /api/user/favorites/:type/:id` | 取消收藏 |
-| `GET /api/user/history` | 播放历史 |
-| `POST /api/user/history` | 记录播放 |
-| `GET /api/user/playlists` | 播放列表 |
-| `POST /api/user/playlists` | 创建播放列表 |
-| `GET /api/user/playlists/:id` | 播放列表详情 |
-| `DELETE /api/user/playlists/:id` | 删除播放列表 |
-| `POST /api/user/playlists/:id/tracks` | 添加曲目到播放列表 |
-| `DELETE /api/user/playlists/:id/tracks/:trackId` | 移除曲目 |
-| `GET /api/user/settings` | 获取用户设置 |
-| `PUT /api/user/settings` | 更新用户设置 |
-| `GET /api/user/queue` | 获取播放队列 |
-| `PUT /api/user/queue` | 保存播放队列 |
-| `POST /api/libraries/:id/downloads` | 提交下载 |
-| `GET /api/libraries/:id/downloads` | 下载列表 |
-| `GET /api/libraries/:id/downloads/:jobId` | 下载详情 |
-| `DELETE /api/libraries/:id/downloads/:jobId` | 取消下载 |
-| `GET /api/jukebox/status` | 服务端播放状态 |
-| `POST /api/jukebox/play/:id` | 服务端播放 |
-| `POST /api/jukebox/stop` | 停止 |
-| `POST /api/jukebox/next` | 下一曲 |
-| `PUT /api/jukebox/volume` | 音量 |
-| `PUT /api/jukebox/loop` | 循环模式 |
-| `GET/POST/DELETE /api/jukebox/queue` | 管理服务端队列 |
-| `DELETE /api/jukebox/queue/:index` | 移除队列项 |
-| `POST /api/jukebox/shuffle` | 随机播放 |
-| `PUT /api/jukebox/queue/set` | 设置队列 |
+| `GET /api/libraries/{id}` | 库详情 |
+| `DELETE /api/libraries/{id}` | 删除库 |
+| `GET/POST /api/libraries/{id}/members` | 成员列表 / 添加成员 |
+| `DELETE/PUT /api/libraries/{id}/members/{userId}` | 移除 / 修改成员角色 |
+| `POST /api/libraries/{id}/scan` | 触发扫描 |
+| `GET /api/libraries/{id}/scan/status` | 扫描进度 |
+| `POST /api/metadata/identify` `/reidentify` | 手动识别 / 重新识别元数据 |
+| `POST /api/metadata/search/track` `/artist` `/album` | 元数据搜索 |
+| `POST /api/metadata/save` | 保存元数据 |
+| `GET /api/metadata/sources` | 元数据源列表 |
+| `GET /api/data/tracks` | 曲目列表 (分页) |
+| `POST /api/data/tracks/byids` | 按 ID 批量查询曲目 |
+| `GET /api/data/search` | 搜索 |
+| `GET /api/data/artists` | 艺术家列表 |
+| `GET /api/data/artists/{artistId}` | 艺术家详情 |
+| `GET /api/data/albums` | 专辑列表 |
+| `GET /api/data/albums/{albumId}` | 专辑详情 |
+| `GET/POST /api/data/tracks/lyrics` | 歌词获取 / 更新 |
+| `GET /api/s/{session}/{id}` | 流媒体 (会话令牌) |
+| `GET /api/s/{session}/{id}/transcode-status` | 转码缓存状态 |
+| `GET /api/c/{session}/{imageId}` | 封面 |
+| `GET /api/user/favorites/list` | 收藏列表 |
+| `POST /api/user/favorites/add` `/remove` `/check` | 添加 / 取消 / 检查收藏 |
+| `GET /api/user/history/list` | 播放历史 |
+| `POST /api/user/history/add` `/remove` | 记录 / 删除播放历史 |
+| `GET/POST /api/user/playlists` | 播放列表 / 创建 |
+| `GET/DELETE /api/user/playlists/{id}` | 播放列表详情 / 删除 |
+| `POST /api/user/playlists/{id}/tracks/add` `/remove` | 添加 / 移除曲目 |
+| `GET/PUT /api/user/settings` | 用户设置 |
+| `GET/PUT /api/user/queue` | 播放队列 |
+| `POST /api/libraries/{id}/downloads` | 提交下载 |
+| `GET /api/libraries/{id}/downloads` | 下载列表 |
+| `GET/DELETE /api/libraries/{id}/downloads/{jobId}` | 下载详情 / 取消 |
+| `GET /api/plat/list` | 外部平台列表 |
+| `GET /api/plat/{name}/charts` `/charts/{id}` | 平台排行榜 |
+| `GET /api/plat/{name}/search` | 平台搜索 |
+| `GET /api/plat/{name}/tracks/{id}` `/artists/{id}` | 平台曲目 / 艺术家详情 |
+| `GET/POST /api/jukeboxes` | Jukebox 列表 / 创建 |
+| `GET/PUT/DELETE /api/jukeboxes/{id}` | Jukebox 详情 / 更新 / 删除 |
+| `POST /api/jukeboxes/{id}/play/{trackId}` | 服务端播放 |
+| `POST /api/jukeboxes/{id}/stop` `/next` `/prev` | 停止 / 下一曲 / 上一曲 |
+| `PUT /api/jukeboxes/{id}/volume` `/mode` | 音量 / 播放模式 |
+| `GET/POST/DELETE /api/jukeboxes/{id}/queue` | 管理服务端队列 |
+| `POST /api/jukeboxes/{id}/shuffle` | 随机播放 |
+| `PUT /api/jukeboxes/{id}/queue/set` | 设置队列 |
+| `GET /api/audio/devices` | 可用音频设备 |
+| `GET/POST/PUT/DELETE /api/audio/device/configs` | 音频设备配置 CRUD |
+| `GET/PUT /api/admin/users` | 用户管理 (admin) |
+| `GET/PUT /api/admin/settings` | 全局设置 (admin) |
+| `GET /api/admin/dirs` | 目录浏览 (admin) |
+| `GET/PUT /api/notifications/channels` `/preferences` | 通知渠道 / 偏好 (admin) |
+| `GET /api/tasks` | 任务列表 (admin) |
+| `POST /api/tasks/{id}/run` | 立即执行任务 |
+| `PUT /api/tasks/{id}/enabled` | 启用 / 禁用任务 |
+| `GET/POST /api/plugins` | 插件管理 (admin) |
 
 ### 6.3 WebSocket
 
 ```
-WS /ws?token=<jwt>
+WS /ws/{session}    (会话令牌认证，与流媒体一致)
 
-事件 (预留):
-  scan.progress       { libraryId, scanned, total }
-  scan.completed      { libraryId, new, updated, del }
-  download.progress   { jobId, progress, status }
-  download.done       { jobId, trackId }
-  player.state        { trackId, status, position }
-  jukebox.state       { trackId, status }
+事件:
+  jukebox.state   { jukeboxId, state, track, position }   (已实现)
+  scan.progress       { libraryId, scanned, total }        (预留)
+  scan.completed      { libraryId, new, updated, del }     (预留)
+  download.progress   { jobId, progress, status }          (预留)
+  player.state        { trackId, status, position }        (预留)
 ```
 
 ---
@@ -590,15 +710,24 @@ WS /ws?token=<jwt>
 ├── internal/
 │   ├── api/
 │   │   ├── rest/                        REST API handlers
+│   │   │   ├── admin.go                 管理端 (用户/设置/目录)
 │   │   │   ├── auth.go                  认证
 │   │   │   ├── browse.go                浏览 (tracks/artists/albums)
+│   │   │   ├── cover.go                 封面
 │   │   │   ├── download.go              下载管理
 │   │   │   ├── health.go                健康检查
 │   │   │   ├── helpers.go               工具函数
 │   │   │   ├── jukebox.go               服务端播放器
 │   │   │   ├── library.go               库 CRUD + 成员管理
+│   │   │   ├── longconn.go              SSE 长连接
+│   │   │   ├── lyrics.go                歌词
+│   │   │   ├── metadata.go              元数据识别/保存
+│   │   │   ├── notification.go          通知
+│   │   │   ├── platform.go              外部平台
+│   │   │   ├── plugin.go                插件管理
 │   │   │   ├── scan.go                  扫描触发/状态
 │   │   │   ├── stream.go                流媒体
+│   │   │   ├── task.go                  任务管理
 │   │   │   ├── user.go                  用户管理
 │   │   │   └── user_data.go             收藏/历史/播放列表/设置/队列
 │   │   ├── subsonic/                    Subsonic API 兼容
@@ -607,20 +736,27 @@ WS /ws?token=<jwt>
 │   │   │   └── hub.go
 │   │   └── middleware/                  中间件
 │   │       ├── auth.go                  JWT 认证
+│   │       ├── clientip.go              客户端 IP 解析
 │   │       ├── permission.go            权限检查
 │   │       └── ratelimit.go             限流
 │   ├── config/                          配置加载
 │   │   └── config.go
 │   ├── core/
 │   │   ├── domain/                      实体、值对象
-│   │   │   └── domain.go                所有数据模型
+│   │   │   ├── domain.go                所有数据模型
+│   │   │   ├── error_codes.go           错误码
+│   │   │   └── notification.go          通知领域模型
 │   │   ├── port/                        接口定义
 │   │   │   ├── auth.go
 │   │   │   ├── download.go
 │   │   │   ├── metadata.go
+│   │   │   ├── notification.go
+│   │   │   ├── permission.go
+│   │   │   ├── platform.go
 │   │   │   ├── player.go
 │   │   │   └── repository.go
 │   │   └── service/                     应用服务
+│   │       ├── notification_service.go  通知编排
 │   │       └── scanner_service.go       扫描编排
 │   ├── infrastructure/
 │   │   ├── auth/                        认证基础设施
@@ -633,29 +769,54 @@ WS /ws?token=<jwt>
 │   │   ├── download/                    下载管理器
 │   │   │   ├── manager.go
 │   │   │   └── source.go
+│   │   ├── external/                    外部平台客户端
+│   │   │   └── netease/                 NetEase API + 加密
+│   │   ├── logger/                      日志 (lumberjack)
+│   │   ├── lyrics/                      歌词文件存储
 │   │   ├── metadata/                    元数据引擎
 │   │   │   ├── cover.go                 封面提取/缓存
+│   │   │   ├── cover_manager.go         封面管理
 │   │   │   ├── ffprobe.go               ffprobe 调用
-│   │   │   ├── musicbrainz.go           MusicBrainz 查询 (预留)
+│   │   │   ├── musicbrainz.go           MusicBrainz 客户端
+│   │   │   ├── mbsource.go              MusicBrainz 源
+│   │   │   ├── netesource.go            NetEase 源
+│   │   │   ├── usersource.go            用户手动源
+│   │   │   ├── registry.go              源注册表
 │   │   │   └── resolver.go              编排各 Provider
+│   │   ├── notification/                通知
+│   │   │   └── email/                   邮件 (SMTP/IMAP)
 │   │   ├── player/                      服务端播放
-│   │   │   └── engine.go                ffplay 进程管理
+│   │   │   ├── engine.go                ffplay 进程管理
+│   │   │   └── device.go                音频设备
 │   │   ├── repository/                  数据仓库实现
 │   │   │   ├── album_repo.go
 │   │   │   ├── artist_repo.go
+│   │   │   ├── audio_device_repo.go
 │   │   │   ├── db.go                    数据库连接 + 迁移
 │   │   │   ├── download_repo.go
+│   │   │   ├── external_ids.go
 │   │   │   ├── image_repo.go
+│   │   │   ├── jukebox_repo.go
 │   │   │   ├── library_repo.go
 │   │   │   ├── playlist_repo.go
 │   │   │   ├── scan_repo.go
+│   │   │   ├── settings_repo.go
 │   │   │   ├── track_repo.go
+│   │   │   ├── user_metadata_repo.go
 │   │   │   └── user_repo.go
 │   │   ├── scanner/                     扫描器
 │   │   │   └── scanner.go
+│   │   ├── secrets/                     凭据静态加密
+│   │   ├── ssrf/                        SSRF 防护
+│   │   ├── task/                        定时任务调度 (cron)
+│   │   ├── transcoder/                  ffmpeg 转码
 │   │   ├── search/                      全文搜索 (预留)
 │   │   ├── sidecar/                     侧车文件 (预留)
 │   │   └── storage/                     文件存储抽象 (预留)
+│   ├── plugin/                          插件系统 (go-plugin)
+│   │   ├── manager.go                   插件管理
+│   │   ├── market.go                    插件市场
+│   │   └── adapter.go                   gRPC 适配
 │   └── server/                          依赖组装
 │       └── server.go
 ├── pkg/
@@ -674,8 +835,13 @@ WS /ws?token=<jwt>
 │   │   │       ├── button.tsx
 │   │   │       ├── card.tsx
 │   │   │       └── input.tsx
+│   │   ├── hooks/                       自定义 Hooks
+│   │   │   ├── i18n/                    国际化 (i18next)
 │   │   ├── lib/
-│   │   │   └── utils.ts                工具函数
+│   │   │   ├── utils.ts                工具函数
+│   │   │   ├── desktopLyrics.tsx       桌面歌词
+│   │   │   ├── mediaSession.ts         媒体会话
+│   │   │   └── lyricsSettings.ts       歌词设置
 │   │   ├── pages/
 │   │   │   ├── LoginPage.tsx
 │   │   │   ├── AlbumsPage.tsx
@@ -688,7 +854,11 @@ WS /ws?token=<jwt>
 │   │   │   ├── FavoritesPage.tsx
 │   │   │   ├── HistoryPage.tsx
 │   │   │   ├── PlayerPage.tsx
-│   │   │   └── SettingsPage.tsx
+│   │   │   ├── SettingsPage.tsx
+│   │   │   ├── JukeboxPage.tsx         服务端播放
+│   │   │   ├── DiscoverPage.tsx        外部平台 (发现)
+│   │   │   ├── plugins/                插件管理页
+│   │   │   └── tasks/                  任务管理页
 │   │   ├── stores/
 │   │   │   ├── auth.ts                  认证状态
 │   │   │   ├── library.ts              库选择状态
@@ -745,9 +915,10 @@ WS /ws?token=<jwt>
 
 ```
 用户点击曲目 → Zustand Player Store 更新队列
-  → <audio> 设置 src = /api/s/{session}/{trackId}
-  → HTTP Range 请求 → 服务端直接输出文件
-  → 浏览器原生解码播放
+  → <audio>/MSE 设置 src = /api/s/{session}/{trackId}?quality=...
+  → 原生编码 → HTTP Range 直传，零转码
+  → 非原生编码 → ffmpeg 转码为分段 MP4 (MSE 流式) + 磁盘缓存
+  → 浏览器解码播放
   → 播放状态持久化: localStorage + PUT /api/user/settings
   → 队列持久化: PUT /api/user/queue
 ```
@@ -755,9 +926,9 @@ WS /ws?token=<jwt>
 ### 场景 D: 服务端 Jukebox 播放
 
 ```
-用户点击"服务端播放" → POST /api/jukebox/play/{id}
-  → Player Engine: 启动 ffplay 进程
-  → 音频输出到宿主机声卡
+用户点击"服务端播放" → POST /api/jukeboxes/{id}/play/{trackId}
+  → Player Engine: 启动 ffplay 进程 (绑定音频设备)
+  → 音频输出到宿主机声卡 (PulseAudio/ALSA)
   → WebSocket 推送状态变更
 ```
 
@@ -772,11 +943,16 @@ WS /ws?token=<jwt>
 | **P2** | Scanner + TagParser + 基础数据模型入库 | ✅ 已完成 |
 | **P3** | Subsonic API 核心 + REST 查询 | ✅ 已完成 |
 | **P4** | Web UI 基础 (库管理 + 专辑浏览 + 播放) | ✅ 已完成 |
-| **P5** | MusicBrainz 刮削 + 元数据编辑 | 🔄 进行中 |
+| **P5** | 元数据刮削 (MusicBrainz + NetEase) + 元数据编辑 | ✅ 已完成 |
 | **P6** | 库共享 + 权限系统 | ✅ 已完成 |
 | **P7** | 下载管理器 + Jukebox 播放接口 | ✅ 已完成 |
-| **P8** | 全文搜索 + 高级播放列表 + 播客 | ⏳ 待开发 |
-| **P9** | WebSocket 实时推送 + 多端同步 | ⏳ 待开发 |
+| **P8** | 音频转码 (AAC/FLAC) + 歌词系统 | ✅ 已完成 |
+| **P9** | 多版本歌曲归并 + 外部音乐平台 (NetEase) | ✅ 已完成 |
+| **P10** | 插件系统 + 插件市场 | ✅ 已完成 |
+| **P11** | 通知系统 + 任务调度 | ✅ 已完成 |
+| **P12** | 国际化 (i18n) | ✅ 已完成 |
+| **P13** | 全文搜索 + 播客 | ⏳ 待开发 |
+| **P14** | WebSocket 多端同步 (浏览器播放器) | 🔄 进行中 |
 
 ---
 
@@ -789,9 +965,11 @@ Docker Compose 架构 (port 28880 对外):
                          → postgres:5432 (内部)
                          → redis:6379 (内部)
 
-Dockerfile:
-  Stage 1 (builder):      golang:1.26-alpine → 编译静态二进制
-  Stage 2 (runtime):      alpine:3.20 → ffmpeg + 二进制 + web/dist
+Dockerfile (多阶段构建):
+  Stage 1 (go-builder):    golang:1.26-alpine → 编译静态二进制
+  Stage 2 (web-builder):   node:22-alpine → npm ci && npm run build
+  Stage 3 (ffplay-builder): alpine:3.20 → 从源码编译 ffmpeg-6.1.1 (含 ffplay)
+  Stage 4 (runtime):       alpine:3.20 → ffmpeg + pulseaudio-utils + 二进制 + web/dist
 
 运行时目录结构 (容器内):
   /opt/sonicore/
@@ -800,14 +978,20 @@ Dockerfile:
     ├── music/             音乐文件 (只读挂载)
     └── data/
         ├── images/        封面缓存
-        └── cache/         其他缓存
+        ├── cache/         转码等缓存
+        ├── lyrics/        歌词文件
+        └── plugins/       插件目录
 
 环境变量配置 (SONICORE_ 前缀):
   SONICORE_SERVER_HOST / PORT / WEB_DIR
   SONICORE_DATABASE_HOST / PORT / USER / PASSWORD / DBNAME
   SONICORE_REDIS_HOST / PORT / PASSWORD / DB
-  SONICORE_DATA_MUSIC_DIR / DATA_DIR / IMAGES_DIR / CACHE_DIR
+  SONICORE_DATA_MUSIC_DIR / DATA_DIR / IMAGES_DIR / CACHE_DIR / LYRICS_DIR
   SONICORE_JWT_SECRET / EXPIRATION
+  SONICORE_AUDIO_PULSE_SERVER
+  SONICORE_METADATA_MUSICBRAINZ_ENABLED / NETEEASE_ENABLED
+  SONICORE_PLATFORMS_NETEEASE_ENABLED / COOKIE
+  SONICORE_NOTIFICATION_EMAIL_*
 ```
 
 ---

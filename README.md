@@ -15,20 +15,25 @@ Sonicore is a self-hosted music management center offering server-side playback 
 
 | 特性 | 状态 | 说明 |
 |------|------|------|
-| **🔊 Jukebox 服务端播放** | ✅ 完成 | ffplay + PulseAudio，多引擎并发，WebSocket 实时控制 |
+| **🔊 Jukebox 服务端播放** | ✅ 完成 | ffplay + PulseAudio/ALSA，多引擎并发，WebSocket 实时控制 |
 | **🔍 音乐库管理** | ✅ 完成 | 扫描、分类、浏览歌曲/专辑/艺人，ffprobe 元数据解析 |
 | **📋 播放列表** | ✅ 完成 | 创建/管理播放列表，收藏/历史记录，多选批量操作 |
 | **👥 多用户与权限** | ✅ 完成 | super_admin / admin / user 三级角色 + 库级权限 |
 | **📱 浏览器播放** | ✅ 完成 | React SPA 播放器，MSE 流式，循环/随机模式，队列管理 |
 | **📦 Docker 部署** | ✅ 完成 | 一键 docker compose 启动，nginx 反向代理 |
-| **🎵 元数据刮削** | ✅ 完成 | ffprobe 解析 + MusicBrainz enrichment 已接入扫描流程 |
+| **🎵 元数据刮削** | ✅ 完成 | ffprobe 解析 + MusicBrainz / NetEase / 用户手动刮削 |
 | **📄 歌词支持** | ✅ 完成 | 多来源歌词（内嵌/侧边/网络/用户），LRC 解析，桌面歌词窗口 |
 | **🎚️ 音频转码** | ✅ 完成 | 不支持的编码自动转码（AAC 256/320、FLAC），缓存 + 音质切换 |
 | **🔀 多版本歌曲** | ✅ 完成 | 相同 MBID 归并，默认版本 + 版本切换（播放栏/队列），路径自动提取版本描述 |
 | **⭐ 收藏与历史** | ✅ 完成 | 收藏（含多版本联动）、播放历史 |
+| **🧩 插件系统** | ✅ 完成 | go-plugin 子进程 + 插件市场（官方仓库同步、GitHub 下载） |
+| **🔔 通知系统** | ✅ 完成 | 邮件 (SMTP/IMAP) 渠道 + 用户偏好 + 插件注册通道 |
+| **⏰ 任务调度** | ✅ 完成 | 定时任务（转码缓存清理、插件仓库同步、限流器清理）+ 后台管理 |
+| **🌐 外部音乐平台** | ✅ 完成 | NetEase 排行榜 / 搜索 / 详情（Discover 页面） |
+| **🌍 国际化** | ✅ 完成 | i18next 中英文界面 |
 | **🔄 WebSocket 同步** | 🚧 部分完成 | Jukebox 状态实时推送（浏览器播放器待补充） |
-| **📱 Subsonic API** | 🚧 部分完成 | 12/40+ 端点已实现（ping, 浏览, 搜索, 流媒体等） |
-| **🎵 多来源下载** | 📋 计划中 | 下载管理器框架就绪，仅支持 HTTP 直链；更多音源待接入 |**
+| **📱 Subsonic API** | 🚧 部分完成 | 30+ 端点已实现（浏览、搜索、流媒体、播放列表、用户、收藏等） |
+| **🎵 多来源下载** | 📋 计划中 | 下载管理器框架就绪，仅支持 HTTP 直链；更多音源待接入 |
 
 ---
 
@@ -67,8 +72,9 @@ Sonicore is a self-hosted music management center offering server-side playback 
 - Go 1.26, gorilla/mux, gorilla/websocket
 - PostgreSQL (lib/pq), Redis (go-redis/v9)
 - JWT 认证, bcrypt 密码加密
-- ffprobe 元数据解析, MusicBrainz API 刮削
-- PulseAudio 音频设备管理, ffplay 服务端播放
+- ffprobe 元数据解析, MusicBrainz / NetEase API 刮削
+- PulseAudio/ALSA 音频设备管理, ffplay 服务端播放
+- hashicorp/go-plugin 插件系统, robfig/cron 定时任务
 
 **Frontend**
 - React 19 + TypeScript 6 + Vite 8
@@ -166,9 +172,18 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 
 兼容 Subsonic API（部分实现），可使用任意 Subsonic 客户端连接。
 
-已实现端点：`ping`, `getLicense`, `getArtists`/`getIndexes`, `getArtist`, `getAlbum`, `getSong`, `getAlbumList`/`getAlbumList2`, `search2`/`search3`, `stream`, `getCoverArt`, `getPlaylists`, `scrobble`, `getNowPlaying`。
+已实现端点：
 
-> 🚧 `scrobble` 和 `getNowPlaying` 为占位实现，更多端点持续添加中。
+- 基础：`ping`、`getLicense`、`getScanStatus`、`startScan`
+- 浏览：`getIndexes`/`getArtists`、`getMusicFolders`、`getArtist`、`getAlbum`、`getSong`、`getMusicDirectory`、`getAlbumList`/`getAlbumList2`、`getGenres`、`getArtistInfo`
+- 搜索：`search2`/`search3`
+- 流媒体：`stream`、`getCoverArt`
+- 播放列表：`getPlaylists`、`getPlaylist`、`createPlaylist`、`updatePlaylist`、`deletePlaylist`
+- 用户：`getUser`、`getUsers`、`createUser`、`updateUser`、`deleteUser`、`changePassword`
+- 收藏：`star`、`unstar`、`getStarred`
+- Jukebox：`jukeboxControl`
+
+> 🚧 `scrobble`、`getNowPlaying`、`getChatMessages`、`getInternetRadioStations`、`getAvatar` 为占位实现，更多端点持续添加中。
 
 ---
 
@@ -176,7 +191,7 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 
 ### 短期 / Short-term
 - [ ] 热度系统（Heat 字段落地：播放次数/收藏等综合热度计算与展示）
-- [ ] Subsonic API 完善（`star`/`unstar`, `getRandomSongs`, `jukeboxControl` 等）
+- [ ] Subsonic API 完善（`getRandomSongs`、`getSongsByGenre`、播客等）
 - [ ] 浏览器播放器 WebSocket 状态同步
 - [ ] 多版本 Work 聚合（Live/Remix 等不同录音归并）
 - [ ] 播放队列跨设备同步
@@ -188,8 +203,6 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 
 ### 长期 / Long-term
 - [ ] 音乐推荐引擎
-- [ ] 插件系统
-- [ ] 国际化（i18n）
 
 ---
 
@@ -205,6 +218,10 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 | go-redis/v9 | Redis 客户端 |
 | viper | 配置管理 |
 | golang.org/x/crypto | bcrypt 密码加密 |
+| hashicorp/go-plugin | 插件系统（子进程 + gRPC） |
+| robfig/cron/v3 | 定时任务调度 |
+| golang.org/x/image | 封面图像处理 |
+| gopkg.in/natefinch/lumberjack | 日志轮转 |
 
 ### 前端依赖
 
@@ -217,6 +234,8 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 | Vite 8 | 构建工具 |
 | lucide-react | 图标 |
 | class-variance-authority | UI 组件样式 |
+| i18next / react-i18next | 国际化 |
+| clsx / tailwind-merge | 样式类合并 |
 
 ---
 
@@ -238,16 +257,29 @@ sonicore/
 │   │   └── service/       # 业务逻辑
 │   ├── infrastructure/
 │   │   ├── auth/          # JWT / 密码
-│   │   ├── cache/         # Redis 会话
+│   │   ├── cache/         # Redis 会话 / 令牌
 │   │   ├── download/      # 下载管理器
-│   │   ├── metadata/      # 元数据刮削
+│   │   ├── external/      # 外部平台客户端（netease）
+│   │   ├── lyrics/        # 歌词文件存储
+│   │   ├── logger/        # 日志
+│   │   ├── metadata/      # 元数据刮削（MusicBrainz/NetEase）
+│   │   ├── notification/  # 通知（邮件渠道）
 │   │   ├── player/        # ffplay 播放引擎
-│   │   └── repository/    # 数据库实现
+│   │   ├── repository/    # 数据库实现
+│   │   ├── scanner/       # 音乐库扫描
+│   │   ├── secrets/       # 凭据静态加密
+│   │   ├── ssrf/          # SSRF 防护
+│   │   ├── task/          # 定时任务调度
+│   │   └── transcoder/    # ffmpeg 转码
+│   ├── plugin/            # 插件系统（go-plugin）
 │   └── server/            # HTTP 服务配置
 ├── web/                   # React 前端
 │   ├── src/
 │   │   ├── api/           # API 客户端
 │   │   ├── components/    # 公共组件
+│   │   ├── hooks/         # 自定义 Hooks
+│   │   ├── i18n/          # 国际化
+│   │   ├── lib/           # 工具库
 │   │   ├── pages/         # 页面
 │   │   ├── stores/        # Zustand 状态
 │   │   └── types/         # TypeScript 类型
