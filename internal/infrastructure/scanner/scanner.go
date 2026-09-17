@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -118,7 +119,31 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		existingByPath[existingTracks[i].FilePath] = &existingTracks[i]
 	}
 
+	// Batch-load every existing track's artists once, so the walk's
+	// unchanged-track branch reuses them instead of issuing a LoadTrackArtists
+	// query per file. On a bulk failure the unchanged-track branch falls back
+	// to per-file LoadTrackArtists, preserving the previous best-effort
+	// behaviour (one failing file only affects that file).
+	trackArtistsByTrack := map[string][]*domain.TrackArtist{}
+	bulkLoaded := false
+	if len(existingTracks) > 0 {
+		ids := make([]string, len(existingTracks))
+		for i := range existingTracks {
+			ids[i] = existingTracks[i].ID
+		}
+		if m, err := e.trackRepo.LoadTrackArtistsBulk(ctx, ids); err != nil {
+			logger.Error("[scan] load track artists bulk error: %v", err)
+		} else {
+			trackArtistsByTrack = m
+			bulkLoaded = true
+		}
+	}
+
 	seenPaths := make(map[string]bool)
+	// pendingArtists collects the IDs of artists seen this scan that still
+	// lack an avatar; they are resolved in one post-scan pass after every
+	// track (and its artist associations) has been persisted.
+	pendingArtists := make(map[string]struct{})
 
 	err = filepath.Walk(lib.Path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -209,6 +234,26 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 			changed := false
 			overwrite := opts.Mode == "overwrite"
 
+			// Reuse the batch-loaded artists for two purposes: the album
+			// association below (primary performer) and the artist-avatar
+			// backfill pass at the end of the scan. Cover filtering happens in
+			// the post-scan pass (a freshly loaded artist has no cover pointer
+			// here), so every artist ID is collected. When the bulk load failed
+			// earlier, fall back to per-file loading so a single failure does
+			// not drop this track's album association and avatar candidates.
+			trackArtists := trackArtistsByTrack[existing.ID]
+			if !bulkLoaded {
+				tas, err := e.trackRepo.LoadTrackArtists(ctx, existing.ID)
+				if err != nil {
+					logger.Error("[scan] load track artists error for %s: %v", existing.ID, err)
+				} else {
+					trackArtists = tas
+				}
+			}
+			for _, ta := range trackArtists {
+				pendingArtists[ta.ArtistID] = struct{}{}
+			}
+
 			// Ensure track_albums entry exists (set before ApplyEnrichment so album enrichment can find it)
 			if len(existing.Albums) == 0 {
 				albumName := meta.Album
@@ -216,8 +261,8 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 					albumName = enrichment.Album
 				}
 				var primaryID string
-				if tas, err := e.trackRepo.LoadTrackArtists(ctx, existing.ID); err == nil && len(tas) > 0 {
-					primaryID = tas[0].ArtistID
+				if len(trackArtists) > 0 {
+					primaryID = trackArtists[0].ArtistID
 				}
 				if primaryID != "" && albumName != "" {
 					album, err := e.findOrCreateAlbum(ctx, albumName, primaryID, meta.Year, meta.Genre, enrichment)
@@ -415,6 +460,12 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		addArtist(meta.Composer, "composer")
 		addArtist(meta.Lyricist, "lyricist")
 		addArtist(meta.Arranger, "arranger")
+
+		for _, ta := range trackArtists {
+			if ta.Artist != nil && ta.Artist.CoverImageID == nil {
+				pendingArtists[ta.ArtistID] = struct{}{}
+			}
+		}
 
 		if primaryPerformerID == "" {
 			stats.Errors = append(stats.Errors, fmt.Sprintf("no valid performer for %s", path))
@@ -750,6 +801,11 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		logger.Error("[scan] album stats recalculation error: %v", err)
 	}
 
+	// Backfill artist avatars last: every track and its artist associations
+	// are now persisted, so the per-artist title set read from the DB is
+	// complete for same-name disambiguation.
+	e.backfillArtistAvatars(ctx, pendingArtists)
+
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks
 	lib.LastScannedAt = timePtr(time.Now())
 
@@ -896,6 +952,100 @@ func (e *Engine) metaComplete(ctx context.Context, track *domain.Track) bool {
 	// Source not found in registry (e.g. disabled) — consider incomplete
 	// so the next scan re-identifies it.
 	return false
+}
+
+// backfillArtistAvatars resolves and imports avatars for the given artists
+// that still lack one. It is a post-scan pass: by the time it runs every
+// track and its artist associations are persisted, so each artist's library
+// track titles can be read from the DB for same-name disambiguation. Failures
+// are logged and skipped — a transient source outage must not fail the scan.
+func (e *Engine) backfillArtistAvatars(ctx context.Context, artistIDs map[string]struct{}) {
+	if e.covers == nil || e.registry == nil || len(artistIDs) == 0 {
+		return
+	}
+	// Deterministic order so the scan logs are reproducible.
+	ids := make([]string, 0, len(artistIDs))
+	for id := range artistIDs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	sources := e.registry.Sources()
+	resolved := 0
+	for _, id := range ids {
+		artist, err := e.artistRepo.FindByID(ctx, id)
+		if err != nil || artist == nil {
+			logger.Info("[scan] artist avatar: id=%s lookup failed: %v", id, err)
+			continue
+		}
+		if artist.CoverImageID != nil {
+			continue
+		}
+		// The placeholder artist carries no real identity to search for.
+		if artist.Name == "" || artist.Name == domain.UnknownArtistName {
+			continue
+		}
+		tracks, err := e.trackRepo.FindByArtistID(ctx, id)
+		if err != nil {
+			logger.Error("[scan] artist tracks load error for %s: %v", id, err)
+			continue
+		}
+		refs := make([]metadata.ArtistTrackRef, 0, len(tracks))
+		for i := range tracks {
+			if tracks[i].Title != "" {
+				refs = append(refs, metadata.ArtistTrackRef{ID: tracks[i].ID, Title: tracks[i].Title})
+			}
+		}
+		logger.Debug("[scan] artist avatar: id=%s name=%q source=%s tracks=%d", id, artist.Name, artist.MetadataSource, len(refs))
+		res := metadata.ResolveArtistImage(ctx, sources, artist, refs)
+
+		// Only a source that yielded a cover sets Source/ArtistExternalID;
+		// persist that ID so future scans resolve deterministically. A source
+		// that identified the artist without a cover is intentionally not
+		// recorded.
+		if res.Source != "" && res.ArtistExternalID != "" {
+			if err := e.artistRepo.Update(ctx, artist); err != nil {
+				logger.Error("[scan] artist external id backfill error for %s (%q): %v", id, artist.Name, err)
+			} else {
+				logger.Info("[scan] artist source id backfilled: id=%s name=%q source=%s id=%s", id, artist.Name, res.Source, res.ArtistExternalID)
+			}
+		}
+		// Backfill the discovered track external id (alias) onto the exact
+		// library track that was identified (by its stable ID, not title).
+		// Skip when the track is already keyed under that source (primary or
+		// existing alias) so a conflicting alias cannot join unrelated tracks
+		// into one version group.
+		if res.Source != "" && res.TrackExternalID != "" && res.TrackID != "" {
+			for i := range tracks {
+				if tracks[i].ID != res.TrackID {
+					continue
+				}
+				if tracks[i].MetadataSource == res.Source {
+					break
+				}
+				if tracks[i].ExternalIDs != nil && tracks[i].ExternalIDs[res.Source] != "" {
+					break
+				}
+				if err := e.trackRepo.AddExternalID(ctx, res.TrackID, res.Source, res.TrackExternalID); err != nil {
+					logger.Error("[scan] track external id backfill error for %s: %v", res.TrackID, err)
+				}
+				break
+			}
+		}
+
+		if res.CoverURL == "" {
+			continue
+		}
+		if err := e.covers.ImportArtistCoverURL(ctx, artist, res.CoverURL); err != nil {
+			logger.Error("[scan] artist cover import error for %s (%q): %v", id, artist.Name, err)
+			continue
+		}
+		resolved++
+		logger.Info("[scan] artist avatar imported: id=%s name=%q", id, artist.Name)
+	}
+	if resolved > 0 {
+		logger.Info("[scan] artist avatars backfilled: %d/%d", resolved, len(ids))
+	}
 }
 
 // hasUserCache reports whether a saved user metadata row exists for the

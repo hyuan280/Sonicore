@@ -47,6 +47,7 @@ type CoverManager struct {
 	images    *repository.ImageRepo
 	albums    *repository.AlbumRepo
 	tracks    *repository.TrackRepo
+	artists   *repository.ArtistRepo
 
 	// newRegistry builds the current metadata source chain (settings-aware)
 	// when the embedded cover is missing and a platform cover should be
@@ -73,7 +74,7 @@ const maxNetworkCoverBytes = 20 << 20
 // maxCoverDimension caps the pixel size of downloaded covers (checked via
 // the image header before a full decode) so a small payload that declares a
 // huge canvas cannot blow up memory during decode/resize.
-const maxCoverDimension = 4096
+const maxCoverDimension = 5000
 
 // maxCoverCandidateAttempts bounds how many platform cover candidates are
 // downloaded before giving up (each fetch can take up to 30s), so a slow or
@@ -203,6 +204,7 @@ func NewCoverManager(imagesDir string, db *sql.DB, newRegistry func() *Registry)
 		images:      repository.NewImageRepo(db),
 		albums:      repository.NewAlbumRepo(db),
 		tracks:      repository.NewTrackRepo(db),
+		artists:     repository.NewArtistRepo(db),
 		newRegistry: newRegistry,
 		recentFails: make(map[string]time.Time),
 	}
@@ -484,6 +486,201 @@ func (m *CoverManager) ImportTrackCoverURL(ctx context.Context, libraryID string
 		return err
 	}
 	m.clearFail(track.ID)
+	return nil
+}
+
+// ImportArtistCoverURL downloads an artist avatar from a platform-provided
+// URL and imports it with the "network" source: the original is written to
+// {images}/artist/artist_{id}.jpg (with a 256px thumbnail when larger), an
+// images row (owner_type "artist", no library) is created, and the artist's
+// cover_image_id is pointed at it. The download runs outside the lock so a
+// slow upstream cannot stall other covers; failures are memoized for the
+// cooldown window.
+func (m *CoverManager) ImportArtistCoverURL(ctx context.Context, artist *domain.Artist, coverURL string) error {
+	if artist == nil || artist.ID == "" {
+		return fmt.Errorf("artist cover import: nil artist")
+	}
+	key := "artist:" + artist.ID
+	if m.recentFail(key) {
+		return fmt.Errorf("artist cover import recently failed for %s", artist.ID)
+	}
+	// Fast path under the lock before any download: an intact cover already
+	// present short-circuits the whole network fetch.
+	m.extractMu.Lock()
+	if artist.CoverImageID != nil {
+		if img, err := m.images.FindByID(ctx, *artist.CoverImageID); err == nil && imageFilesIntact(img) {
+			m.extractMu.Unlock()
+			return nil
+		}
+	}
+	m.extractMu.Unlock()
+
+	data, err := fetchImage(ctx, coverURL)
+	if err != nil {
+		m.noteFail(key)
+		return err
+	}
+	data, err = ensureJPEG(data)
+	if err != nil {
+		m.noteFail(key)
+		return err
+	}
+
+	m.extractMu.Lock()
+	defer m.extractMu.Unlock()
+	// Re-check the current DB state by owner: a concurrent request may have
+	// imported the cover during the download window. When an orphan row exists
+	// (images row present but the artist pointer is nil), repair the pointer
+	// instead of returning with the avatar still unreferenced.
+	if img, err := m.images.FindByOwner(ctx, "artist", artist.ID); err == nil && imageFilesIntact(img) {
+		if artist.CoverImageID == nil || *artist.CoverImageID != img.ID {
+			artist.CoverImageID = &img.ID
+			if uerr := m.artists.Update(ctx, artist); uerr != nil {
+				logger.Error("[cover] artist cover pointer repair error for %s: %v", artist.ID, uerr)
+			}
+		}
+		return nil
+	}
+	if err := m.importArtistCoverLocked(ctx, artist, data, "network"); err != nil {
+		m.noteFail(key)
+		return err
+	}
+	m.clearFail(key)
+	return nil
+}
+
+// importArtistCoverLocked runs the artist avatar import pipeline: files are
+// staged under temporary names, then the row is created, then the artist
+// pointer is updated, and only then are the files committed. Caller must hold
+// extractMu and pass JPEG-encoded avatar bytes.
+func (m *CoverManager) importArtistCoverLocked(ctx context.Context, artist *domain.Artist, data []byte, source string) error {
+	dir := filepath.Join(m.imagesDir, "artist")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	mainPath := CoverPath(m.imagesDir, "artist", "artist", artist.ID, "jpg")
+	thumbPath := filepath.Join(dir, fmt.Sprintf("artist_%s_256.jpg", artist.ID))
+	format, w, h, hash := imageInfo(data)
+
+	// Content unchanged: the existing row and cover_image_id stay untouched,
+	// only the files are (re)written.
+	if artist.CoverImageID != nil {
+		if old, err := m.images.FindByID(ctx, *artist.CoverImageID); err == nil && old.Hash == hash {
+			if err := os.WriteFile(mainPath, data, 0644); err != nil {
+				return err
+			}
+			if w > 256 || h > 256 {
+				if err := ResizeToThumbnail(data, thumbPath, 256); err != nil {
+					logger.Error("[cover] artist thumbnail resize error for %s: %v", artist.ID, err)
+				}
+			} else {
+				os.Remove(thumbPath)
+			}
+			return nil
+		}
+	}
+
+	tmpMain := mainPath + ".tmp"
+	if err := os.WriteFile(tmpMain, data, 0644); err != nil {
+		return err
+	}
+	cleanupTmp := func() {
+		os.Remove(tmpMain)
+		os.Remove(thumbPath + ".tmp")
+	}
+
+	variants := domain.ImageVariants{}
+	thumbWritten := false
+	if w > 256 || h > 256 {
+		tmpThumb := thumbPath + ".tmp"
+		if err := ResizeToThumbnail(data, tmpThumb, 256); err != nil {
+			cleanupTmp()
+			return err
+		}
+		if fileSize(tmpThumb) > 0 {
+			sw, sh := scaledDims(w, h, 256)
+			variants = append(variants, domain.ImageVariant{Path: thumbPath, Width: sw, Height: sh, Size: fileSize(tmpThumb)})
+			thumbWritten = true
+		}
+	}
+	if len(variants) == 0 {
+		variants = append(variants, domain.ImageVariant{Path: mainPath, Width: w, Height: h, Size: int64(len(data))})
+	}
+
+	img := &domain.Image{
+		ID:        domain.NewID(),
+		OwnerType: "artist",
+		OwnerID:   artist.ID,
+		Source:    source,
+		Path:      mainPath,
+		Format:    format,
+		Width:     w,
+		Height:    h,
+		Size:      int64(len(data)),
+		Hash:      hash,
+		Variants:  variants,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := m.images.Create(ctx, img); err != nil {
+		cleanupTmp()
+		return err
+	}
+
+	prevImageID := ""
+	if artist.CoverImageID != nil {
+		prevImageID = *artist.CoverImageID
+	}
+	artist.CoverImageID = &img.ID
+	if err := m.artists.Update(ctx, artist); err != nil {
+		m.images.Delete(ctx, img.ID)
+		if prevImageID != "" {
+			artist.CoverImageID = &prevImageID
+		} else {
+			artist.CoverImageID = nil
+		}
+		cleanupTmp()
+		return err
+	}
+
+	// rollbackNewRow undoes the committed pointer change and drops the new row
+	// after a file-commit failure, so the artist returns to the previous row
+	// (its files may hold new bytes; the next scan re-syncs via hash).
+	rollbackNewRow := func() {
+		if prevImageID != "" {
+			artist.CoverImageID = &prevImageID
+		} else {
+			artist.CoverImageID = nil
+		}
+		if uerr := m.artists.Update(ctx, artist); uerr != nil {
+			logger.Error("[cover] artist cover rollback error for %s: %v", artist.ID, uerr)
+		}
+		if derr := m.images.Delete(ctx, img.ID); derr != nil {
+			logger.Info("[cover] delete artist image row %s on rollback: %v", img.ID, derr)
+		}
+	}
+
+	if err := os.Rename(tmpMain, mainPath); err != nil {
+		cleanupTmp()
+		rollbackNewRow()
+		return err
+	}
+	if thumbWritten {
+		if err := os.Rename(thumbPath+".tmp", thumbPath); err != nil {
+			os.Remove(thumbPath + ".tmp")
+			cleanupTmp()
+			rollbackNewRow()
+			return err
+		}
+	} else {
+		os.Remove(thumbPath)
+	}
+
+	if prevImageID != "" {
+		if err := m.images.Delete(ctx, prevImageID); err != nil {
+			logger.Info("[cover] delete stale artist image row: %v", err)
+		}
+	}
 	return nil
 }
 
@@ -897,7 +1094,9 @@ func (m *CoverManager) DeleteAlbumCovers(ctx context.Context, albumID string) er
 	return nil
 }
 
-// DeleteArtistCovers removes the artist's images row(s) and files.
+// DeleteArtistCovers removes the artist's images row(s) and files, including
+// the 256px thumbnail written by the import pipeline (the orphan sweep cannot
+// recover it once the row is deleted, since variants live on the row).
 func (m *CoverManager) DeleteArtistCovers(ctx context.Context, artistID string) error {
 	m.extractMu.Lock()
 	defer m.extractMu.Unlock()
@@ -906,6 +1105,7 @@ func (m *CoverManager) DeleteArtistCovers(ctx context.Context, artistID string) 
 		return err
 	}
 	os.Remove(CoverPath(m.imagesDir, "artist", "artist", artistID, "jpg"))
+	os.Remove(CoverPathWithSuffix(m.imagesDir, "artist", "artist", artistID, "_256", "jpg"))
 	return nil
 }
 

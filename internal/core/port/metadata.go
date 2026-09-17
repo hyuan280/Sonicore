@@ -84,6 +84,7 @@ const (
 	FieldCoverURL
 	FieldLyrics
 	FieldAlbumCountry
+	FieldArtistImage
 )
 
 // TargetFields is the completion goal for the registry chain. Year, Genre and
@@ -164,6 +165,7 @@ type ArtistSearchResult struct {
 	ExternalID string `json:"external_id"`
 	Country    string `json:"country,omitempty"`
 	Type       string `json:"type,omitempty"`
+	CoverURL   string `json:"cover_url,omitempty"`
 	Source     string `json:"source"`
 }
 
@@ -183,6 +185,7 @@ type ArtistLookupDetail struct {
 	Name       string `json:"name"`
 	Country    string `json:"country,omitempty"`
 	Type       string `json:"type,omitempty"`
+	CoverURL   string `json:"cover_url,omitempty"`
 }
 
 // AlbumDetail is the result of a platform album lookup by external ID.

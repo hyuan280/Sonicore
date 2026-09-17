@@ -21,7 +21,7 @@ Sonicore is a self-hosted music management center offering server-side playback 
 | **👥 多用户与权限** | ✅ 完成 | super_admin / admin / user 三级角色 + 库级权限 |
 | **📱 浏览器播放** | ✅ 完成 | React SPA 播放器，MSE 流式，循环/随机模式，队列管理 |
 | **📦 Docker 部署** | ✅ 完成 | 一键 docker compose 启动，nginx 反向代理 |
-| **🎵 元数据刮削** | ✅ 完成 | ffprobe 解析 + MusicBrainz / NetEase / 用户手动刮削 |
+| **🎵 元数据刮削** | ✅ 完成 | ffprobe 解析 + MusicBrainz / NetEase / 用户手动刮削 + 艺人头像自动获取 |
 | **📄 歌词支持** | ✅ 完成 | 多来源歌词（内嵌/侧边/网络/用户），LRC 解析，桌面歌词窗口 |
 | **🎚️ 音频转码** | ✅ 完成 | 不支持的编码自动转码（AAC 256/320、FLAC），缓存 + 音质切换 |
 | **🔀 多版本歌曲** | ✅ 完成 | 相同 MBID 归并，默认版本 + 版本切换（播放栏/队列），路径自动提取版本描述 |

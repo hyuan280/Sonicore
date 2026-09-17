@@ -444,13 +444,13 @@ func (c *Client) request(ctx context.Context, uri string, data map[string]any, m
 	if i := strings.IndexByte(logURL, '?'); i >= 0 {
 		logURL = logURL[:i]
 	}
-	logger.Info("[netease] POST %s [%s]", logURL, mode)
+	logger.Debug("[netease] POST %s [%s]", logURL, mode)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("netease request %s: %w", uri, err)
 	}
 	defer resp.Body.Close()
-	logger.Info("[netease] %d %s", resp.StatusCode, logURL)
+	logger.Debug("[netease] %d %s", resp.StatusCode, logURL)
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

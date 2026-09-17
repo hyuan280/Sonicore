@@ -14,9 +14,11 @@ import (
 )
 
 type fakeNeteaseProvider struct {
-	search func(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error)
-	enrich func(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error)
-	track  func(ctx context.Context, id string) (*port.TrackDetail, error)
+	search        func(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error)
+	enrich        func(ctx context.Context, tracks []port.PlatformTrack) ([]port.PlatformTrack, error)
+	track         func(ctx context.Context, id string) (*port.TrackDetail, error)
+	artist        func(ctx context.Context, id string) (*port.ArtistDetail, error)
+	searchArtists func(ctx context.Context, query string, page, limit int) ([]port.ArtistDetail, int, error)
 }
 
 func (f *fakeNeteaseProvider) SearchTracks(ctx context.Context, query string, page, limit int) ([]port.PlatformTrack, int, error) {
@@ -41,7 +43,10 @@ func (f *fakeNeteaseProvider) GetTrack(ctx context.Context, trackID string) (*po
 }
 
 func (f *fakeNeteaseProvider) SearchArtists(ctx context.Context, query string, page, limit int) ([]port.ArtistDetail, int, error) {
-	return nil, 0, errors.New("unexpected SearchArtists")
+	if f.searchArtists == nil {
+		return nil, 0, errors.New("unexpected SearchArtists")
+	}
+	return f.searchArtists(ctx, query, page, limit)
 }
 
 func (f *fakeNeteaseProvider) SearchAlbums(ctx context.Context, query string, page, limit int) ([]map[string]any, int, error) {
@@ -50,6 +55,13 @@ func (f *fakeNeteaseProvider) SearchAlbums(ctx context.Context, query string, pa
 
 func (f *fakeNeteaseProvider) GetAlbum(ctx context.Context, albumID string) (*netease.AlbumDetail, error) {
 	return nil, errors.New("unexpected GetAlbum")
+}
+
+func (f *fakeNeteaseProvider) GetArtist(ctx context.Context, artistID string) (*port.ArtistDetail, error) {
+	if f.artist == nil {
+		return nil, errors.New("unexpected GetArtist")
+	}
+	return f.artist(ctx, artistID)
 }
 
 func neTrack(id, title, artist, album string) port.PlatformTrack {

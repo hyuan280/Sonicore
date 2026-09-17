@@ -1014,6 +1014,28 @@ func (r *TrackRepo) UpdateMergeFields(ctx context.Context, id, metadataSource, e
 	return err
 }
 
+// AddExternalID adds a single (source, external id) alias into a track's
+// external_ids without touching its primary source/id. The alias is only
+// written when that source key is absent (insert-only): an existing alias is
+// never overwritten. Used to backfill a platform id discovered during
+// artist-avatar disambiguation so the track is keyed under the new source on
+// future scans.
+func (r *TrackRepo) AddExternalID(ctx context.Context, trackID, source, id string) error {
+	if trackID == "" || source == "" || id == "" {
+		return nil
+	}
+	src := sourceOrDefault(source)
+	ext, err := marshalExternalIDs(map[string]string{src: id})
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE tracks SET external_ids = COALESCE(external_ids, '{}'::jsonb) || $2::jsonb, updated_at = NOW()
+		 WHERE id = $1 AND NOT (COALESCE(external_ids, '{}'::jsonb) ? $3)`,
+		trackID, ext, src)
+	return err
+}
+
 // updateAlbumStats refreshes song_count and duration for the given albums.
 // Only main-version tracks (version = 0 or 1) are counted so secondary
 // versions (version > 1) do not inflate the song count or total duration.

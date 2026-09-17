@@ -24,6 +24,10 @@ var ErrTrackNotFound = fmt.Errorf("track not found")
 // album. It allows callers to distinguish "not found" from network errors.
 var ErrAlbumNotFound = fmt.Errorf("album not found")
 
+// ErrArtistNotFound is returned when an artist detail lookup finds no matching
+// artist. It allows callers to distinguish "not found" from network errors.
+var ErrArtistNotFound = fmt.Errorf("artist not found")
+
 // AlbumDetail holds metadata for a single album retrieved from the NetEase
 // API. It is used by the metadata resolution chain to fill in album-level
 // fields (artist, year) when saving a track identified via NetEase.
@@ -321,7 +325,7 @@ func (p *Provider) GetArtist(ctx context.Context, artistID string) (*port.Artist
 	data, _ := body["data"].(map[string]any)
 	artist, _ := data["artist"].(map[string]any)
 	if len(artist) == 0 {
-		return nil, fmt.Errorf("artist not found: %s", artistID)
+		return nil, fmt.Errorf("%w: %s", ErrArtistNotFound, artistID)
 	}
 	return &port.ArtistDetail{
 		Platform:   p.Name(),

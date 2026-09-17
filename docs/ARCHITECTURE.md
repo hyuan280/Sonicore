@@ -137,13 +137,17 @@ Metadata Pipeline (只读扫描):
 Image 存储策略:
   原则: 永不写入音频目录，文件系统缓存 + DB 元数据引用
 
-  来源 (优先级递减):
-    1. 音频文件内嵌封面图 (从 ffprobe 识别，由 cover.go 提取)
-    2. 同目录 cover.jpg / folder.jpg (扫描时复制到缓存)
-    3. 用户 Web UI 手动上传 (预留)
+  来源:
+    - 音频文件内嵌封面图 (从 ffprobe 识别，由 cover.go 提取)
+    - 同目录 cover.jpg / folder.jpg (扫描时复制到缓存)
+    - 平台网络封面 (识别链返回的 CoverURL，如 NetEase 曲目/专辑封面)
+    - 艺人头像 (从元数据源解析艺人后拉取，如 NetEase 艺人头像，扫描末段回填)
+    - 用户 Web UI 手动上传 (预留)
 
-  存储路径: {images_dir}/{library_id}/
-    文件命名: {type}_{owner_id}.{format}    (例: album_01HABCDE123.jpg)
+  存储路径:
+    - 曲目封面: {images_dir}/{library_id}/track_{id}.jpg (+ 64px 缩略图)
+    - 专辑封面: {images_dir}/album/album_{id}.jpg (+ 256px 缩略图，跨库共享)
+    - 艺人头像: {images_dir}/artist/artist_{id}.jpg (+ 256px 缩略图，跨库共享)
 
   HTTP 服务:
     GET /api/c/{session}/{imageId}  → 封面（支持 size 参数多尺寸变体）
@@ -477,9 +481,9 @@ type MBMetadata struct {
 type Image struct {
   ID        string
   LibraryID string
-  OwnerType string    // "album" | "artist"
+  OwnerType string    // "track" | "album" | "artist"
   OwnerID   string
-  Source    string    // "embedded" | "local_file" | "musicbrainz" | "lastfm" | "user_upload"
+  Source    string    // "embedded" | "network"
   Path      string
   Format    string    // "jpeg" | "png" | "webp"
   Width     int
@@ -774,6 +778,7 @@ WS /ws/{session}    (会话令牌认证，与流媒体一致)
 │   │   ├── logger/                      日志 (lumberjack)
 │   │   ├── lyrics/                      歌词文件存储
 │   │   ├── metadata/                    元数据引擎
+│   │   │   ├── artist_image.go          艺人头像解析
 │   │   │   ├── cover.go                 封面提取/缓存
 │   │   │   ├── cover_manager.go         封面管理
 │   │   │   ├── ffprobe.go               ffprobe 调用

@@ -20,6 +20,7 @@ type neteaseProvider interface {
 	SearchArtists(ctx context.Context, query string, page, limit int) ([]port.ArtistDetail, int, error)
 	SearchAlbums(ctx context.Context, query string, page, limit int) ([]map[string]any, int, error)
 	GetAlbum(ctx context.Context, albumID string) (*netease.AlbumDetail, error)
+	GetArtist(ctx context.Context, artistID string) (*port.ArtistDetail, error)
 }
 
 // neteaseSource adapts the NetEase platform provider to the
@@ -67,7 +68,7 @@ func (s *neteaseSource) Priority() int { return s.priority }
 // never deliver.
 func (s *neteaseSource) Capabilities() port.MetadataFields {
 	return port.FieldTrackID | port.FieldTitle | port.FieldArtists | port.FieldAlbum | port.FieldAlbumExternalID |
-		port.FieldCoverURL | port.FieldLyrics
+		port.FieldCoverURL | port.FieldLyrics | port.FieldArtistImage
 }
 
 // Identify searches NetEase for the best scoring candidate and reports it
@@ -180,6 +181,7 @@ func (s *neteaseSource) SearchArtists(ctx context.Context, query string) ([]port
 		out = append(out, port.ArtistSearchResult{
 			Name:       a.Name,
 			ExternalID: a.ArtistID,
+			CoverURL:   a.CoverURL,
 			Source:     s.name,
 		})
 	}
@@ -203,8 +205,24 @@ func (s *neteaseSource) LookupAlbum(ctx context.Context, externalID string) (*po
 	}, nil
 }
 
+// LookupArtist fetches artist details from NetEase by platform artist ID.
+// An unresolvable id yields (nil, nil); other failures are real errors.
 func (s *neteaseSource) LookupArtist(ctx context.Context, externalID string) (*port.ArtistLookupDetail, error) {
-	return nil, nil
+	detail, err := s.provider.GetArtist(ctx, externalID)
+	if err != nil {
+		if errors.Is(err, netease.ErrArtistNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if detail == nil || detail.ArtistID == "" {
+		return nil, nil
+	}
+	return &port.ArtistLookupDetail{
+		ExternalID: detail.ArtistID,
+		Name:       detail.Name,
+		CoverURL:   detail.CoverURL,
+	}, nil
 }
 
 // SearchReleases searches NetEase for albums by name.
