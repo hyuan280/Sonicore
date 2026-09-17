@@ -234,7 +234,7 @@ func New(cfg *config.Config) (*Server, error) {
 		Source:   "system",
 		Provider: "middleware",
 		Name:     "登录限流器清理",
-		Interval: 2 * time.Minute,
+		Interval: 10 * time.Minute,
 	}, func(ctx context.Context) error {
 		authLimiter.CleanupOnce()
 		return nil
