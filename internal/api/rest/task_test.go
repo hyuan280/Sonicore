@@ -52,6 +52,26 @@ func TestTaskListSorted(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"id":"t-001"`)
 }
 
+func TestTaskGetFound(t *testing.T) {
+	h := newTaskHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.Get(rec, setTaskVars(httptest.NewRequest(http.MethodGet, "/api/tasks/t-001", nil), "t-001"))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"id":"t-001"`)
+}
+
+func TestTaskGetNotFound(t *testing.T) {
+	h := newTaskHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.Get(rec, setTaskVars(httptest.NewRequest(http.MethodGet, "/api/tasks/nope", nil), "nope"))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "1100")
+}
+
 func TestTaskRunNotFound(t *testing.T) {
 	h := newTaskHandler(t)
 

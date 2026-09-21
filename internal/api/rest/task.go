@@ -24,6 +24,23 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.sched.List())
 }
 
+// Get returns a single task by ID, or 404 when unknown. This is the
+// lightweight status endpoint used by the frontend to poll one task without
+// fetching the whole list.
+func (h *TaskHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	scheduled, err := h.sched.Get(id)
+	if errors.Is(err, task.ErrNotFound) {
+		writeCodedError(w, http.StatusNotFound, domain.ErrTaskNotFound)
+		return
+	}
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrInternal)
+		return
+	}
+	writeJSON(w, http.StatusOK, scheduled)
+}
+
 // Run triggers an immediate execution of the task. This is fire-and-forget
 // ("trigger") semantics: 202 means the run was accepted, not that it
 // succeeded. The actual outcome is observable via the task list (status,

@@ -154,6 +154,19 @@ func TestCronEveryDescriptor(t *testing.T) {
 	assert.True(t, got.Before(before.Add(6*time.Minute)))
 }
 
+func TestGet(t *testing.T) {
+	s := NewScheduler(nil)
+	require.NoError(t, s.Register(Spec{ID: "t", Name: "t", Interval: time.Hour}, noopFn()))
+
+	got, err := s.Get("t")
+	require.NoError(t, err)
+	assert.Equal(t, "t", got.ID)
+	assert.Equal(t, "t", got.Name)
+
+	_, err = s.Get("missing")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
 func TestRegisterUpdateResetsNextRun(t *testing.T) {
 	s := NewScheduler(nil)
 	require.NoError(t, s.Register(Spec{ID: "t", Name: "t", Interval: time.Hour}, noopFn()))

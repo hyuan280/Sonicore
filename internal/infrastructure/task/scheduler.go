@@ -176,6 +176,17 @@ func (s Spec) scheduleDesc() string {
 	return "every " + s.Interval.String()
 }
 
+// Get returns a single registered task by ID, or ErrNotFound when unknown.
+func (s *Scheduler) Get(id string) (domain.ScheduledTask, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e, ok := s.tasks[id]
+	if !ok {
+		return domain.ScheduledTask{}, ErrNotFound
+	}
+	return s.view(e), nil
+}
+
 // List returns every registered task sorted by next run (ascending, tasks
 // without a next run last).
 func (s *Scheduler) List() []domain.ScheduledTask {

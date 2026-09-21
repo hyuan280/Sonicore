@@ -172,6 +172,7 @@
       "devices": "Audio Devices",
       "sources": "Data Sources",
       "notifications": "Notifications",
+      "network": "Network",
       "users": "Users"
     },
     "account": "Account",
@@ -577,6 +578,7 @@
     "sortByUpdatedAt": "Last Updated",
     "searchInstalled": "Search plugins",
     "searchMarket": "Search plugins",
+    "searchUninstalled": "Search plugins",
     "noInstalled": "No plugins installed yet",
     "noUninstalled": "No uninstalled plugins",
     "noMatch": "No plugins match",
@@ -596,6 +598,9 @@
     "enableSwitch": "Enable plugin",
     "pluginDisabled": "The plugin is disabled",
     "refresh": "Refresh",
+    "syncRepos": "Sync repos",
+    "syncing": "Syncing...",
+    "syncFailed": "Repository sync failed",
     "noPageData": "This plugin provides no data page",
     "fieldNoModel": "Field is not bound to a config key (model)",
     "enable": "Enable",
@@ -642,6 +647,19 @@
     "channelDesc": "Enable state and testing for notification channels (built-in and plugin channels are managed the same way)",
     "test": "Test",
     "testSent": "Test notification sent"
+  },
+  "network": {
+    "proxyServer": "Proxy Server",
+    "proxyServerDesc": "Global proxy server URL, reused by the GitHub proxy below when \"Use global proxy\" is enabled.",
+    "proxyUrl": "Proxy URL",
+    "proxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "githubProxy": "GitHub Proxy",
+    "githubProxyDesc": "Accessing GitHub (plugin market, download counts) requires external network; configure a dedicated proxy or reuse the global one.",
+    "githubProxyUrl": "GitHub Proxy URL",
+    "githubProxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "useGlobalProxy": "Use global proxy",
+    "useGlobalProxyDesc": "When enabled, GitHub requests reuse the global proxy above, so no dedicated proxy URL is needed.",
+    "useGlobalNeedsProxy": "Configure the global proxy above to enable this."
   },
   "tasks": {
     "title": "Tasks",

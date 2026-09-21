@@ -172,6 +172,7 @@
       "devices": "音频设备",
       "sources": "数据源",
       "notifications": "通知",
+      "network": "网络",
       "users": "用户"
     },
     "account": "账号",
@@ -577,6 +578,7 @@
     "sortByUpdatedAt": "更新时间",
     "searchInstalled": "搜索插件",
     "searchMarket": "搜索插件",
+    "searchUninstalled": "搜索插件",
     "noInstalled": "暂无已安装插件",
     "noUninstalled": "没有未安装的插件",
     "noMatch": "没有匹配的插件",
@@ -596,6 +598,9 @@
     "enableSwitch": "插件启动",
     "pluginDisabled": "插件已停用",
     "refresh": "刷新",
+    "syncRepos": "同步仓库",
+    "syncing": "同步中...",
+    "syncFailed": "仓库同步失败",
     "noPageData": "该插件没有提供数据页",
     "fieldNoModel": "该字段未绑定配置键（model）",
     "enable": "启用",
@@ -642,6 +647,19 @@
     "channelDesc": "各通知渠道的启用状态与测试（内置与插件渠道统一管理）",
     "test": "测试",
     "testSent": "测试通知已发送"
+  },
+  "network": {
+    "proxyServer": "代理服务器",
+    "proxyServerDesc": "全局代理服务器地址，供下方 GitHub 代理在开启「使用全局代理」时复用。",
+    "proxyUrl": "代理地址",
+    "proxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "githubProxy": "GitHub 代理",
+    "githubProxyDesc": "访问 GitHub（插件市场、下载计数）需要外部网络，可单独配置代理或复用全局代理。",
+    "githubProxyUrl": "GitHub 代理地址",
+    "githubProxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "useGlobalProxy": "使用全局代理",
+    "useGlobalProxyDesc": "开启后，GitHub 请求将复用上方配置的全局代理，无需单独填写代理地址。",
+    "useGlobalNeedsProxy": "需先在上方配置全局代理后才能开启。"
   },
   "tasks": {
     "title": "任务",

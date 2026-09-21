@@ -283,6 +283,20 @@ func New(cfg *config.Config) (*Server, error) {
 		}
 		return dec
 	})
+	// Wire the runtime GitHub proxy (admin network settings) into the
+	// marketplace. When "use global proxy" is enabled AND a global proxy is
+	// actually configured, GitHub uses the global proxy URL; otherwise it uses
+	// the dedicated GitHub proxy URL (so enabling the switch with an empty
+	// global proxy never silently drops the configured GitHub proxy). An empty
+	// result means no proxy (direct connection).
+	marketSvc.SetGitHubProxyProvider(func() string {
+		if cachedSettings.get(settingsRepo, "network_github_proxy_use_global") == "true" {
+			if global := cachedSettings.get(settingsRepo, "network_proxy_url"); global != "" {
+				return global
+			}
+		}
+		return cachedSettings.get(settingsRepo, "network_github_proxy_url")
+	})
 	if err := marketSvc.SeedOfficialRepos(context.Background()); err != nil {
 		logger.Warn("[plugin-market] seed official repos: %v", err)
 	}
@@ -546,6 +560,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	tasksR.Use(middleware.AuthMiddleware(jwtService))
 	tasksR.Use(rest.AdminOnly)
 	tasksR.HandleFunc("", taskHandler.List).Methods("GET")
+	tasksR.HandleFunc("/{id}", taskHandler.Get).Methods("GET")
 	tasksR.HandleFunc("/{id}/run", taskHandler.Run).Methods("POST")
 	tasksR.HandleFunc("/{id}/enabled", taskHandler.SetEnabled).Methods("PUT")
 

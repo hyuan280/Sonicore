@@ -61,6 +61,58 @@ func writeRepoCache(t *testing.T, cacheDir, name string, doc repoJSON) {
 	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "repos", name+".json"), raw, 0o644))
 }
 
+func TestIsGitHubHost(t *testing.T) {
+	cases := map[string]bool{
+		"github.com":                    true,
+		"api.github.com":                true,
+		"codeload.github.com":           true,
+		"raw.githubusercontent.com":     true,
+		"objects.githubusercontent.com": true,
+		"githubusercontent.com":         true,
+		// Case and trailing dot are normalized.
+		"GitHub.com":                 true,
+		"API.GitHub.com":             true,
+		"raw.githubusercontent.com.": true,
+		"github.com.":                true,
+		"example.com":                false,
+		"notgithub.com":              false,
+		"github.com.evil.com":        false,
+		"":                           false,
+	}
+	for host, want := range cases {
+		require.Equal(t, want, isGitHubHost(host), "host %q", host)
+	}
+}
+
+func TestProxyFor(t *testing.T) {
+	mkt, _, _, _, _ := newTestMarket(t)
+	req := func(raw string) *http.Request {
+		return httptest.NewRequest(http.MethodGet, raw, nil)
+	}
+
+	// No proxy configured: always a direct connection.
+	u, err := mkt.proxyFor(req("https://api.github.com/x"))
+	require.NoError(t, err)
+	require.Nil(t, u)
+
+	// Proxy configured: GitHub hosts are proxied, others are not.
+	mkt.SetGitHubProxyProvider(func() string { return "http://127.0.0.1:7890" })
+	u, err = mkt.proxyFor(req("https://api.github.com/x"))
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	require.Equal(t, "http://127.0.0.1:7890", u.String())
+
+	u, err = mkt.proxyFor(req("https://example.com/x"))
+	require.NoError(t, err)
+	require.Nil(t, u)
+
+	// An unparseable proxy URL falls back to a direct connection.
+	mkt.SetGitHubProxyProvider(func() string { return "http://[::1" })
+	u, err = mkt.proxyFor(req("https://api.github.com/x"))
+	require.NoError(t, err)
+	require.Nil(t, u)
+}
+
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {
 		a, b string

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { isAdmin, useAuth } from "../stores/auth";
-import { Server, SquareLibrary, Speaker, Database, Bell, Users } from "lucide-react";
+import { Server, SquareLibrary, Speaker, Database, Bell, Globe, Users } from "lucide-react";
 import { ROUTES, SETTINGS_TABS, SETTINGS_TAB_STORAGE_KEY, settingsPath } from "../lib/constants";
 import LanguageSwitcher from "../components/LanguageSwitcher";
 
@@ -53,6 +53,11 @@ function SettingsPageInner() {
       to: settingsPath(SETTINGS_TABS.notifications),
       icon: Bell,
       label: t("settings.tabs.notifications"),
+    },
+    {
+      to: settingsPath(SETTINGS_TABS.network),
+      icon: Globe,
+      label: t("settings.tabs.network"),
     },
     {
       to: settingsPath(SETTINGS_TABS.users),

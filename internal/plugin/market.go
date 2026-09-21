@@ -136,8 +136,12 @@ type Market struct {
 	mgr            *Manager
 	client         *http.Client
 	downloadClient *http.Client
-	githubToken    func() string
-	githubAPIBase  string
+	// downloadProxyClient serves GitHub tarball downloads through the
+	// admin-configured proxy; see NewMarket. It is nil when no proxy is used.
+	downloadProxyClient *http.Client
+	githubToken         func() string
+	githubProxy         func() string
+	githubAPIBase       string
 }
 
 // NewMarket wires the marketplace. pluginsDir is {data_dir}/plugins,
@@ -149,30 +153,67 @@ type Market struct {
 // download_url inside repo.json IS re-vetted on the download path (see
 // ensureArchive).
 func NewMarket(pluginsDir, cacheDir string, repo *Repo, mgr *Manager) *Market {
-	return &Market{
-		pluginsDir: pluginsDir,
-		cacheDir:   cacheDir,
-		repo:       repo,
-		mgr:        mgr,
-		client:     &http.Client{Timeout: repoFetchTimeout, CheckRedirect: ssrf.RedirectGuard},
-		downloadClient: &http.Client{
-			Timeout: pluginDownloadTimeout,
-			Transport: &http.Transport{
-				// Re-resolve + pin at dial time to close the DNS-rebinding
-				// window between ensureArchive's SafeURL pre-check and the
-				// actual dial; private hosts are allowed only when the request
-				// context carries ssrf.WithAllowPrivate (self-hosted repos).
-				// Proxy is disabled so the pinned dialer always connects to the
-				// target host directly.
-				Proxy:           nil,
-				DialContext:     ssrf.DialContext(&net.Dialer{Timeout: 10 * time.Second}),
-				IdleConnTimeout: 90 * time.Second,
-			},
-			CheckRedirect: ssrf.RedirectGuard,
-		},
+	m := &Market{
+		pluginsDir:    pluginsDir,
+		cacheDir:      cacheDir,
+		repo:          repo,
+		mgr:           mgr,
 		githubToken:   func() string { return "" },
+		githubProxy:   func() string { return "" },
 		githubAPIBase: "https://api.github.com",
 	}
+
+	// m.client fetches repo.json and GitHub download counts. Its proxy
+	// function routes GitHub hosts through the admin-configured GitHub proxy
+	// and leaves every other host on the environment default, so self-hosted
+	// private repositories keep working.
+	clientTransport := http.DefaultTransport.(*http.Transport).Clone()
+	clientTransport.Proxy = func(req *http.Request) (*url.URL, error) {
+		if u, _ := m.proxyFor(req); u != nil {
+			return u, nil
+		}
+		return http.ProxyFromEnvironment(req)
+	}
+	m.client = &http.Client{
+		Timeout:       repoFetchTimeout,
+		Transport:     clientTransport,
+		CheckRedirect: ssrf.RedirectGuard,
+	}
+
+	// m.downloadClient keeps the SSRF-pinned dialer for direct (non-proxied)
+	// downloads.
+	m.downloadClient = &http.Client{
+		Timeout: pluginDownloadTimeout,
+		Transport: &http.Transport{
+			// Re-resolve + pin at dial time to close the DNS-rebinding
+			// window between ensureArchive's SafeURL pre-check and the
+			// actual dial; private hosts are allowed only when the request
+			// context carries ssrf.WithAllowPrivate (self-hosted repos).
+			// Proxy is disabled so the pinned dialer always connects to the
+			// target host directly.
+			Proxy:           nil,
+			DialContext:     ssrf.DialContext(&net.Dialer{Timeout: 10 * time.Second}),
+			IdleConnTimeout: 90 * time.Second,
+		},
+		CheckRedirect: ssrf.RedirectGuard,
+	}
+
+	// m.downloadProxyClient handles GitHub tarball downloads through the
+	// proxy. The proxy is often local/private (e.g. 127.0.0.1:7890), so it
+	// uses a plain dialer instead of the SSRF-pinned one (which rejects
+	// non-public addresses). The download URL is still vetted by
+	// ensureArchive's SafeURL/sameHost checks and RedirectGuard.
+	m.downloadProxyClient = &http.Client{
+		Timeout: pluginDownloadTimeout,
+		Transport: &http.Transport{
+			Proxy:           m.proxyFor,
+			DialContext:     (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			IdleConnTimeout: 90 * time.Second,
+		},
+		CheckRedirect: ssrf.RedirectGuard,
+	}
+
+	return m
 }
 
 // SetGitHubTokenProvider wires an optional GitHub API token (used to raise
@@ -182,6 +223,31 @@ func (m *Market) SetGitHubTokenProvider(fn func() string) {
 	if fn != nil {
 		m.githubToken = fn
 	}
+}
+
+// SetGitHubProxyProvider wires the runtime GitHub proxy URL (admin network
+// settings). The provider returns "" when no proxy is configured; it is read
+// on every request so changes apply without a restart.
+func (m *Market) SetGitHubProxyProvider(fn func() string) {
+	if fn != nil {
+		m.githubProxy = fn
+	}
+}
+
+// proxyFor returns the proxy URL for an outbound request, or nil when the
+// request should not be proxied: only GitHub hosts are routed through the
+// configured GitHub proxy, and an empty or unparseable proxy URL falls back to
+// a direct connection.
+func (m *Market) proxyFor(req *http.Request) (*url.URL, error) {
+	p := m.githubProxy()
+	if p == "" || !isGitHubHost(req.URL.Hostname()) {
+		return nil, nil
+	}
+	u, err := url.Parse(p)
+	if err != nil {
+		return nil, nil
+	}
+	return u, nil
 }
 
 // SeedOfficialRepos inserts the built-in official repositories (see
@@ -264,7 +330,11 @@ func (m *Market) syncRepo(ctx context.Context, row *RepoRow) error {
 			return fmt.Errorf("not modified but no cached body: %w", statErr)
 		}
 		meta.FetchedAt = time.Now()
-		return m.saveMeta(metaPath, meta)
+		if err := m.saveMeta(metaPath, meta); err != nil {
+			return err
+		}
+		logger.Info("[plugin-market] repo %s up to date (304)", row.Name)
+		return nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("repo returned status %d", resp.StatusCode)
@@ -285,7 +355,13 @@ func (m *Market) syncRepo(ctx context.Context, row *RepoRow) error {
 		ETag:         resp.Header.Get("ETag"),
 		LastModified: resp.Header.Get("Last-Modified"),
 	}
-	return m.saveMeta(metaPath, meta)
+	if err := m.saveMeta(metaPath, meta); err != nil {
+		return err
+	}
+	var doc repoJSON
+	_ = json.Unmarshal(body, &doc)
+	logger.Info("[plugin-market] repo %s synced: %d plugins", row.Name, len(doc.Plugins))
+	return nil
 }
 
 // checkUpdates compares every installed market plugin against its source
@@ -930,7 +1006,17 @@ func (m *Market) ensureArchive(ctx context.Context, archive, url, wantSHA, repoU
 	if err != nil {
 		return err
 	}
-	resp, err := m.downloadClient.Do(req)
+	// GitHub-hosted downloads route through the admin-configured proxy (a
+	// dedicated client with a plain dialer, so a local proxy is reachable);
+	// everything else keeps the SSRF-pinned direct client. Match proxyFor's
+	// actual decision rather than re-checking the raw setting, so an
+	// unparseable proxy URL does not silently downgrade to a direct connection
+	// without the SSRF-pinned dialer.
+	client := m.downloadClient
+	if u, perr := m.proxyFor(req); perr == nil && u != nil {
+		client = m.downloadProxyClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download plugin: %w", err)
 	}
@@ -1154,6 +1240,19 @@ func sanitizeName(name string) string {
 		return ""
 	}
 	return name
+}
+
+// isGitHubHost reports whether host is a GitHub host (github.com or any
+// subdomain, plus the githubusercontent.com CDN that serves raw and release
+// assets). The GitHub proxy only applies to these hosts.
+func isGitHubHost(host string) bool {
+	// url.Hostname() neither lowercases nor strips a trailing dot, so
+	// normalize here to keep "GitHub.com" / "github.com." working.
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if host == "github.com" || host == "githubusercontent.com" {
+		return true
+	}
+	return strings.HasSuffix(host, ".github.com") || strings.HasSuffix(host, ".githubusercontent.com")
 }
 
 // sameHost reports whether two URLs share the same hostname (case-insensitive,

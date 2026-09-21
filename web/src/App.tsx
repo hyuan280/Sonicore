@@ -99,6 +99,7 @@ const LibrariesTab = lazy(() => import("./pages/settings/LibrariesTab"));
 const DevicesTab = lazy(() => import("./pages/settings/DevicesTab"));
 const SourcesTab = lazy(() => import("./pages/settings/SourcesTab"));
 const NotificationsTab = lazy(() => import("./pages/settings/NotificationsTab"));
+const NetworkTab = lazy(() => import("./pages/settings/NetworkTab"));
 const UsersTab = lazy(() => import("./pages/settings/UsersTab"));
 const DiscoverPage = lazy(() => import("./pages/DiscoverPage"));
 const DiscoverChartPage = lazy(() => import("./pages/DiscoverChartPage"));
@@ -496,6 +497,7 @@ export default function App() {
           <Route path={SETTINGS_TABS.devices} element={<DevicesTab />} />
           <Route path={SETTINGS_TABS.sources} element={<SourcesTab />} />
           <Route path={SETTINGS_TABS.notifications} element={<NotificationsTab />} />
+          <Route path={SETTINGS_TABS.network} element={<NetworkTab />} />
           <Route path={SETTINGS_TABS.users} element={<UsersTab />} />
         </Route>
         <Route path={ROUTES.tasks} element={<TasksPage />} />

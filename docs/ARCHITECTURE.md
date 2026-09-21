@@ -687,6 +687,7 @@ type ScheduledTask struct {
 | `GET /api/admin/dirs` | 目录浏览 (admin) |
 | `GET/PUT /api/notifications/channels` `/preferences` | 通知渠道 / 偏好 (admin) |
 | `GET /api/tasks` | 任务列表 (admin) |
+| `GET /api/tasks/{id}` | 单个任务状态 (admin) |
 | `POST /api/tasks/{id}/run` | 立即执行任务 |
 | `PUT /api/tasks/{id}/enabled` | 启用 / 禁用任务 |
 | `GET/POST /api/plugins` | 插件管理 (admin) |

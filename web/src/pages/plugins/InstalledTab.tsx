@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useOutletContext } from "react-router-dom";
 import { translateApiError } from "../../i18n/errorCodes";
@@ -7,6 +7,8 @@ import { Modal } from "../../components/ui/modal";
 import { SchemaRenderer } from "../../components/ui/schema";
 import { MenuItem } from "../../components/ui/menu";
 import PluginToolbar from "./PluginToolbar";
+import { PluginRefreshButton } from "./PluginRefreshButton";
+import { useListControls } from "./useListControls";
 import LogsModal from "./LogsModal";
 import { PluginCard, sourceInfo } from "./PluginCard";
 import { useRepoOfficialMap } from "../../hooks/useRepoOfficialMap";
@@ -32,6 +34,28 @@ const STATUS_LABEL_KEYS: Record<PluginStatus, string> = {
   error: "plugins.statusError",
 };
 
+const INITIAL_FILTERS: Record<string, string[]> = {
+  [PLUGIN_INSTALLED_FILTER_KEYS.status]: [],
+  [PLUGIN_INSTALLED_FILTER_KEYS.source]: [],
+};
+
+function matches(p: PluginInstance, query: string, filters: Record<string, string[]>): boolean {
+  if (query && !p.name.toLowerCase().includes(query)) return false;
+  const status = filters[PLUGIN_INSTALLED_FILTER_KEYS.status];
+  if (status.length > 0 && !status.includes(p.status)) return false;
+  const source = filters[PLUGIN_INSTALLED_FILTER_KEYS.source];
+  if (source.length > 0 && !source.includes(p.source)) return false;
+  return true;
+}
+
+const SORTERS: Record<string, (a: PluginInstance, b: PluginInstance) => number> = {
+  [PLUGIN_INSTALLED_SORT_KEYS.name]: (a, b) => a.name.localeCompare(b.name),
+  [PLUGIN_INSTALLED_SORT_KEYS.status]: (a, b) =>
+    STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
+  [PLUGIN_INSTALLED_SORT_KEYS.updatedAt]: (a, b) =>
+    (b.updated_at || "").localeCompare(a.updated_at || ""),
+};
+
 export default function InstalledTab() {
   const { t } = useTranslation();
   const { setToolbar } = useOutletContext<PluginsOutletContext>();
@@ -47,20 +71,12 @@ export default function InstalledTab() {
   const [historyId, setHistoryId] = useState<string | null>(null);
   // logId opens the live log viewer of one plugin.
   const [logId, setLogId] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState<Record<string, string[]>>({
-    [PLUGIN_INSTALLED_FILTER_KEYS.status]: [],
-    [PLUGIN_INSTALLED_FILTER_KEYS.source]: [],
-  });
-  const [sortBy, setSortBy] = useState("");
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [refreshing, setRefreshing] = useState(false);
+  const { search, setSearch, filters, setFilters, sortBy, setSortBy, filtered, toggleFilter } =
+    useListControls(plugins, INITIAL_FILTERS, matches, SORTERS);
 
-  useEffect(() => {
-    loadPlugins();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const loadPlugins = async () => {
+  const loadPlugins = useCallback(async () => {
     try {
       const d = await api.plugins.installed();
       setPlugins(d.plugins || []);
@@ -69,7 +85,22 @@ export default function InstalledTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t]);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    setError("");
+    try {
+      await loadPlugins();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPlugins]);
+
+  useEffect(() => {
+    loadPlugins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const statusOptions = useMemo(
     () =>
@@ -82,34 +113,6 @@ export default function InstalledTab() {
     () => Array.from(new Set(plugins.map((p) => p.source))).sort(),
     [plugins],
   );
-
-  const filtered = useMemo(() => {
-    let list = plugins.filter((p) => {
-      const q = search.trim().toLowerCase();
-      if (q && !p.name.toLowerCase().includes(q)) return false;
-      if (
-        filters[PLUGIN_INSTALLED_FILTER_KEYS.status].length > 0 &&
-        !filters[PLUGIN_INSTALLED_FILTER_KEYS.status].includes(p.status)
-      )
-        return false;
-      if (
-        filters[PLUGIN_INSTALLED_FILTER_KEYS.source].length > 0 &&
-        !filters[PLUGIN_INSTALLED_FILTER_KEYS.source].includes(p.source)
-      )
-        return false;
-      return true;
-    });
-    if (sortBy === PLUGIN_INSTALLED_SORT_KEYS.name) {
-      list = [...list].sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sortBy === PLUGIN_INSTALLED_SORT_KEYS.status) {
-      list = [...list].sort(
-        (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
-      );
-    } else if (sortBy === PLUGIN_INSTALLED_SORT_KEYS.updatedAt) {
-      list = [...list].sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
-    }
-    return list;
-  }, [plugins, search, filters, sortBy]);
 
   const runAction = async (id: string, action: () => Promise<unknown>) => {
     setBusyIds((prev) => {
@@ -160,31 +163,37 @@ export default function InstalledTab() {
 
   const toolbarNode = useMemo(
     () => (
-      <PluginToolbar
-        filterGroups={filterGroups}
-        filters={filters}
-        onFilterToggle={(group, value) =>
-          setFilters((prev) => {
-            const cur = prev[group] || [];
-            const next = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
-            return { ...prev, [group]: next };
-          })
-        }
-        onFiltersClear={() =>
-          setFilters({
-            [PLUGIN_INSTALLED_FILTER_KEYS.status]: [],
-            [PLUGIN_INSTALLED_FILTER_KEYS.source]: [],
-          })
-        }
-        searchValue={search}
-        onSearch={setSearch}
-        searchPlaceholder={searchPlaceholder}
-        sortOptions={sortOptions}
-        sortBy={sortBy}
-        onSortBy={setSortBy}
-      />
+      <div className="flex items-center gap-2">
+        <PluginToolbar
+          filterGroups={filterGroups}
+          filters={filters}
+          onFilterToggle={toggleFilter}
+          onFiltersClear={() => setFilters({ ...INITIAL_FILTERS })}
+          searchValue={search}
+          onSearch={setSearch}
+          searchPlaceholder={searchPlaceholder}
+          sortOptions={sortOptions}
+          sortBy={sortBy}
+          onSortBy={setSortBy}
+        />
+        <PluginRefreshButton label={t("plugins.refresh")} busy={refreshing} onClick={refresh} />
+      </div>
     ),
-    [filterGroups, filters, search, sortBy, sortOptions, searchPlaceholder],
+    [
+      filterGroups,
+      filters,
+      search,
+      sortBy,
+      sortOptions,
+      searchPlaceholder,
+      refreshing,
+      refresh,
+      toggleFilter,
+      setFilters,
+      setSearch,
+      setSortBy,
+      t,
+    ],
   );
 
   useEffect(() => {

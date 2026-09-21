@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -212,6 +213,9 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
 	githubToken, _ := h.settingsRepo.Get(r.Context(), "plugins_github_token")
+	proxyURL, _ := h.settingsRepo.Get(r.Context(), "network_proxy_url")
+	githubProxyURL, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_url")
+	githubProxyUseGlobal, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_use_global")
 	// A stored cookie that no longer decrypts (secret rotation, corruption)
 	// is reported so ops can distinguish "not configured" from "configured
 	// but unreadable" — the provider silently degrades to anonymous in the
@@ -231,6 +235,9 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		"log_level":                       logLevel,
 		"plugins_github_token_set":        githubToken != "" && !tokenBroken,
 		"plugins_github_token_error":      tokenBroken,
+		"network_proxy_url":               proxyURL,
+		"network_github_proxy_url":        githubProxyURL,
+		"network_github_proxy_use_global": githubProxyUseGlobal == "true",
 	}
 	h.mergeNotificationSettings(r.Context(), resp)
 	writeJSON(w, http.StatusOK, resp)
@@ -249,6 +256,9 @@ type updateSettingsRequest struct {
 	LogLevel                  *string `json:"log_level,omitempty"`
 	GitHubToken               *string `json:"plugins_github_token,omitempty"`
 	GitHubTokenClear          *bool   `json:"plugins_github_token_clear,omitempty"`
+	NetworkProxyURL           *string `json:"network_proxy_url,omitempty"`
+	NetworkGitHubProxyURL     *string `json:"network_github_proxy_url,omitempty"`
+	NetworkGitHubUseGlobal    *bool   `json:"network_github_proxy_use_global,omitempty"`
 	NotificationEmailEnabled  *bool   `json:"notification_email_enabled,omitempty"`
 	NotificationEmailSMTPHost *string `json:"notification_email_smtp_host,omitempty"`
 	NotificationEmailSMTPPort *string `json:"notification_email_smtp_port,omitempty"`
@@ -357,6 +367,27 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.GitHubTokenClear != nil && *req.GitHubTokenClear {
 		writes["plugins_github_token"] = ""
 	}
+	if req.NetworkProxyURL != nil {
+		if !validProxyURL(*req.NetworkProxyURL) {
+			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+			return
+		}
+		writes["network_proxy_url"] = *req.NetworkProxyURL
+	}
+	if req.NetworkGitHubProxyURL != nil {
+		if !validProxyURL(*req.NetworkGitHubProxyURL) {
+			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+			return
+		}
+		writes["network_github_proxy_url"] = *req.NetworkGitHubProxyURL
+	}
+	if req.NetworkGitHubUseGlobal != nil {
+		val := "false"
+		if *req.NetworkGitHubUseGlobal {
+			val = "true"
+		}
+		writes["network_github_proxy_use_global"] = val
+	}
 	notifDirty := false
 	if req.NotificationEmailEnabled != nil {
 		notifDirty = true
@@ -437,6 +468,9 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
 	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
 	githubToken, _ := h.settingsRepo.Get(r.Context(), "plugins_github_token")
+	proxyURL, _ := h.settingsRepo.Get(r.Context(), "network_proxy_url")
+	githubProxyURL, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_url")
+	githubProxyUseGlobal, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_use_global")
 	cookieBroken := h.cookieBroken(neCookie)
 	tokenBroken := h.tokenBroken(githubToken)
 	resp := map[string]interface{}{
@@ -452,6 +486,9 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"log_level":                       logLevel,
 		"plugins_github_token_set":        githubToken != "" && !tokenBroken,
 		"plugins_github_token_error":      tokenBroken,
+		"network_proxy_url":               proxyURL,
+		"network_github_proxy_url":        githubProxyURL,
+		"network_github_proxy_use_global": githubProxyUseGlobal == "true",
 	}
 	h.mergeNotificationSettings(r.Context(), resp)
 	writeJSON(w, http.StatusOK, resp)
@@ -524,6 +561,27 @@ func (h *AdminHandler) ListDirs(w http.ResponseWriter, r *http.Request) {
 		"dirs":       dirs,
 		"has_parent": browseDir != "/",
 	})
+}
+
+// validProxyURL gates an admin-entered proxy URL. An empty value (meaning "no
+// proxy") is allowed; otherwise the value must parse and use a supported proxy
+// scheme. The market's proxyFor silently ignores an unparseable URL and
+// connects directly, so rejecting bad input here avoids a saved-but-inert
+// proxy that is hard to diagnose.
+func validProxyURL(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "http", "https", "socks5", "socks5h":
+		return true
+	default:
+		return false
+	}
 }
 
 // AdminOnly middleware checks for admin:access permission

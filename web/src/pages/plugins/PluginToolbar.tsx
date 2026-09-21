@@ -56,6 +56,20 @@ export default function PluginToolbar({
   const { t } = useTranslation();
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  // The input owns its value locally so typing is controlled synchronously.
+  // The tab passes the search value back through a memoized toolbar element
+  // and the PluginsPage context (an extra render round-trip); driving the
+  // <input> directly from that prop lags the browser and duplicates
+  // characters. Changes are still pushed up via onSearch for filtering.
+  const [draft, setDraft] = useState(searchValue);
+
+  // The toolbar element is mounted in PluginsPage via the outlet context and
+  // reused across tab switches (same position, no key), so `draft` would
+  // otherwise leak a previous tab's query. Sync it whenever the parent value
+  // changes; during typing the parent lags behind draft, so this is a no-op.
+  useEffect(() => {
+    setDraft(searchValue);
+  }, [searchValue]);
 
   useEffect(() => {
     if (searchOpen) searchRef.current?.focus();
@@ -72,8 +86,12 @@ export default function PluginToolbar({
           <input
             ref={searchRef}
             type="text"
-            value={searchValue}
-            onChange={(e) => onSearch(e.target.value)}
+            value={draft}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDraft(v);
+              onSearch(v);
+            }}
             placeholder={searchPlaceholder}
             aria-label={t("plugins.search")}
             className="w-44 px-3 py-1.5 text-sm bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg outline-none focus:border-green-500 placeholder-zinc-500"
@@ -81,6 +99,7 @@ export default function PluginToolbar({
           <button
             type="button"
             onClick={() => {
+              setDraft("");
               setSearchOpen(false);
               onSearch("");
             }}
@@ -95,7 +114,7 @@ export default function PluginToolbar({
           type="button"
           onClick={() => setSearchOpen(true)}
           aria-label={t("plugins.search")}
-          className={toolbarButton(searchValue !== "")}
+          className={toolbarButton(draft !== "")}
         >
           <Search className="w-4 h-4" />
         </button>

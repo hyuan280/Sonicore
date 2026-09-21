@@ -453,3 +453,27 @@ func TestAdminOnlyMiddleware(t *testing.T) {
 		})
 	}
 }
+
+func TestValidProxyURL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"empty means no proxy", "", true},
+		{"http", "http://127.0.0.1:7890", true},
+		{"https", "https://proxy.example.com:3128", true},
+		{"socks5", "socks5://107.172.234.226:11208", true},
+		{"socks5h", "socks5h://proxy.example.com:1080", true},
+		{"userinfo allowed", "socks5://user:pass@proxy.example.com:1080", true},
+		{"missing scheme", "127.0.0.1:7890", false},
+		{"unsupported scheme", "ftp://proxy.example.com:21", false},
+		{"missing host", "http://", false},
+		{"garbage", "://bad", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, validProxyURL(tt.raw), "url %q", tt.raw)
+		})
+	}
+}

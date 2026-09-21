@@ -53,6 +53,7 @@ export const SETTINGS_TABS = {
   devices: "devices",
   sources: "sources",
   notifications: "notifications",
+  network: "network",
   users: "users",
 } as const;
 

@@ -466,6 +466,7 @@ export const api = {
   },
   tasks: {
     list: () => request("/api/tasks"),
+    get: (id: string) => request(`/api/tasks/${encodeURIComponent(id)}`),
     run: (id: string) => request(`/api/tasks/${encodeURIComponent(id)}/run`, { method: "POST" }),
     setEnabled: (id: string, enabled: boolean) =>
       request(`/api/tasks/${encodeURIComponent(id)}/enabled`, {
