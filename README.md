@@ -26,6 +26,7 @@ Sonicore is a self-hosted music management center offering server-side playback 
 | **🎚️ 音频转码** | ✅ 完成 | 不支持的编码自动转码（AAC 256/320、FLAC），缓存 + 音质切换 |
 | **🔀 多版本歌曲** | ✅ 完成 | 相同 MBID 归并，默认版本 + 版本切换（播放栏/队列），路径自动提取版本描述 |
 | **⭐ 收藏与历史** | ✅ 完成 | 收藏（含多版本联动）、播放历史 |
+| **🔥 热度系统** | ✅ 完成 | 播放/完整播放/收藏/歌单加权，Valkey 防刷，热度徽标与排序 |
 | **🧩 插件系统** | ✅ 完成 | go-plugin 子进程 + 插件市场（官方仓库同步、GitHub 下载） |
 | **🔔 通知系统** | ✅ 完成 | 邮件 (SMTP/IMAP) 渠道 + 用户偏好 + 插件注册通道 |
 | **⏰ 任务调度** | ✅ 完成 | 定时任务（转码缓存清理、插件仓库同步、限流器清理）+ 后台管理 |
@@ -168,6 +169,42 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 - **Jukebox** — 创建多个播放引擎，独立控制
 - **管理** — 用户管理、权限控制、音乐库管理（含版本描述编辑）
 
+### 热度系统 / Heat
+
+每首曲目有一个 `heat`（热度）分数，用于排序与展示。热度由用户行为事件累加得到，存储在 `track_events` 事件日志中，并缓存到 `tracks.heat` 聚合列（可随时按事件重算）。
+
+**计分规则**
+
+| 行为 | 权重 |
+|------|------|
+| 播放（有效收听） | +1 |
+| 完整播放（听完） | 额外 +1 |
+| 收藏 | +5 |
+| 加入歌单 | +2（每个歌单每首曲目一次） |
+
+- 取消收藏、移出歌单、删除歌单会**对称回退**对应热度；收藏/歌单重复添加不会重复计分。
+- 下载权重已预留，但当前没有下载接口，故暂不计分。
+
+**触发来源**
+
+- 浏览器播放（`/api/user/history/add`，前端每 15 秒上报进度）
+- Subsonic `scrobble`（需 `submission=true`）
+- 服务端 Jukebox 播放（曲目结束/切歌/停止时结算）
+- 收藏 / 歌单增删
+
+**防刷（Valkey 限流 + 可信收听时长）**
+
+- 服务端维护“可信累计收听时长”：只在真实流逝的墙钟时间内累加，快进不增加累计、从任意位置续播不会误判，短曲目按播放比例判定。
+- 一次播放需累计 **≥30 秒**（或短曲目 ≥50% 时长）才计为一次播放；**完整播放**需累计 **≥90% 时长**（快进到结尾不算）。
+- 每个 `(user, track)` 在每个窗口（`max(30s, 曲目时长 + 5s)`）内**最多计 1 次播放 + 1 次完整播放**，无法通过反复上报刷分。
+- 播放上报要求曲目所属音乐库的访问权限；Jukebox 按引擎真实播放时长结算，跳过/秒切不计。
+
+**展示**
+
+- 歌曲标题后显示热度徽标（🔥 + 数值，颜色随数值从灰到红，100 为最红）。
+- 歌曲页支持按热度 / 播放次数 / 最近播放排序。
+- 专辑、艺人、歌单、收藏、历史、点唱机队列等列表均显示热度。
+
 ### Subsonic API
 
 兼容 Subsonic API（部分实现），可使用任意 Subsonic 客户端连接。
@@ -178,19 +215,20 @@ Sonicore 支持在服务端直接播放音乐，通过 ffplay + PulseAudio 输�
 - 浏览：`getIndexes`/`getArtists`、`getMusicFolders`、`getArtist`、`getAlbum`、`getSong`、`getMusicDirectory`、`getAlbumList`/`getAlbumList2`、`getGenres`、`getArtistInfo`
 - 搜索：`search2`/`search3`
 - 流媒体：`stream`、`getCoverArt`
+- 播放上报：`scrobble`（计入热度与播放历史）
 - 播放列表：`getPlaylists`、`getPlaylist`、`createPlaylist`、`updatePlaylist`、`deletePlaylist`
 - 用户：`getUser`、`getUsers`、`createUser`、`updateUser`、`deleteUser`、`changePassword`
 - 收藏：`star`、`unstar`、`getStarred`
 - Jukebox：`jukeboxControl`
 
-> 🚧 `scrobble`、`getNowPlaying`、`getChatMessages`、`getInternetRadioStations`、`getAvatar` 为占位实现，更多端点持续添加中。
+> 🚧 `getNowPlaying`、`getChatMessages`、`getInternetRadioStations`、`getAvatar` 为占位实现，更多端点持续添加中。
 
 ---
 
 ## 开发路线 / Roadmap
 
 ### 短期 / Short-term
-- [ ] 热度系统（Heat 字段落地：播放次数/收藏等综合热度计算与展示）
+- [x] 热度系统（Heat 字段落地：播放/完整播放/收藏/歌单加权 + Valkey 防刷 + 展示排序）
 - [ ] Subsonic API 完善（`getRandomSongs`、`getSongsByGenre`、播客等）
 - [ ] 浏览器播放器 WebSocket 状态同步
 - [ ] 多版本 Work 聚合（Live/Remix 等不同录音归并）

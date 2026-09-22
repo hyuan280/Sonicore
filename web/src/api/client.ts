@@ -278,10 +278,10 @@ export const api = {
       request("/api/user/favorites/check", { method: "POST", body: JSON.stringify({ ids }) }),
     history: (page = 1, perPage = 30) =>
       request(`/api/user/history/list?page=${page}&per_page=${perPage}`),
-    addHistory: (trackId: string) =>
+    addHistory: (trackId: string, position = 0) =>
       request("/api/user/history/add", {
         method: "POST",
-        body: JSON.stringify({ track_id: trackId }),
+        body: JSON.stringify({ track_id: trackId, position }),
       }),
     deleteHistoryItems: (ids: string[]) =>
       request("/api/user/history/remove", { method: "POST", body: JSON.stringify({ ids }) }),

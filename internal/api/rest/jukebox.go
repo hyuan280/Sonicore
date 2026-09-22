@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -23,7 +25,28 @@ type JukeboxHandler struct {
 	jukeboxRepo     *repository.JukeboxRepo
 	audioDeviceRepo *repository.AudioDeviceRepo
 	trackRepo       *repository.TrackRepo
+	heatRepo        jukeboxHeatRecorder
 	wsHub           *ws.Hub
+
+	// jbActive holds the in-flight listen per engine. Heat is only awarded when
+	// a listen is finalized (track change or stop), based on how long the track
+	// actually played, so starting or skipping a track earns nothing.
+	jbMu     sync.Mutex
+	jbActive map[string]jukeboxListen
+}
+
+// jukeboxHeatRecorder is the subset of the heat repository used by jukebox
+// playback, kept as an interface so the play accounting is unit testable.
+type jukeboxHeatRecorder interface {
+	CountPlay(ctx context.Context, trackID, userID, session string, countPlay, countComplete bool) (bool, error)
+}
+
+// jukeboxListen is the playback accounting state for one engine.
+type jukeboxListen struct {
+	epoch    uint64
+	trackID  string
+	duration float64
+	start    time.Time
 }
 
 func NewJukeboxHandler(db *sql.DB, manager *player.EngineManager, wsHub *ws.Hub) *JukeboxHandler {
@@ -33,7 +56,9 @@ func NewJukeboxHandler(db *sql.DB, manager *player.EngineManager, wsHub *ws.Hub)
 		jukeboxRepo:     repository.NewJukeboxRepo(db),
 		audioDeviceRepo: repository.NewAudioDeviceRepo(db),
 		trackRepo:       repository.NewTrackRepo(db),
+		heatRepo:        repository.NewHeatRepo(db),
 		wsHub:           wsHub,
+		jbActive:        make(map[string]jukeboxListen),
 	}
 }
 
@@ -54,7 +79,7 @@ func (h *JukeboxHandler) getLibPaths(ctx context.Context) map[string]string {
 }
 
 func (h *JukeboxHandler) getOrCreateEngine(id, deviceID, driver string) (*player.Engine, bool) {
-	return h.manager.GetOrCreate(id, deviceID, driver, func(trackID string) (*player.TrackInfo, error) {
+	eng, created := h.manager.GetOrCreate(id, deviceID, driver, func(trackID string) (*player.TrackInfo, error) {
 		track, err := h.trackRepo.FindByID(context.Background(), trackID)
 		if err != nil {
 			logger.Error("[jukebox] resolve failed: id=%q err=%v", trackID, err)
@@ -73,6 +98,15 @@ func (h *JukeboxHandler) getOrCreateEngine(id, deviceID, driver string) (*player
 		}
 		return info, nil
 	})
+	if created {
+		// A rebuilt engine restarts PlayEpoch at zero, so drop any in-flight
+		// listen accounting for the previous instance; otherwise a stale epoch
+		// could suppress the new engine's first play.
+		h.jbMu.Lock()
+		delete(h.jbActive, id)
+		h.jbMu.Unlock()
+	}
+	return eng, created
 }
 
 func (h *JukeboxHandler) wireEngine(eng *player.Engine) {
@@ -89,7 +123,62 @@ func (h *JukeboxHandler) wireEngine(eng *player.Engine) {
 				logger.Error("[jukebox] save state error: %v", err)
 			}
 		}()
+
+		h.trackJukeboxPlay(eng.ID(), s)
 	})
+}
+
+// trackJukeboxPlay advances the per-engine listen accounting and finalizes the
+// previous listen when the engine stops or moves to another playback instance.
+// Only finalized listens are recorded, and only if they actually played long
+// enough (see recordJukeboxListen), so rapidly calling play/next/prev cannot
+// farm heat.
+func (h *JukeboxHandler) trackJukeboxPlay(engID string, s player.Status) {
+	h.jbMu.Lock()
+	prev, hasPrev := h.jbActive[engID]
+	var finalize *jukeboxListen
+	switch {
+	// Stop/Next-at-end/ClearQueue leave the engine non-playing but may keep
+	// current set and the epoch unchanged, so state (not just a nil track) has
+	// to signal the end of a listen. Finalizing here also stops the wall-clock
+	// played time from including idle time after playback stopped.
+	case s.Track == nil || s.State != player.StatePlaying:
+		if hasPrev {
+			finalize = &prev
+			delete(h.jbActive, engID)
+		}
+	case !hasPrev || prev.epoch != s.PlayEpoch:
+		if hasPrev {
+			finalize = &prev
+		}
+		h.jbActive[engID] = jukeboxListen{
+			epoch:    s.PlayEpoch,
+			trackID:  s.Track.ID,
+			duration: s.Track.Duration,
+			start:    time.Now(),
+		}
+	}
+	h.jbMu.Unlock()
+
+	if finalize == nil {
+		return
+	}
+	// Recording is async: OnChange runs inside Engine.Play() before ffplay
+	// starts, so the accounting must not block playback or the broadcast.
+	go h.recordJukeboxListen(*finalize)
+}
+
+func (h *JukeboxHandler) recordJukeboxListen(l jukeboxListen) {
+	played := time.Since(l.start).Seconds()
+	play := domain.HeatQualifiesForListened(played, l.duration)
+	complete := domain.HeatListenedIsComplete(played, l.duration)
+	if !play && !complete {
+		return
+	}
+	token := domain.NewID()
+	if _, err := h.heatRepo.CountPlay(context.Background(), l.trackID, "", token, play, complete); err != nil {
+		logger.Error("[heat] jukebox play failed: %v", err)
+	}
 }
 
 func (h *JukeboxHandler) ensureEngine(ctx context.Context, id string) (*player.Engine, error) {
@@ -272,6 +361,9 @@ func (h *JukeboxHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.manager.Remove(id)
+	h.jbMu.Lock()
+	delete(h.jbActive, id)
+	h.jbMu.Unlock()
 	writeJSON(w, http.StatusNoContent, nil)
 }
 

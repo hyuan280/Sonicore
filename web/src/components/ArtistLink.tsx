@@ -1,12 +1,6 @@
 import { Link } from "react-router-dom";
 import { ROUTES } from "../lib/constants";
-
-interface TrackArtist {
-  artist_id: string;
-  name?: string;
-  role?: string;
-  artist?: { name?: string };
-}
+import type { TrackArtist } from "../types";
 
 interface ArtistLinkProps {
   artists?: TrackArtist[];

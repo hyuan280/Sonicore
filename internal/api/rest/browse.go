@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -115,6 +116,39 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, t)
 	}
 
+	switch r.URL.Query().Get("sort") {
+	case "heat":
+		sort.SliceStable(filtered, func(i, j int) bool {
+			if filtered[i].Heat != filtered[j].Heat {
+				return filtered[i].Heat > filtered[j].Heat
+			}
+			return filtered[i].Title < filtered[j].Title
+		})
+	case "plays":
+		sort.SliceStable(filtered, func(i, j int) bool {
+			if filtered[i].PlayCount != filtered[j].PlayCount {
+				return filtered[i].PlayCount > filtered[j].PlayCount
+			}
+			return filtered[i].Title < filtered[j].Title
+		})
+	case "recent":
+		sort.SliceStable(filtered, func(i, j int) bool {
+			ti, tj := filtered[i].LastPlayedAt, filtered[j].LastPlayedAt
+			switch {
+			case ti == nil && tj == nil:
+				return filtered[i].Title < filtered[j].Title
+			case ti == nil:
+				return false
+			case tj == nil:
+				return true
+			case !ti.Equal(*tj):
+				return ti.After(*tj)
+			default:
+				return filtered[i].Title < filtered[j].Title
+			}
+		})
+	}
+
 	total := len(filtered)
 	start := (page - 1) * perPage
 	if start > total {
@@ -159,6 +193,9 @@ func (h *DataHandler) Tracks(w http.ResponseWriter, r *http.Request) {
 			"version":         t.Version,
 			"version_label":   t.VersionLabel,
 			"metadata_source": t.MetadataSource,
+			"heat":            t.Heat,
+			"play_count":      t.PlayCount,
+			"last_played_at":  t.LastPlayedAt,
 		}
 		entry["albums"] = h.buildTrackAlbums(r.Context(), t.ID)
 		entry["artists"] = h.buildTrackArtists(r.Context(), t.ID)
@@ -268,6 +305,9 @@ func (h *DataHandler) ArtistDetail(w http.ResponseWriter, r *http.Request) {
 			"version_label":   t.VersionLabel,
 			"metadata_source": t.MetadataSource,
 			"external_id":     t.ExternalID,
+			"heat":            t.Heat,
+			"play_count":      t.PlayCount,
+			"last_played_at":  t.LastPlayedAt,
 			"artists":         h.buildTrackArtists(r.Context(), t.ID),
 			"albums":          h.buildTrackAlbums(r.Context(), t.ID),
 		}
@@ -404,6 +444,9 @@ func (h *DataHandler) AlbumDetail(w http.ResponseWriter, r *http.Request) {
 			"version_label":   t.VersionLabel,
 			"metadata_source": t.MetadataSource,
 			"external_id":     t.ExternalID,
+			"heat":            t.Heat,
+			"play_count":      t.PlayCount,
+			"last_played_at":  t.LastPlayedAt,
 			"artists":         h.buildTrackArtists(r.Context(), t.ID),
 			"albums":          h.buildTrackAlbums(r.Context(), t.ID),
 		}

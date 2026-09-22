@@ -443,9 +443,9 @@ type Track struct {
   Hash           string    // SHA256 of audio data
   LyricsMask     int       // 歌词来源位掩码（内嵌/侧边/网络/用户）
   LyricsOffset   float64
-  Heat           int       // 热度（待实现）
-  PlayCount      int
-  LastPlayedAt   *time.Time
+  Heat           int       // 热度聚合值（由 track_events 事件累加，可重算）
+  PlayCount      int       // 有效播放次数
+  LastPlayedAt   *time.Time // 最近播放时间
   Metadata       *TrackMetadata  // JSONB 扩展元数据
   Version        int
   VersionLabel   string          // 多版本描述

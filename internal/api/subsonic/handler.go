@@ -21,6 +21,7 @@ import (
 	"github.com/sonicore/server/internal/core/domain"
 	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/auth"
+	"github.com/sonicore/server/internal/infrastructure/cache"
 	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
@@ -39,12 +40,14 @@ type Handler struct {
 	artistRepo    *repository.ArtistRepo
 	libRepo       *repository.LibraryRepo
 	playlistRepo  *repository.PlaylistRepo
+	heatRepo      *repository.HeatRepo
+	playMarkers   *cache.PlayMarkerStore
 	scanner       *service.ScannerService
 	engineManager *player.EngineManager
 	images        *repository.ImageRepo
 }
 
-func NewHandler(db *sql.DB, jwt *auth.JWTService, scanner *service.ScannerService, engineManager *player.EngineManager) *Handler {
+func NewHandler(db *sql.DB, jwt *auth.JWTService, scanner *service.ScannerService, engineManager *player.EngineManager, playMarkers *cache.PlayMarkerStore) *Handler {
 	return &Handler{
 		db:            db,
 		jwt:           jwt,
@@ -55,6 +58,8 @@ func NewHandler(db *sql.DB, jwt *auth.JWTService, scanner *service.ScannerServic
 		artistRepo:    repository.NewArtistRepo(db),
 		libRepo:       repository.NewLibraryRepo(db),
 		playlistRepo:  repository.NewPlaylistRepo(db),
+		heatRepo:      repository.NewHeatRepo(db),
+		playMarkers:   playMarkers,
 		scanner:       scanner,
 		engineManager: engineManager,
 	}
@@ -175,6 +180,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "getMusicDirectory":
 		body = h.getMusicDirectory(ctx, user, q)
 	case "scrobble":
+		h.handleScrobble(ctx, user, q)
+		h.respond(w, r, "ok", nil)
+		return
 	case "jukeboxControl":
 		h.jukeboxControl(ctx, w, r, user, q)
 		return
@@ -718,7 +726,13 @@ func (h *Handler) createPlaylist(ctx context.Context, w http.ResponseWriter, r *
 
 	var trackIDs []string
 	if ids, ok := q["songId"]; ok {
-		trackIDs = ids
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				trackIDs = append(trackIDs, id)
+			}
+		}
 	}
 
 	now := time.Now()
@@ -737,7 +751,38 @@ func (h *Handler) createPlaylist(ctx context.Context, w http.ResponseWriter, r *
 		})
 		return
 	}
+	h.awardPlaylistTracks(ctx, user.ID, pl.ID, pl.TrackIDs)
 	h.respond(w, r, "ok", nil)
+}
+
+// awardPlaylistTracks grants playlist_add heat for tracks added through a
+// Subsonic client, matching the REST playlist handlers.
+func (h *Handler) awardPlaylistTracks(ctx context.Context, userID, playlistID string, trackIDs []string) {
+	for _, tid := range trackIDs {
+		if tid == "" {
+			continue
+		}
+		if _, err := h.heatRepo.Award(ctx, tid, userID,
+			domain.HeatEventPlaylistAdd, domain.HeatWeightPlaylistAdd,
+			domain.PlaylistDedupeKey(playlistID, tid)); err != nil {
+			logger.Error("[subsonic] playlist heat award error: %v", err)
+		}
+	}
+}
+
+// reversePlaylistTracks withdraws playlist_add heat for tracks removed through
+// a Subsonic client.
+func (h *Handler) reversePlaylistTracks(ctx context.Context, playlistID string, trackIDs []string) {
+	if len(trackIDs) == 0 {
+		return
+	}
+	keys := make([]string, len(trackIDs))
+	for i, tid := range trackIDs {
+		keys[i] = domain.PlaylistDedupeKey(playlistID, tid)
+	}
+	if err := h.heatRepo.ReverseMany(ctx, keys); err != nil {
+		logger.Error("[subsonic] playlist heat reverse error: %v", err)
+	}
 }
 
 func (h *Handler) deletePlaylist(ctx context.Context, w http.ResponseWriter, r *http.Request, user *domain.User, q url.Values) {
@@ -755,6 +800,7 @@ func (h *Handler) deletePlaylist(ctx context.Context, w http.ResponseWriter, r *
 		})
 		return
 	}
+	h.reversePlaylistTracks(ctx, id, pl.TrackIDs)
 	h.respond(w, r, "ok", nil)
 }
 
@@ -766,6 +812,11 @@ func (h *Handler) updatePlaylist(ctx context.Context, w http.ResponseWriter, r *
 			"error": map[string]interface{}{"code": 70, "message": "playlist not found"},
 		})
 		return
+	}
+
+	before := make(map[string]bool, len(pl.TrackIDs))
+	for _, tid := range pl.TrackIDs {
+		before[tid] = true
 	}
 
 	if name := q.Get("name"); name != "" {
@@ -810,6 +861,27 @@ func (h *Handler) updatePlaylist(ctx context.Context, w http.ResponseWriter, r *
 		})
 		return
 	}
+
+	// Mirror the REST handlers: award heat for tracks that were actually added
+	// and withdraw it for tracks that were actually removed.
+	after := make(map[string]bool, len(pl.TrackIDs))
+	for _, tid := range pl.TrackIDs {
+		after[tid] = true
+	}
+	var added, removed []string
+	for tid := range after {
+		if !before[tid] {
+			added = append(added, tid)
+		}
+	}
+	for tid := range before {
+		if !after[tid] {
+			removed = append(removed, tid)
+		}
+	}
+	h.awardPlaylistTracks(ctx, user.ID, pl.ID, added)
+	h.reversePlaylistTracks(ctx, pl.ID, removed)
+
 	h.respond(w, r, "ok", nil)
 }
 
@@ -1306,16 +1378,29 @@ func (h *Handler) handleStar(ctx context.Context, w http.ResponseWriter, r *http
 					itemID).Scan(&libID)
 			}
 			if add {
-				if _, err := h.db.ExecContext(ctx,
+				res, err := h.db.ExecContext(ctx,
 					"INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT DO NOTHING",
-					user.ID, itemType, itemID, libID); err != nil {
+					user.ID, itemType, itemID, libID)
+				if err != nil {
 					logger.Error("[subsonic] star insert error: %v", err)
+				} else if itemType == "track" {
+					if n, _ := res.RowsAffected(); n > 0 {
+						if _, err := h.heatRepo.Award(ctx, itemID, user.ID,
+							domain.HeatEventFavorite, domain.HeatWeightFavorite,
+							domain.FavoriteDedupeKey(user.ID, itemID)); err != nil {
+							logger.Error("[subsonic] star heat error: %v", err)
+						}
+					}
 				}
 			} else {
 				if _, err := h.db.ExecContext(ctx,
 					"DELETE FROM favorites WHERE user_id = $1 AND item_type = $2 AND item_id = $3",
 					user.ID, itemType, itemID); err != nil {
 					logger.Error("[subsonic] unstar delete error: %v", err)
+				} else if itemType == "track" {
+					if _, err := h.heatRepo.Reverse(ctx, domain.FavoriteDedupeKey(user.ID, itemID)); err != nil {
+						logger.Error("[subsonic] unstar heat error: %v", err)
+					}
 				}
 			}
 		}
@@ -1330,6 +1415,78 @@ func (h *Handler) handleStar(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	h.respond(w, r, "ok", nil)
+}
+
+// handleScrobble records playback reported by Subsonic clients. Clients send
+// submission=false for "now playing" notifications, which must not count. The
+// client-supplied time is not trusted; the server rate-limits each track itself.
+func (h *Handler) handleScrobble(ctx context.Context, user *domain.User, q url.Values) {
+	if q.Get("submission") == "false" {
+		return
+	}
+	for _, id := range q["id"] {
+		if id == "" {
+			continue
+		}
+		h.countScrobble(ctx, id, user.ID)
+	}
+}
+
+func (h *Handler) countScrobble(ctx context.Context, trackID, userID string) {
+	track, err := h.trackRepo.FindByID(ctx, trackID)
+	if err != nil {
+		// Only a genuinely unknown track is silent; a real database/IO error
+		// must be observable. Either way, do not consume the rate-limit window
+		// or attempt an insert that would fail its foreign key.
+		if !errors.Is(err, sql.ErrNoRows) {
+			logger.Error("[subsonic] scrobble track lookup failed: %v", err)
+		}
+		return
+	}
+	if !h.userCanAccessLibrary(ctx, userID, track.LibraryID) {
+		return
+	}
+
+	// Mirror the REST AddHistory behaviour so Subsonic plays also show up in the
+	// history list: keep a single row per user/track.
+	h.db.ExecContext(ctx, `DELETE FROM play_history WHERE user_id=$1 AND track_id=$2`, userID, trackID)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO play_history (id, user_id, track_id, library_id, played_at)
+		 VALUES ($1, $2, $3, $4, NOW())`,
+		domain.NewID(), userID, trackID, track.LibraryID); err != nil {
+		logger.Error("[subsonic] scrobble history insert failed: %v", err)
+	}
+
+	token := domain.NewID()
+	if h.playMarkers != nil {
+		ok, err := h.playMarkers.Allow(ctx, "play", userID, trackID, token, domain.HeatRateLimitWindow(track.Duration))
+		if err != nil {
+			logger.Error("[subsonic] scrobble rate limit error: %v", err)
+			return
+		}
+		if !ok {
+			return
+		}
+	}
+
+	if _, err := h.heatRepo.RecordScrobble(ctx, trackID, userID, token); err != nil {
+		logger.Error("[subsonic] scrobble heat error: %v", err)
+	}
+}
+
+// userCanAccessLibrary reports whether the user is a member of the library,
+// mirroring the permission checks on the REST playback paths.
+func (h *Handler) userCanAccessLibrary(ctx context.Context, userID, libraryID string) bool {
+	libs, err := h.libRepo.FindByUserID(ctx, userID)
+	if err != nil {
+		return false
+	}
+	for _, l := range libs {
+		if l.ID == libraryID {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, q url.Values) {

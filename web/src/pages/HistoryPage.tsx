@@ -54,6 +54,7 @@ export default function HistoryPage() {
     duration: h.duration || 0,
     suffix: h.suffix || "mp3",
     cover_image_id: h.cover_image_id,
+    heat: h.heat,
     artists: h.artists,
     albums: h.albums,
     versions: h.versions,

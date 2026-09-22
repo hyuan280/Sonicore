@@ -278,8 +278,18 @@ export default function PlayerBar() {
     soundStartedRef.current = false;
     el.volume = ps.volume;
 
+    const reportHistory = () => {
+      api.user.addHistory(trackId, el.currentTime).catch(() => {});
+    };
+
+    // onEnded reports before advanceTrack() swaps ps.track.id and re-runs this
+    // effect; without this flag cleanup would report the same play a second
+    // time (currentTime is still at the track end when cleanup runs).
+    let ended = false;
     const onEnded = () => {
       if (currentTrackRef.current !== trackId) return;
+      ended = true;
+      reportHistory();
       switchingRef.current = false;
       usePlayer.getState().advanceTrack();
     };
@@ -291,13 +301,13 @@ export default function PlayerBar() {
       if (el.currentTime > 0) soundStartedRef.current = true;
 
       s.setPosition(el.currentTime);
-      if (el.currentTime - lastHistoryRef.current >= 15 && s.track) {
+      if (el.currentTime - lastHistoryRef.current >= 15) {
         lastHistoryRef.current = el.currentTime;
-        api.user.addHistory(s.track.id).catch(() => {});
+        reportHistory();
       }
       if (lastHistoryRef.current === 0 && el.currentTime >= 3) {
         lastHistoryRef.current = el.currentTime;
-        api.user.addHistory(s.track.id).catch(() => {});
+        reportHistory();
       }
 
       if (el.ended && s.playing) {
@@ -363,6 +373,13 @@ export default function PlayerBar() {
     el.addEventListener("error", onError);
 
     return () => {
+      // Report only playback that actually progressed past the last report and
+      // was not already reported by onEnded. This effect also re-runs when
+      // quality or playEpoch change, so the position guard avoids re-reporting
+      // the same play on those dependency changes.
+      if (!ended && el.currentTime >= 3 && el.currentTime - lastHistoryRef.current >= 3) {
+        reportHistory();
+      }
       clearTimeout(swTimer);
       el.removeEventListener("ended", onEnded);
       el.removeEventListener("timeupdate", onTimeUpdate);

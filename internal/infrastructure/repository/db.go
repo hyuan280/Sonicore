@@ -267,6 +267,19 @@ func RunMigrations(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_play_history_user ON play_history(user_id, played_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_play_history_library ON play_history(library_id);
 
+	CREATE TABLE IF NOT EXISTS track_events (
+		id         VARCHAR(26) PRIMARY KEY,
+		track_id   VARCHAR(26) NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+		user_id    VARCHAR(26) REFERENCES users(id) ON DELETE SET NULL,
+		event_type VARCHAR(32) NOT NULL,
+		weight     INTEGER NOT NULL DEFAULT 0,
+		dedupe_key VARCHAR(160) NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_track_events_dedupe ON track_events(dedupe_key);
+	CREATE INDEX IF NOT EXISTS idx_track_events_track ON track_events(track_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_track_events_type ON track_events(event_type, created_at DESC);
+
 	CREATE TABLE IF NOT EXISTS user_settings (
 		user_id VARCHAR(26) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		key     VARCHAR(64) NOT NULL,

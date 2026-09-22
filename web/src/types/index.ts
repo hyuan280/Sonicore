@@ -85,10 +85,15 @@ export interface Album {
   country?: string;
 }
 
+// TrackArtist describes an artist entry attached to a track. The list/detail
+// APIs return a nested `artist` object while some endpoints flatten `name` to
+// the top level, so both are optional here; consumers should read
+// `name || artist?.name`.
 export interface TrackArtist {
   artist_id: string;
-  name: string;
-  role: string;
+  name?: string;
+  role?: string;
+  artist?: { name?: string };
 }
 
 export interface Track {
@@ -105,6 +110,7 @@ export interface Track {
   suffix: string;
   size: number;
   cover_image_id?: string;
+  heat?: number;
 }
 
 export interface PlayerStatus {

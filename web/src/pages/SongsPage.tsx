@@ -15,23 +15,32 @@ export default function SongsPage() {
   const { t } = useTranslation();
   const [total, setTotal] = useState(0);
   const [searchQ, setSearchQ] = useState("");
+  const [sort, setSort] = useState("");
   const [multi, setMulti] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Guards against out-of-order responses: sort changes fire immediately while
+  // a pending searchQ debounce may fire a second request, so an older response
+  // must not overwrite a newer one.
+  const loadSeqRef = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
     if (searchQ.trim()) params.set("q", searchQ.trim());
+    if (sort) params.set("sort", sort);
     const r = await fetch(`/api/data/tracks?${params}`, {
       headers: { Authorization: "Bearer " + localStorage.getItem("token") },
     }).then((r) => r.json());
+    if (seq !== loadSeqRef.current) return;
     const items: TrackRow[] = (r.items || []).map((t: any) => ({
       id: t.id,
       title: t.title,
       duration: t.duration,
       suffix: t.suffix,
       cover_image_id: t.cover_image_id,
+      heat: t.heat,
       artists: t.artists,
       albums: t.albums,
       versions: t.versions,
@@ -40,18 +49,28 @@ export default function SongsPage() {
     setTotal(r.total || 0);
     if (items.length > 0) {
       const fav = await api.user.checkFavorites(items.map((t) => t.id));
+      if (seq !== loadSeqRef.current) return;
       setFavoriteIds(new Set(Object.keys(fav.favorites || {})));
     }
-  }, [page, perPage, searchQ]);
+  }, [page, perPage, searchQ, sort]);
+
+  // Keep the newest load() reachable from the debounce timer: its effect only
+  // depends on searchQ, so capturing `load` directly would let a pending timer
+  // fire with a stale sort/page and overwrite the newer result. Synced in an
+  // effect so the ref is not written during render.
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   useEffect(() => {
-    load();
-  }, [page, perPage]);
+    loadRef.current();
+  }, [page, perPage, sort]);
 
   useEffect(() => {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      load();
+      loadRef.current();
     }, 500);
     return () => clearTimeout(timerRef.current);
   }, [searchQ]);
@@ -98,6 +117,19 @@ export default function SongsPage() {
               )}
             </div>
             <div className="flex-1" />
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(1);
+              }}
+              className="shrink-0 mr-2 px-2 py-1.5 text-sm bg-zinc-800 text-zinc-300 border-none outline-none rounded cursor-pointer"
+            >
+              <option value="">{t("songs.sortDefault")}</option>
+              <option value="heat">{t("songs.sortHeat")}</option>
+              <option value="plays">{t("songs.sortPlays")}</option>
+              <option value="recent">{t("songs.sortRecent")}</option>
+            </select>
             <Button
               onClick={() =>
                 player.setQueue(

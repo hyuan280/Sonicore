@@ -25,6 +25,7 @@ interface RawTrack {
   duration: number;
   file_format: string;
   cover_image_id?: string;
+  heat?: number;
   artists: { artist_id: string; name: string; role: string }[];
   albums?: { id: string; title?: string; track?: number; disc_number?: number }[];
   version?: number;
@@ -87,6 +88,7 @@ export default function ArtistDetailPage() {
     duration: t.duration,
     suffix: t.file_format || "mp3",
     cover_image_id: t.cover_image_id,
+    heat: t.heat,
     artists: t.artists,
     albums: t.albums,
     versions: t.versions,

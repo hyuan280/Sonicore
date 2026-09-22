@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { TrackArtist } from "../types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,13 +24,6 @@ export function coverImageUrl(imageID: string, size?: number): string {
   let url = `/api/c/${session}/${imageID}`;
   if (size) url += `?size=${size}`;
   return url;
-}
-
-interface TrackArtist {
-  artist_id: string;
-  name?: string;
-  role: string;
-  artist?: { name?: string };
 }
 
 export function performerNames(artists?: TrackArtist[]): string {

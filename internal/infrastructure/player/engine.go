@@ -84,6 +84,9 @@ type Status struct {
 	QueueIdx     int        `json:"queue_idx"`
 	ShuffleOrder []int      `json:"shuffle_order"`
 	ShuffleIdx   int        `json:"shuffle_idx"`
+	// PlayEpoch increments on every Engine.Play call, so consumers can tell
+	// distinct playback instances apart (including repeat-one and replays).
+	PlayEpoch uint64 `json:"play_epoch"`
 }
 
 type TrackResolver func(id string) (*TrackInfo, error)
@@ -631,6 +634,7 @@ func (e *Engine) Status() Status {
 		QueueIdx:     e.queueIdx,
 		ShuffleOrder: e.shuffleOrder,
 		ShuffleIdx:   e.shuffleIdx,
+		PlayEpoch:    e.playEpoch,
 	}
 }
 

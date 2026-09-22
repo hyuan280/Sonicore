@@ -70,6 +70,13 @@
     "duration": "时长",
     "playAll": "播放全部"
   },
+  "songs": {
+    "sortDefault": "默认排序",
+    "sortHeat": "按热度",
+    "sortPlays": "按播放次数",
+    "sortRecent": "最近播放",
+    "heat": "热度"
+  },
   "trackTable": {
     "select": "选择",
     "selected": "已选 {{count}} 项",

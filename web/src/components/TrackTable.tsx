@@ -19,6 +19,7 @@ import { usePlayer } from "../stores/player";
 import { api } from "../api/client";
 import { AddBtn, FavBtn, AddQueueBtn } from "./AddToPlaylist";
 import ArtistLink from "./ArtistLink";
+import HeatBadge from "./HeatBadge";
 import { formatDuration, coverImageUrl } from "../lib/utils";
 
 export interface TrackRow {
@@ -28,6 +29,7 @@ export interface TrackRow {
   duration: number;
   suffix?: string;
   cover_image_id?: string;
+  heat?: number;
   artists?: { artist_id: string; name: string; role: string }[];
   albums?: { id: string; title?: string }[];
   versions?: {
@@ -628,10 +630,13 @@ export default function TrackTable({
                   </span>
                 </div>
                 <span
-                  className={`flex-1 min-w-[200px] text-sm truncate ml-3 cursor-pointer ${isCurrent ? "text-green-500" : ""}`}
+                  className="flex-1 min-w-[200px] flex items-center gap-2 ml-3 text-sm cursor-pointer overflow-hidden"
                   onClick={() => onPlay(i)}
                 >
-                  {t.title}
+                  <span className={`truncate min-w-0 ${isCurrent ? "text-green-500" : ""}`}>
+                    {t.title}
+                  </span>
+                  <HeatBadge heat={t.heat} />
                 </span>
               </div>
               <div className="flex items-center gap-1 flex-1 min-w-0">

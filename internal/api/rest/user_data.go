@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -23,15 +24,29 @@ type UserDataHandler struct {
 	artistRepo  *repository.ArtistRepo
 	albumRepo   *repository.AlbumRepo
 	libraryRepo *repository.LibraryRepo
+	heatRepo    *repository.HeatRepo
+	perm        *middleware.PermissionChecker
+	playMarkers playMarkerStore
 }
 
-func NewUserDataHandler(db *sql.DB) *UserDataHandler {
+// playMarkerStore is the Valkey-backed heat rate limiter. It is optional: when
+// nil (e.g. in unit tests) heat counting is skipped but playback history is
+// still recorded.
+type playMarkerStore interface {
+	ListenProgress(ctx context.Context, userID, trackID, token string, position float64, window time.Duration) (string, float64, error)
+	Allow(ctx context.Context, kind, userID, trackID, session string, window time.Duration) (bool, error)
+}
+
+func NewUserDataHandler(db *sql.DB, playMarkers playMarkerStore) *UserDataHandler {
 	return &UserDataHandler{
 		db:          db,
 		trackRepo:   repository.NewTrackRepo(db),
 		artistRepo:  repository.NewArtistRepo(db),
 		albumRepo:   repository.NewAlbumRepo(db),
 		libraryRepo: repository.NewLibraryRepo(db),
+		heatRepo:    repository.NewHeatRepo(db),
+		perm:        middleware.NewPermissionChecker(db),
+		playMarkers: playMarkers,
 	}
 }
 
@@ -84,7 +99,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 				        f.item_type, f.item_id, f.created_at,
 				        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 				        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-				        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, '')
+				        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, ''), COALESCE(t.heat, 0)
 				 FROM favorites f
 				 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 				 LEFT JOIN LATERAL (
@@ -104,7 +119,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			        f.item_type, f.item_id, f.created_at,
 			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-			        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, '')
+			        t.cover_image_id, COALESCE(t.version, 0), COALESCE(t.version_label, ''), COALESCE(t.external_id, ''), COALESCE(t.metadata_source, ''), COALESCE(t.heat, 0)
 			 FROM favorites f
 			 LEFT JOIN tracks t ON t.id = f.item_id AND f.item_type = 'track'
 			 LEFT JOIN LATERAL (
@@ -134,7 +149,8 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 			var coverID sql.NullString
 			var version int
 			var versionLabel, extID, metaSource string
-			if err := rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &extID, &metaSource); err != nil {
+			var heat int
+			if err := rows.Scan(&t, &id, &ca, &title, &album, &albumID, &duration, &fileFormat, &coverID, &version, &versionLabel, &extID, &metaSource, &heat); err != nil {
 				logger.Error("[favorites] scan row error: %v", err)
 				continue
 			}
@@ -142,7 +158,7 @@ func (h *UserDataHandler) ListFavorites(w http.ResponseWriter, r *http.Request) 
 				"item_type": t, "item_id": id, "created_at": ca,
 				"title": title, "duration": duration, "suffix": fileFormat,
 				"version": version, "version_label": versionLabel, "external_id": extID,
-				"metadata_source": metaSource,
+				"metadata_source": metaSource, "heat": heat,
 			}
 			if albumID != "" {
 				item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
@@ -237,12 +253,22 @@ func (h *UserDataHandler) AddFavorites(w http.ResponseWriter, r *http.Request) {
 				h.db.QueryRowContext(r.Context(),
 					"SELECT library_id FROM tracks WHERE id = $1", tid).Scan(&libID)
 			}
-			if _, err := h.db.ExecContext(r.Context(),
+			res, err := h.db.ExecContext(r.Context(),
 				`INSERT INTO favorites (user_id, item_type, item_id, library_id, created_at)
 				 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-				userID, req.ItemType, tid, libID, now); err != nil {
+				userID, req.ItemType, tid, libID, now)
+			if err != nil {
 				writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
 				return
+			}
+			if req.ItemType == "track" {
+				if n, _ := res.RowsAffected(); n > 0 {
+					if _, err := h.heatRepo.Award(r.Context(), tid, userID,
+						domain.HeatEventFavorite, domain.HeatWeightFavorite,
+						domain.FavoriteDedupeKey(userID, tid)); err != nil {
+						logger.Error("[heat] favorite award failed: %v", err)
+					}
+				}
 			}
 		}
 	}
@@ -266,9 +292,20 @@ func (h *UserDataHandler) RemoveFavorites(w http.ResponseWriter, r *http.Request
 	for _, id := range req.ItemIDs {
 		ids := h.expandTrackVersions(r.Context(), userID, req.ItemType, []string{id})
 		for _, tid := range ids {
-			h.db.ExecContext(r.Context(),
+			res, err := h.db.ExecContext(r.Context(),
 				"DELETE FROM favorites WHERE user_id = $1 AND item_type = $2 AND item_id = $3",
 				userID, req.ItemType, tid)
+			if err != nil {
+				logger.Error("[favorites] delete failed: %v", err)
+				continue
+			}
+			if req.ItemType == "track" {
+				if n, _ := res.RowsAffected(); n > 0 {
+					if _, err := h.heatRepo.Reverse(r.Context(), domain.FavoriteDedupeKey(userID, tid)); err != nil {
+						logger.Error("[heat] favorite reverse failed: %v", err)
+					}
+				}
+			}
 		}
 	}
 
@@ -348,7 +385,7 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 			`SELECT ph.id, ph.track_id, ph.played_at,
 			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-			        t.cover_image_id
+			        t.cover_image_id, COALESCE(t.heat, 0)
 			 FROM play_history ph
 			 INNER JOIN tracks t ON t.id = ph.track_id
 			 LEFT JOIN LATERAL (
@@ -367,7 +404,7 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 			`SELECT ph.id, ph.track_id, ph.played_at,
 			        COALESCE(t.title, ''), COALESCE(sub.album_title, ''),
 			        COALESCE(sub.album_id, ''), COALESCE(t.duration, 0), COALESCE(t.file_format, ''),
-			        t.cover_image_id
+			        t.cover_image_id, COALESCE(t.heat, 0)
 			 FROM play_history ph
 			 INNER JOIN tracks t ON t.id = ph.track_id
 			 LEFT JOIN LATERAL (
@@ -396,11 +433,13 @@ func (h *UserDataHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 		var title, album, albumID, fileFormat string
 		var duration float64
 		var coverID sql.NullString
+		var heat int
 		rows.Scan(&id, &tid, &pa, &title, &album,
-			&albumID, &duration, &fileFormat, &coverID)
+			&albumID, &duration, &fileFormat, &coverID, &heat)
 		item := map[string]interface{}{
 			"id": id, "track_id": tid, "played_at": pa,
 			"title": title, "duration": duration, "suffix": fileFormat,
+			"heat": heat,
 		}
 		if albumID != "" {
 			item["albums"] = []map[string]interface{}{{"id": albumID, "title": album}}
@@ -432,24 +471,33 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		TrackID string `json:"track_id"`
+		TrackID  string  `json:"track_id"`
+		Position float64 `json:"position"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
 
-	now := time.Now()
-	h.db.ExecContext(r.Context(),
-		`DELETE FROM play_history WHERE user_id=$1 AND track_id=$2`, userID, req.TrackID)
-
+	// Resolve and authorize the track before touching play_history, so a
+	// rejected request has no side effect (the DELETE below otherwise erased
+	// the user's existing history entry).
 	var libID string
+	var serverDuration float64
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT library_id FROM tracks WHERE id = $1", req.TrackID).Scan(&libID)
+		"SELECT library_id, duration FROM tracks WHERE id = $1", req.TrackID).Scan(&libID, &serverDuration)
 	if err != nil {
 		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserTrackNotFound)
 		return
 	}
+	if !h.perm.IsMember(r.Context(), libID, userID) {
+		writeCodedError(w, http.StatusForbidden, domain.ErrLibAccessDenied)
+		return
+	}
+
+	now := time.Now()
+	h.db.ExecContext(r.Context(),
+		`DELETE FROM play_history WHERE user_id=$1 AND track_id=$2`, userID, req.TrackID)
 
 	if _, err := h.db.ExecContext(r.Context(),
 		`INSERT INTO play_history (id, user_id, track_id, library_id, played_at)
@@ -459,7 +507,74 @@ func (h *UserDataHandler) AddHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.recordPlayHeat(r.Context(), req.TrackID, userID, req.Position, serverDuration)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
+}
+
+// recordPlayHeat credits verified playback progress and awards heat for one
+// play. Qualification and completion are based on the trusted listened total
+// maintained by the Valkey marker (which can never grow faster than wall-clock
+// time), so resuming or seeking mid-track is handled correctly and a forged
+// position cannot earn heat early. No client-supplied identifier participates
+// in the gate or the dedupe key.
+func (h *UserDataHandler) recordPlayHeat(ctx context.Context, trackID, userID string, position, serverDuration float64) {
+	if h.playMarkers == nil {
+		return
+	}
+	position = clampPlaybackPosition(position, serverDuration)
+	window := domain.HeatRateLimitWindow(serverDuration)
+
+	// Candidate token is only used if this report starts a new listen window;
+	// the marker returns the token for the current window otherwise.
+	session, listened, err := h.playMarkers.ListenProgress(ctx, userID, trackID, domain.NewID(), position, window)
+	if err != nil {
+		logger.Error("[heat] listen progress failed: %v", err)
+		return
+	}
+
+	qualifies := domain.HeatQualifiesForListened(listened, serverDuration)
+	complete := domain.HeatListenedIsComplete(listened, serverDuration)
+	if !qualifies && !complete {
+		return
+	}
+
+	countPlay := false
+	if qualifies {
+		ok, err := h.playMarkers.Allow(ctx, "play", userID, trackID, session, window)
+		if err != nil {
+			logger.Error("[heat] play rate limit failed: %v", err)
+			return
+		}
+		countPlay = ok
+	}
+
+	countComplete := false
+	if complete {
+		ok, err := h.playMarkers.Allow(ctx, "playc", userID, trackID, session, window)
+		if err != nil {
+			logger.Error("[heat] complete rate limit failed: %v", err)
+			return
+		}
+		countComplete = ok
+	}
+
+	if !countPlay && !countComplete {
+		return
+	}
+	if _, err := h.heatRepo.CountPlay(ctx, trackID, userID, session, countPlay, countComplete); err != nil {
+		logger.Error("[heat] count play failed: %v", err)
+	}
+}
+
+func clampPlaybackPosition(position, duration float64) float64 {
+	if position < 0 {
+		return 0
+	}
+	if duration > 0 && position > duration {
+		return duration
+	}
+	return position
 }
 
 func (h *UserDataHandler) RemoveHistoryItems(w http.ResponseWriter, r *http.Request) {
@@ -607,6 +722,9 @@ func (h *UserDataHandler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 			"file_format":     track.FileFormat,
 			"external_id":     track.ExternalID,
 			"metadata_source": track.MetadataSource,
+			"heat":            track.Heat,
+			"play_count":      track.PlayCount,
+			"last_played_at":  track.LastPlayedAt,
 		}
 		if track.ExternalID != "" {
 			versionKeys[repository.VersionGroupKey{MetadataSource: track.MetadataSource, ExternalID: track.ExternalID}] = struct{}{}
@@ -674,8 +792,50 @@ func (h *UserDataHandler) DeletePlaylist(w http.ResponseWriter, r *http.Request)
 	userID := middleware.GetUserID(r.Context())
 	plID := mux.Vars(r)["id"]
 
-	h.db.ExecContext(r.Context(),
+	var trackIDsJSON []byte
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDsJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+			return
+		}
+		logger.Error("[playlist] load track_ids failed: %v", err)
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
+		return
+	}
+	var ids []string
+	if len(trackIDsJSON) > 0 {
+		if err := json.Unmarshal(trackIDsJSON, &ids); err != nil {
+			// Fail before deleting: the track ids are needed to reverse heat,
+			// and they are unrecoverable once the playlist row is gone.
+			logger.Error("[playlist] decode track_ids failed: %v", err)
+			writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
+			return
+		}
+	}
+
+	res, err := h.db.ExecContext(r.Context(),
 		"DELETE FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID)
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
+
+	// Reverse only after the playlist is confirmed deleted, so a failed delete
+	// cannot strip heat for tracks that are still in the playlist.
+	if len(ids) > 0 {
+		keys := make([]string, len(ids))
+		for i, id := range ids {
+			keys[i] = domain.PlaylistDedupeKey(plID, id)
+		}
+		if err := h.heatRepo.ReverseMany(r.Context(), keys); err != nil {
+			logger.Error("[heat] playlist delete reverse failed: %v", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -694,8 +854,11 @@ func (h *UserDataHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 	}
 
 	var trackIDs []byte
-	h.db.QueryRowContext(r.Context(),
-		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs)
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs); err != nil {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
 
 	var ids []string
 	json.Unmarshal(trackIDs, &ids)
@@ -708,9 +871,23 @@ func (h *UserDataHandler) AddTrackToPlaylist(w http.ResponseWriter, r *http.Requ
 	ids = append(ids, req.TrackID)
 	updated, _ := json.Marshal(ids)
 
-	h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE playlists SET track_ids = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3",
 		updated, plID, userID)
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
+
+	if _, err := h.heatRepo.Award(r.Context(), req.TrackID, userID,
+		domain.HeatEventPlaylistAdd, domain.HeatWeightPlaylistAdd,
+		domain.PlaylistDedupeKey(plID, req.TrackID)); err != nil {
+		logger.Error("[heat] playlist award failed: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "added"})
 }
@@ -729,8 +906,11 @@ func (h *UserDataHandler) AddTracksToPlaylist(w http.ResponseWriter, r *http.Req
 	}
 
 	var trackIDs []byte
-	h.db.QueryRowContext(r.Context(),
-		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs)
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs); err != nil {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
 
 	var ids []string
 	json.Unmarshal(trackIDs, &ids)
@@ -738,17 +918,35 @@ func (h *UserDataHandler) AddTracksToPlaylist(w http.ResponseWriter, r *http.Req
 	for _, id := range ids {
 		existing[id] = true
 	}
+	var added []string
 	for _, id := range req.TrackIDs {
 		if !existing[id] {
 			ids = append(ids, id)
 			existing[id] = true
+			added = append(added, id)
 		}
 	}
 	updated, _ := json.Marshal(ids)
 
-	h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE playlists SET track_ids = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3",
 		updated, plID, userID)
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
+
+	for _, id := range added {
+		if _, err := h.heatRepo.Award(r.Context(), id, userID,
+			domain.HeatEventPlaylistAdd, domain.HeatWeightPlaylistAdd,
+			domain.PlaylistDedupeKey(plID, id)); err != nil {
+			logger.Error("[heat] playlist award failed: %v", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "added"})
 }
@@ -767,8 +965,11 @@ func (h *UserDataHandler) RemoveTracksFromPlaylist(w http.ResponseWriter, r *htt
 	}
 
 	var trackIDs []byte
-	h.db.QueryRowContext(r.Context(),
-		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs)
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2", plID, userID).Scan(&trackIDs); err != nil {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
 
 	var ids []string
 	json.Unmarshal(trackIDs, &ids)
@@ -777,16 +978,37 @@ func (h *UserDataHandler) RemoveTracksFromPlaylist(w http.ResponseWriter, r *htt
 		removeSet[id] = true
 	}
 	filtered := make([]string, 0, len(ids))
+	var removed []string
 	for _, id := range ids {
 		if !removeSet[id] {
 			filtered = append(filtered, id)
+		} else {
+			removed = append(removed, id)
 		}
 	}
 	updated, _ := json.Marshal(filtered)
 
-	h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE playlists SET track_ids = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3",
 		updated, plID, userID)
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrUserQueryFailed)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeCodedError(w, http.StatusNotFound, domain.ErrUserPlaylistNotFound)
+		return
+	}
+
+	if len(removed) > 0 {
+		keys := make([]string, len(removed))
+		for i, id := range removed {
+			keys[i] = domain.PlaylistDedupeKey(plID, id)
+		}
+		if err := h.heatRepo.ReverseMany(r.Context(), keys); err != nil {
+			logger.Error("[heat] playlist reverse failed: %v", err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }

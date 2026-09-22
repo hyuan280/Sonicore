@@ -20,7 +20,7 @@ func newUserDataHandler(t *testing.T) (*UserDataHandler, sqlmock.Sqlmock) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
-	return NewUserDataHandler(db), mock
+	return NewUserDataHandler(db, nil), mock
 }
 
 func udRequest(method, path, body, userID string) *http.Request {
@@ -81,8 +81,8 @@ func TestListFavoritesTrackType(t *testing.T) {
 	// main query
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT DISTINCT ON`)).
 		WithArgs("u-001", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"item_type", "item_id", "created_at", "title", "album_title", "album_id", "duration", "file_format", "cover_image_id", "version", "version_label", "external_id", "metadata_source"}).
-			AddRow("track", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil, 1, "", "", "musicbrainz"))
+		WillReturnRows(sqlmock.NewRows([]string{"item_type", "item_id", "created_at", "title", "album_title", "album_id", "duration", "file_format", "cover_image_id", "version", "version_label", "external_id", "metadata_source", "heat"}).
+			AddRow("track", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil, 1, "", "", "musicbrainz", 42))
 	// loadTrackArtistsBulk
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
@@ -220,8 +220,8 @@ func TestListHistory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ph.id, ph.track_id, ph.played_at`)).
 		WithArgs("u-001", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "track_id", "played_at", "title", "album_title", "album_id", "duration", "file_format", "cover_image_id"}).
-			AddRow("h-1", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "track_id", "played_at", "title", "album_title", "album_id", "duration", "file_format", "cover_image_id", "heat"}).
+			AddRow("h-1", "t-001", time.Now(), "Song", "Album", "alb-1", 200.0, "mp3", nil, 7))
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM track_artists ta`)).
 		WithArgs("t-001").
 		WillReturnRows(sqlmock.NewRows([]string{"track_id", "artist_id", "role", "sort_order", "name", "external_id", "metadata_source"}))
@@ -238,12 +238,18 @@ func TestListHistory(t *testing.T) {
 func TestAddHistory(t *testing.T) {
 	h, mock := newUserDataHandler(t)
 
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT library_id, duration FROM tracks WHERE id = $1`)).
+		WithArgs("t-001").
+		WillReturnRows(sqlmock.NewRows([]string{"library_id", "duration"}).AddRow("lib-001", 200.0))
+	// permission check: user owns the library
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM libraries WHERE id = $1`)).
+		WithArgs("lib-001").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
+			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
+			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM play_history WHERE user_id=$1 AND track_id=$2`)).
 		WithArgs("u-001", "t-001").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT library_id FROM tracks WHERE id = $1`)).
-		WithArgs("t-001").
-		WillReturnRows(sqlmock.NewRows([]string{"library_id"}).AddRow("lib-001"))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO play_history`)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -259,9 +265,9 @@ func TestAddHistory(t *testing.T) {
 func TestAddHistoryTrackNotFound(t *testing.T) {
 	h, mock := newUserDataHandler(t)
 
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM play_history WHERE user_id=$1 AND track_id=$2`)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT library_id FROM tracks WHERE id = $1`)).
+	// The track is resolved before any history write, so a missing track has no
+	// side effect.
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT library_id, duration FROM tracks WHERE id = $1`)).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
 
@@ -271,6 +277,7 @@ func TestAddHistoryTrackNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Track not found")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestRemoveHistoryItems(t *testing.T) {
@@ -380,8 +387,14 @@ func TestGetPlaylistZeroPerPage(t *testing.T) {
 func TestDeletePlaylist(t *testing.T) {
 	h, mock := newUserDataHandler(t)
 
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT track_ids FROM playlists WHERE id = $1 AND owner_id = $2`)).
+		WithArgs("pl-1", "u-001").
+		WillReturnRows(sqlmock.NewRows([]string{"track_ids"}).AddRow([]byte(`["t-001"]`)))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM playlists WHERE id = $1 AND owner_id = $2`)).
 		WithArgs("pl-1", "u-001").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// Heat is reversed only after the delete succeeds.
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tracks t SET heat = t.heat - agg.total`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	req := mux.SetURLVars(httptest.NewRequest(http.MethodDelete, "/api/user/playlists/pl-1", nil),

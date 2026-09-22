@@ -91,6 +91,7 @@ func New(cfg *config.Config) (*Server, error) {
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiration)
 	tokenStore := cache.NewTokenStore(vk)
 	sessionStore := cache.NewSessionStore(vk)
+	playMarkers := cache.NewPlayMarkerStore(vk)
 
 	refreshExp, err := time.ParseDuration(cfg.JWT.RefreshExpiration)
 	if err != nil {
@@ -324,7 +325,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	router := mux.NewRouter()
 	middleware.SetTrustedProxies(cfg.Server.TrustedProxies)
-	registerRoutes(router, db, jwtService, tokenStore, sessionStore, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter, pluginManager, marketSvc)
+	registerRoutes(router, db, jwtService, tokenStore, sessionStore, playMarkers, scannerService, notifService, downloadManager, engineManager, wsHub, refreshExp, cfg, platformProviders, neteaseProvider, covers, enc, mbClient, sched, authLimiter, pluginManager, marketSvc)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	httpSrv := &http.Server{
@@ -346,7 +347,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
-func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter, pluginManager *pluginmgr.Manager, marketSvc *pluginmgr.Market) {
+func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, tokenStore *cache.TokenStore, sessionStore *cache.SessionStore, playMarkers *cache.PlayMarkerStore, scannerService *service.ScannerService, notifService *service.NotificationService, downloadManager *download.Manager, engineManager *player.EngineManager, wsHub *ws.Hub, refreshExp time.Duration, cfg *config.Config, platformProviders map[string]port.PlatformProvider, neteaseProvider *netease.Provider, covers *metadata.CoverManager, enc *secrets.Encryptor, mbClient *metadata.MBClient, taskSched *task.Scheduler, authLimiter *middleware.RateLimiter, pluginManager *pluginmgr.Manager, marketSvc *pluginmgr.Market) {
 	r.Use(corsMiddleware)
 	r.Use(loggingMiddleware)
 
@@ -354,7 +355,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 		w.Write([]byte("pong"))
 	}).Methods("GET")
 
-	subsonicHandler := subsonic.NewHandler(db, jwtService, scannerService, engineManager)
+	subsonicHandler := subsonic.NewHandler(db, jwtService, scannerService, engineManager, playMarkers)
 	r.PathPrefix("/rest").Handler(subsonicHandler)
 
 	api := r.PathPrefix("/api").Subrouter()
@@ -443,7 +444,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	coverHandler := rest.NewCoverHandler(db, cfg.Data.ImagesDir, sessionStore, covers)
 	api.HandleFunc("/c/{session}/{imageId}", coverHandler.Serve).Methods("GET")
 
-	userData := rest.NewUserDataHandler(db)
+	userData := rest.NewUserDataHandler(db, playMarkers)
 	protected.HandleFunc("/user/favorites/list", userData.ListFavorites).Methods("GET")
 	protected.HandleFunc("/user/favorites/add", userData.AddFavorites).Methods("POST")
 	protected.HandleFunc("/user/favorites/check", userData.CheckFavorites).Methods("POST")

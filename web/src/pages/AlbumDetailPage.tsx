@@ -33,6 +33,7 @@ export default function AlbumDetailPage() {
         duration: t.duration,
         suffix: t.file_format || "mp3",
         cover_image_id: t.cover_image_id,
+        heat: t.heat,
         artists: t.artists,
         albums: t.albums,
         versions: t.versions,

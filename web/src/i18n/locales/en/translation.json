@@ -70,6 +70,13 @@
     "duration": "Duration",
     "playAll": "Play All"
   },
+  "songs": {
+    "sortDefault": "Default",
+    "sortHeat": "By heat",
+    "sortPlays": "By plays",
+    "sortRecent": "Recently played",
+    "heat": "Heat"
+  },
   "trackTable": {
     "select": "Select",
     "selected": "{{count}} selected",

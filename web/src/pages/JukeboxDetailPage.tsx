@@ -25,6 +25,22 @@ import {
 import { Link } from "react-router-dom";
 import { formatDuration, performerNames } from "../lib/utils";
 import ArtistLink from "../components/ArtistLink";
+import HeatBadge from "../components/HeatBadge";
+import type { TrackArtist } from "../types";
+
+// tracksByIds serializes domain.Track directly, so artists carry a nested
+// artist.name and have no top-level name (unlike browse.go's buildTrackArtists);
+// types/index.ts TrackArtist covers both shapes.
+type QueueAlbum = { id: string; title?: string; track?: number; disc_number?: number };
+
+type QueueTrackMeta = {
+  title: string;
+  artist: string;
+  album: string;
+  heat?: number;
+  artists?: TrackArtist[];
+  albums?: QueueAlbum[];
+};
 
 export default function JukeboxDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -45,12 +61,7 @@ export default function JukeboxDetailPage() {
   const [volume, setVolume] = useState(0.8);
   const [showSettings, setShowSettings] = useState(false);
   const [pushing, setPushing] = useState(false);
-  const [queueTracks, setQueueTracks] = useState<
-    Record<
-      string,
-      { title: string; artist: string; album: string; artists?: any[]; albums?: any[] }
-    >
-  >({});
+  const [queueTracks, setQueueTracks] = useState<Record<string, QueueTrackMeta>>({});
   const wsRef = useRef<WebSocket | null>(null);
   const queueIdsRef = useRef("");
 
@@ -68,15 +79,13 @@ export default function JukeboxDetailPage() {
     api.data
       .tracksByIds(queue)
       .then((d) => {
-        const map: Record<
-          string,
-          { title: string; artist: string; album: string; artists?: any[]; albums?: any[] }
-        > = {};
+        const map: Record<string, QueueTrackMeta> = {};
         for (const t of d.tracks || []) {
           map[t.id] = {
             title: t.title,
             artist: performerNames(t.artists) || "",
             album: t.albums?.[0]?.album?.title || "",
+            heat: t.heat,
             artists: t.artists,
             albums:
               t.albums?.map((a: any) => ({
@@ -374,8 +383,11 @@ export default function JukeboxDetailPage() {
               >
                 <span className="w-6 text-zinc-600 text-right text-xs">{i + 1}</span>
                 <div className="flex-1 min-w-0">
-                  <div className={`truncate ${isCurrent ? "text-green-400" : "text-white"}`}>
-                    {displayTitle}
+                  <div
+                    className={`flex items-center gap-2 ${isCurrent ? "text-green-400" : "text-white"}`}
+                  >
+                    <span className="truncate min-w-0">{displayTitle}</span>
+                    {qt && <HeatBadge heat={qt.heat} />}
                   </div>
                   {(qt?.artists || displayAlbum) && (
                     <div className="text-xs text-zinc-500 truncate">

@@ -16,8 +16,19 @@ func NewPlaylistRepo(db *sql.DB) *PlaylistRepo {
 	return &PlaylistRepo{db: db}
 }
 
+// marshalTrackIDs serializes the track list, normalizing nil to an empty JSON
+// array. A nil slice marshals to JSON null, which jsonb_array_elements_text
+// rejects as a scalar and would break callers that expand the column.
+func marshalTrackIDs(ids []string) []byte {
+	if ids == nil {
+		ids = []string{}
+	}
+	b, _ := json.Marshal(ids)
+	return b
+}
+
 func (r *PlaylistRepo) Create(ctx context.Context, p *domain.Playlist) error {
-	trackIDs, _ := json.Marshal(p.TrackIDs)
+	trackIDs := marshalTrackIDs(p.TrackIDs)
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO playlists (id, name, owner_id, is_public, track_ids, created_at, updated_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -55,7 +66,7 @@ func (r *PlaylistRepo) FindByUserID(ctx context.Context, userID string) ([]domai
 }
 
 func (r *PlaylistRepo) Update(ctx context.Context, p *domain.Playlist) error {
-	trackIDs, _ := json.Marshal(p.TrackIDs)
+	trackIDs := marshalTrackIDs(p.TrackIDs)
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE playlists SET name=$1, is_public=$2, track_ids=$3, updated_at=NOW()
 		 WHERE id=$4`,

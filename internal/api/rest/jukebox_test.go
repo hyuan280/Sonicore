@@ -1,12 +1,14 @@
 package rest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -224,4 +226,127 @@ func TestJukeboxUpdateSuccess(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"name":"Renamed"`)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+type fakeJukeboxHeat struct {
+	mu    sync.Mutex
+	calls []fakeJukeboxCall
+}
+
+type fakeJukeboxCall struct {
+	trackID  string
+	play     bool
+	complete bool
+}
+
+func (f *fakeJukeboxHeat) CountPlay(_ context.Context, trackID, _, _ string, countPlay, countComplete bool) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fakeJukeboxCall{trackID: trackID, play: countPlay, complete: countComplete})
+	return true, nil
+}
+
+func (f *fakeJukeboxHeat) snapshot() []fakeJukeboxCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeJukeboxCall(nil), f.calls...)
+}
+
+func TestJukeboxRapidSkipDoesNotCount(t *testing.T) {
+	h, _ := newJukeboxHandler(t)
+	fake := &fakeJukeboxHeat{}
+	h.heatRepo = fake
+
+	h.trackJukeboxPlay("jb-1", player.Status{Track: &player.TrackInfo{ID: "t-1", Duration: 200}, State: player.StatePlaying, PlayEpoch: 1})
+	// Same playback instance (e.g. a volume change) must not finalize.
+	h.trackJukeboxPlay("jb-1", player.Status{Track: &player.TrackInfo{ID: "t-1", Duration: 200}, State: player.StatePlaying, PlayEpoch: 1})
+	// Skipping straight to the next track finalizes t-1 with ~0 played.
+	h.trackJukeboxPlay("jb-1", player.Status{Track: &player.TrackInfo{ID: "t-2", Duration: 200}, State: player.StatePlaying, PlayEpoch: 2})
+
+	time.Sleep(50 * time.Millisecond)
+	assert.Empty(t, fake.snapshot(), "a skipped listen must not earn heat")
+}
+
+func TestJukeboxPlayedThroughCounts(t *testing.T) {
+	h, _ := newJukeboxHandler(t)
+	fake := &fakeJukeboxHeat{}
+	h.heatRepo = fake
+
+	// Seed a listen that started a full track-length ago.
+	h.jbMu.Lock()
+	h.jbActive["jb-1"] = jukeboxListen{epoch: 1, trackID: "t-1", duration: 200, start: time.Now().Add(-200 * time.Second)}
+	h.jbMu.Unlock()
+
+	h.trackJukeboxPlay("jb-1", player.Status{Track: &player.TrackInfo{ID: "t-2", Duration: 200}, State: player.StatePlaying, PlayEpoch: 2})
+
+	require.Eventually(t, func() bool { return len(fake.snapshot()) == 1 }, time.Second, 10*time.Millisecond)
+	calls := fake.snapshot()
+	assert.Equal(t, "t-1", calls[0].trackID)
+	assert.True(t, calls[0].play, "a full listen counts as a play")
+	assert.True(t, calls[0].complete, "a full listen counts as complete")
+}
+
+func TestJukeboxStopFinalizesPartialListen(t *testing.T) {
+	h, _ := newJukeboxHandler(t)
+	fake := &fakeJukeboxHeat{}
+	h.heatRepo = fake
+
+	h.jbMu.Lock()
+	h.jbActive["jb-1"] = jukeboxListen{epoch: 1, trackID: "t-1", duration: 200, start: time.Now().Add(-40 * time.Second)}
+	h.jbMu.Unlock()
+
+	h.trackJukeboxPlay("jb-1", player.Status{Track: nil, PlayEpoch: 1})
+
+	require.Eventually(t, func() bool { return len(fake.snapshot()) == 1 }, time.Second, 10*time.Millisecond)
+	calls := fake.snapshot()
+	assert.Equal(t, "t-1", calls[0].trackID)
+	assert.True(t, calls[0].play, "40s of a 200s track qualifies as a play")
+	assert.False(t, calls[0].complete, "40s is not a completed listen")
+}
+
+func TestJukeboxEngineRebuildResetsActiveListen(t *testing.T) {
+	h, _ := newJukeboxHandler(t)
+
+	_, created := h.getOrCreateEngine("jb-1", "", "")
+	require.True(t, created)
+
+	// An in-flight listen for the old engine instance.
+	h.jbMu.Lock()
+	h.jbActive["jb-1"] = jukeboxListen{epoch: 1, trackID: "t-1", duration: 100, start: time.Now()}
+	h.jbMu.Unlock()
+
+	// Rebuilding the engine restarts PlayEpoch, so the stale accounting must go.
+	h.manager.Remove("jb-1")
+	_, created = h.getOrCreateEngine("jb-1", "", "")
+	require.True(t, created)
+
+	h.jbMu.Lock()
+	_, ok := h.jbActive["jb-1"]
+	h.jbMu.Unlock()
+	assert.False(t, ok, "engine rebuild clears the stale listen accounting")
+}
+
+func TestJukeboxStopWithTrackStillSetFinalizes(t *testing.T) {
+	h, _ := newJukeboxHandler(t)
+	fake := &fakeJukeboxHeat{}
+	h.heatRepo = fake
+
+	// Engine.Stop() keeps current set and the epoch unchanged; only the state
+	// becomes stopped. It must still finalize using the real played time.
+	h.jbMu.Lock()
+	h.jbActive["jb-1"] = jukeboxListen{epoch: 1, trackID: "t-1", duration: 200, start: time.Now().Add(-40 * time.Second)}
+	h.jbMu.Unlock()
+
+	h.trackJukeboxPlay("jb-1", player.Status{Track: &player.TrackInfo{ID: "t-1", Duration: 200}, State: player.StateStopped, PlayEpoch: 1})
+
+	require.Eventually(t, func() bool { return len(fake.snapshot()) == 1 }, time.Second, 10*time.Millisecond)
+	calls := fake.snapshot()
+	assert.Equal(t, "t-1", calls[0].trackID)
+	assert.True(t, calls[0].play)
+	assert.False(t, calls[0].complete, "40s is not a completed listen")
+
+	h.jbMu.Lock()
+	_, ok := h.jbActive["jb-1"]
+	h.jbMu.Unlock()
+	assert.False(t, ok, "stopping clears the active listen so idle time is not counted later")
 }
