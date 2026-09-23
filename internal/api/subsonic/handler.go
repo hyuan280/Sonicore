@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,7 +20,9 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/auth"
 	"github.com/sonicore/server/internal/infrastructure/cache"
@@ -147,7 +151,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "search2", "search3":
 		body = h.search(ctx, user, q)
 	case "stream":
-		h.serveStream(w, r, q)
+		// Subsonic has no MSE/segmented playback: a stream always delivers the
+		// whole track in one response, so it is treated as a download. By
+		// design a non-admin (role "user") may only browse metadata over
+		// Subsonic; both streaming and downloading require download permission
+		// (admin and above).
+		if !port.HasPermission(user.Role, port.PermDownload) {
+			h.respond(w, r, "failed", map[string]interface{}{
+				"error": map[string]interface{}{"code": 50, "message": "not authorized"},
+			})
+			return
+		}
+		h.serveStream(w, r, user, q)
+		return
+	case "download":
+		h.serveDownload(w, r, user, q)
 		return
 	case "getCoverArt":
 		h.serveCoverArt(w, r, q)
@@ -1124,12 +1142,13 @@ func isAdmin(u *domain.User) bool {
 
 func userToSub(u *domain.User) map[string]interface{} {
 	isAdm := u.Role == domain.RoleSuperAdmin || u.Role == domain.RoleAdmin
+	canDownload := port.HasPermission(u.Role, port.PermDownload)
 	return map[string]interface{}{
 		"username":        u.Username,
 		"email":           u.Email,
 		"admin":           isAdm,
 		"scrobbling":      true,
-		"download":        true,
+		"download":        canDownload,
 		"upload":          isAdm,
 		"playlist":        true,
 		"coverArt":        true,
@@ -1489,11 +1508,17 @@ func (h *Handler) userCanAccessLibrary(ctx context.Context, userID, libraryID st
 	return false
 }
 
-func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, q url.Values) {
+func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, user *domain.User, q url.Values) {
 	id := q.Get("id")
 	track, err := h.trackRepo.FindByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "track not found", http.StatusNotFound)
+		return
+	}
+	if !h.userCanAccessLibrary(r.Context(), user.ID, track.LibraryID) {
+		h.respond(w, r, "failed", map[string]interface{}{
+			"error": map[string]interface{}{"code": 50, "message": "not authorized"},
+		})
 		return
 	}
 	quality := transcoder.ParseQuality(r.URL.Query().Get("quality"))
@@ -1501,9 +1526,89 @@ func (h *Handler) serveStream(w http.ResponseWriter, r *http.Request, q url.Valu
 		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
 		return
 	}
-	w.Header().Set("Content-Type", "audio/"+track.FileFormat)
+	w.Header().Set("Content-Type", middleware.AudioContentType(track.FilePath))
 	w.Header().Set("Content-Length", strconv.FormatInt(track.FileSize, 10))
 	http.ServeFile(w, r, track.FilePath)
+}
+
+// serveDownload serves a track's original file as an attachment. A complete
+// file transfer is admin-only, and it awards download heat once per
+// (user, track): the dedupe key has no session component, so repeated
+// downloads by the same user count only once.
+func (h *Handler) serveDownload(w http.ResponseWriter, r *http.Request, user *domain.User, q url.Values) {
+	if !port.HasPermission(user.Role, port.PermDownload) {
+		h.respond(w, r, "failed", map[string]interface{}{
+			"error": map[string]interface{}{"code": 50, "message": "not authorized"},
+		})
+		return
+	}
+	id := q.Get("id")
+	if id == "" {
+		id = q.Get("songId")
+	}
+	if id == "" {
+		h.respond(w, r, "failed", map[string]interface{}{
+			"error": map[string]interface{}{"code": 10, "message": "missing id"},
+		})
+		return
+	}
+	track, err := h.trackRepo.FindByID(r.Context(), id)
+	if err != nil {
+		h.respond(w, r, "failed", map[string]interface{}{
+			"error": map[string]interface{}{"code": 70, "message": "song not found"},
+		})
+		return
+	}
+	if !h.userCanAccessLibrary(r.Context(), user.ID, track.LibraryID) {
+		h.respond(w, r, "failed", map[string]interface{}{
+			"error": map[string]interface{}{"code": 50, "message": "not authorized"},
+		})
+		return
+	}
+
+	filename := safeFilename(track.Title)
+	if filename == "" {
+		filename = "track"
+	}
+	// track.FileFormat is ffprobe's format_name (e.g. "mov,mp4,m4a,3gp,3g2,mj2"),
+	// not a file extension, so derive both the download extension and the MIME
+	// type from the actual file path.
+	if ext := strings.TrimPrefix(filepath.Ext(track.FilePath), "."); ext != "" {
+		filename += "." + ext
+	}
+	// Capture the status so a 404 (missing file) or a client disconnect does
+	// not consume the permanent per-(user, track) download heat award.
+	rec := middleware.NewStatusRecorder(w)
+	w = rec
+	w.Header().Set("Content-Type", middleware.AudioContentType(track.FilePath))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("Content-Length", strconv.FormatInt(track.FileSize, 10))
+	http.ServeFile(w, r, track.FilePath)
+
+	// Award only after a fully served transfer (a 200 body, not a HEAD, not a
+	// 206 range, and the client still connected), on a detached context. The
+	// dedupe key makes the award idempotent.
+	if rec.Status() == http.StatusOK && r.Method != http.MethodHead && r.Context().Err() == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if _, err := h.heatRepo.Award(ctx, track.ID, user.ID,
+			domain.HeatEventDownload, domain.HeatWeightDownload,
+			domain.DownloadDedupeKey(user.ID, track.ID)); err != nil {
+			logger.Error("[subsonic] download heat error: %v", err)
+		}
+	}
+}
+
+// safeFilename strips characters that would break a Content-Disposition
+// filename: quotes, backslashes, path separators and control characters.
+func safeFilename(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r == '/' || r < 0x20 {
+			return -1
+		}
+		return r
+	}, name)
+	return strings.TrimSpace(name)
 }
 
 // serveCoverArt resolves the id as an images-row id and serves the stored
@@ -1594,8 +1699,8 @@ func trackToSub(t *domain.Track) map[string]interface{} {
 		"bitRate":               t.BitRate / 1000,
 		"size":                  t.FileSize,
 		"suffix":                t.FileFormat,
-		"contentType":           "audio/" + t.FileFormat,
-		"transcodedContentType": "audio/" + t.FileFormat,
+		"contentType":           middleware.AudioContentType(t.FilePath),
+		"transcodedContentType": middleware.AudioContentType(t.FilePath),
 		"transcodedSuffix":      t.FileFormat,
 		"path":                  t.FilePath,
 		"isDir":                 false,

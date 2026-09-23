@@ -266,10 +266,9 @@ func ServeTranscoded(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// A "full" request (frontend seek during streaming) or a non-zero byte
-	// Range request wants a complete, seekable file: wait for the transcode
-	// (or run it) and then serve the finished cache.
-	wantFull := r.URL.Query().Get("full") == "1" || isSeekRange(r.Header.Get("Range"))
+	// A non-zero byte Range request wants a complete, seekable file: wait for
+	// the transcode (or run it) and then serve the finished cache.
+	wantFull := isSeekRange(r.Header.Get("Range"))
 
 	release := lockInflight(cPath)
 	defer release()

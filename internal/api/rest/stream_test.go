@@ -70,6 +70,32 @@ func streamRequest(path string, sess string) *http.Request {
 	return req
 }
 
+// expectStreamUser mocks the UserRepo.FindByID lookup used by the download
+// permission check.
+func expectStreamUser(mock sqlmock.Sqlmock, id, role string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE id = $1`)).
+		WithArgs(id).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "avatar_format", "created_at", "updated_at"}).
+			AddRow(id, "u", "", "", role, "", time.Now(), time.Now()))
+}
+
+// expectLibraryMember mocks the PermissionChecker.IsMember library lookup.
+func expectLibraryMember(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
+		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
+		 FROM libraries WHERE id = \$1`).
+		WithArgs("lib-001").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
+			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
+			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
+}
+
+// expectDownloadHeat mocks the deferred heat award for a complete transfer.
+func expectDownloadHeat(mock sqlmock.Sqlmock) {
+	mock.ExpectExec("WITH ins AS").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
 func TestStreamMissingSession(t *testing.T) {
 	h, _, _ := newStreamHandler(t)
 
@@ -138,22 +164,74 @@ func TestStreamServesFileDirectly(t *testing.T) {
 		AddRow("t-001", "lib-001", "Song", nil, 200, 128000, 44100, 2, audioFile, 8, "mp3", "mp3", "", "musicbrainz", "{}", "", "h",
 			0, 0, 0, 0, nil, nil, 1, "", time.Now(), time.Now())
 	expectStreamTrack(mock, rows)
-	mock.ExpectQuery(`SELECT id, name, path, owner_id, metadata_storage_mode, scan_interval,
-		 last_scanned_at, last_scan_errors, track_count, duration, created_at, updated_at
-		 FROM libraries WHERE id = \$1`).
-		WithArgs("lib-001").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "path", "owner_id", "metadata_storage_mode", "scan_interval",
-			"last_scanned_at", "last_scan_errors", "track_count", "duration", "created_at", "updated_at"}).
-			AddRow("lib-001", "L", "/m", "u-001", "database", "", nil, 0, 0, 0.0, time.Now(), time.Now()))
+	expectLibraryMember(mock)
+	// Admin (download permission) is required for the raw-file branch.
+	expectStreamUser(mock, "u-001", "admin")
+	expectDownloadHeat(mock)
 
 	rec := httptest.NewRecorder()
 	h.ServeStream(rec, streamRequest("/api/stream/"+sess+"/t-001", sess))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "audio/mp3", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "audio/mpeg", rec.Header().Get("Content-Type"))
 	assert.Equal(t, "8", rec.Header().Get("Content-Length"))
 	assert.Equal(t, "bytes", rec.Header().Get("Accept-Ranges"))
 	assert.Equal(t, "fake-mp3", rec.Body.String())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A non-admin member can play via MSE segments but cannot trigger a complete
+// (original-file) transfer.
+func TestStreamDownloadForbiddenForNonAdmin(t *testing.T) {
+	h, mock, _ := newStreamHandler(t)
+	sess := validSession(t, h)
+
+	expectStreamTrack(mock, streamTestTrack())
+	expectLibraryMember(mock)
+	expectStreamUser(mock, "u-001", "user")
+
+	rec := httptest.NewRecorder()
+	h.ServeStream(rec, streamRequest("/api/stream/"+sess+"/t-001", sess))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A non-admin MSE request must not be able to pull the whole track in one
+// segment request.
+func TestStreamMseSegmentCapForNonAdmin(t *testing.T) {
+	h, mock, _ := newStreamHandler(t)
+	sess := validSession(t, h)
+
+	expectStreamTrack(mock, streamTestTrack())
+	expectLibraryMember(mock)
+	expectStreamUser(mock, "u-001", "user")
+
+	rec := httptest.NewRecorder()
+	h.ServeStream(rec, streamRequest("/api/stream/"+sess+"/t-001?start=0&duration=999", sess))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// Invalid, non-finite or oversized duration values must fail closed for
+// callers without download permission (otherwise a NaN/overflow bypasses the
+// segment cap downstream).
+func TestStreamMseInvalidDurationForbiddenForNonAdmin(t *testing.T) {
+	h, mock, _ := newStreamHandler(t)
+	sess := validSession(t, h)
+
+	for _, dur := range []string{"NaN", "1e400", "Inf", "abc"} {
+		expectStreamTrack(mock, streamTestTrack())
+		expectLibraryMember(mock)
+		expectStreamUser(mock, "u-001", "user")
+
+		rec := httptest.NewRecorder()
+		h.ServeStream(rec, streamRequest("/api/stream/"+sess+"/t-001?start=0&duration="+dur, sess))
+
+		assert.Equal(t, http.StatusForbidden, rec.Code, "duration=%s", dur)
+	}
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestStreamTranscodeStatus(t *testing.T) {

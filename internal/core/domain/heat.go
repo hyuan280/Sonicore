@@ -8,9 +8,9 @@ import (
 // Heat event types. Each maps to a track_events row; the sum of weights is the
 // cached tracks.heat value.
 //
-// HeatEventDownload/HeatWeightDownload are reserved: there is no download
-// endpoint yet (downloads are planned to be exposed to admins later), so the
-// download weight is currently never awarded and heat under-counts downloads.
+// HeatEventDownload is awarded when an admin (or above) downloads a track's
+// complete file. Its dedupe key is per (user, track), so each user is counted
+// at most once per track regardless of how many times they download it.
 const (
 	HeatEventPlay         = "play"
 	HeatEventPlayComplete = "play_complete"
@@ -89,6 +89,7 @@ const (
 	HeatKeyPrefixFavorite = "fav"
 	HeatKeyPrefixPlaylist = "pl"
 	HeatKeyPrefixPlay     = "play"
+	HeatKeyPrefixDownload = "dl"
 )
 
 // FavoriteDedupeKey identifies the heat event for one user favoriting one track.
@@ -99,6 +100,13 @@ func FavoriteDedupeKey(userID, trackID string) string {
 // PlaylistDedupeKey identifies the heat event for a track added to a playlist.
 func PlaylistDedupeKey(playlistID, trackID string) string {
 	return fmt.Sprintf("%s:%s:%s", HeatKeyPrefixPlaylist, playlistID, trackID)
+}
+
+// DownloadDedupeKey identifies the heat event for one user downloading one
+// track. There is no session component: a user earns the download weight at
+// most once per track, no matter how many times they download it.
+func DownloadDedupeKey(userID, trackID string) string {
+	return fmt.Sprintf("%s:%s:%s", HeatKeyPrefixDownload, userID, trackID)
 }
 
 // PlaySessionKey identifies one counted play. The session token is generated
