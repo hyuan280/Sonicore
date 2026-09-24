@@ -251,13 +251,21 @@ Scanner Pipeline (Per Library):
 ```
 Stream Request → 会话令牌认证 →
   → Track 查询 → 权限校验 →
-  → 编码判断:
-    ├── 浏览器原生编码 (mp3/aac/flac/opus/ogg/pcm) → 直传: HTTP Range，零转码
-    └── 其他编码 / 码率超限 → ffmpeg 转码 (AAC 256/320k 或 FLAC)
+  → 请求形态判断:
+    ├── MSE 分片 (带 init/start) → 编码判断:
+    │     ├── 浏览器原生编码 (mp3/aac/flac/opus/ogg/pcm) → 直传: HTTP Range，零转码
+    │     └── 其他编码 / 码率超限 → ffmpeg 转码 (AAC 256/320k 或 FLAC)
+    └── 非 MSE → 原始文件下载 (需下载权限，Content-Disposition: attachment，不转码)
 
 Stream URL 格式:
-  /api/s/{session}/{id}?quality=standard|high|lossless
-  /api/s/{session}/{id}/transcode-status    — 查询转码缓存是否就绪
+  /api/s/{session}/{id}?init=1&quality=standard|high|lossless    — MSE 分片初始化
+  /api/s/{session}/{id}?start={s}&duration={d}&quality=...       — MSE 分段
+  /api/s/{session}/{id}                                          — 原始文件下载
+  /api/s/{session}/{id}/transcode-status                         — 查询转码缓存是否就绪
+
+说明: 只有 MSE 分片请求 (含 init/start) 才参考 quality 并可能转码；其余请求一律
+直接返回原始文件。下载需要下载权限 (admin 及以上)，并附带按源文件名生成的
+Content-Disposition。因此 /api/s 不再为非 MSE 请求提供转码流。
 
 转码策略:
   - 兼容编码且码率不超目标 → 直接 http.ServeFile 输出
@@ -266,9 +274,9 @@ Stream URL 格式:
   - 转码与缓存写入解耦，客户端断开不中断缓存写入
 
 响应头:
-  Content-Type: audio/{format}
-  Content-Length: {file_size}
-  Accept-Ranges: bytes
+  MSE/直传: Content-Type: audio/{format}; Accept-Ranges: bytes
+  下载:      Content-Type: audio/{format}; Accept-Ranges: bytes;
+             Content-Disposition: attachment; filename="{source filename}"
 
 客户端:
   浏览器 <audio> 原生播放 / MSE (Media Source Extensions) 流式
@@ -653,7 +661,7 @@ type ScheduledTask struct {
 | `GET /api/data/albums` | 专辑列表 |
 | `GET /api/data/albums/{albumId}` | 专辑详情 |
 | `GET/POST /api/data/tracks/lyrics` | 歌词获取 / 更新 |
-| `GET /api/s/{session}/{id}` | 流媒体 (会话令牌) |
+| `GET /api/s/{session}/{id}` | MSE 分片播放 (init/start) 或原始文件下载 (会话令牌) |
 | `GET /api/s/{session}/{id}/transcode-status` | 转码缓存状态 |
 | `GET /api/c/{session}/{imageId}` | 封面 |
 | `GET /api/user/favorites/list` | 收藏列表 |
@@ -921,10 +929,11 @@ WS /ws/{session}    (会话令牌认证，与流媒体一致)
 
 ```
 用户点击曲目 → Zustand Player Store 更新队列
-  → <audio>/MSE 设置 src = /api/s/{session}/{trackId}?quality=...
+  → MSE 通过 /api/s/{session}/{trackId}?init=1 / ?start=...&quality=... 拉取分片
   → 原生编码 → HTTP Range 直传，零转码
   → 非原生编码 → ffmpeg 转码为分段 MP4 (MSE 流式) + 磁盘缓存
   → 浏览器解码播放
+  （非 MSE 请求仅用于原始文件下载，见 4.5）
   → 播放状态持久化: localStorage + PUT /api/user/settings
   → 队列持久化: PUT /api/user/queue
 ```

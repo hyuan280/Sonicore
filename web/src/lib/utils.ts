@@ -26,6 +26,15 @@ export function coverImageUrl(imageID: string, size?: number): string {
   return url;
 }
 
+// streamDownloadUrl builds the original-file download URL for a track. A
+// non-segmented stream request (no init/start) makes the server send the
+// untouched file with a Content-Disposition filename; it requires the download
+// permission (admin and above).
+export function streamDownloadUrl(trackId: string): string {
+  const session = localStorage.getItem("session_token") || "";
+  return `/api/s/${session}/${trackId}`;
+}
+
 export function performerNames(artists?: TrackArtist[]): string {
   if (!artists || artists.length === 0) return "";
   return artists

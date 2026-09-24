@@ -4,6 +4,7 @@ import {
   formatDuration,
   formatFileSize,
   coverImageUrl,
+  streamDownloadUrl,
   performerNames,
   parseLRC,
   findCurrentLine,
@@ -64,6 +65,21 @@ describe("coverImageUrl", () => {
 
   it("leaves session empty when not stored", () => {
     expect(coverImageUrl("img-1")).toBe("/api/c//img-1");
+  });
+});
+
+describe("streamDownloadUrl", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("includes session token and track id", () => {
+    localStorage.setItem("session_token", "sess123");
+    expect(streamDownloadUrl("track-1")).toBe("/api/s/sess123/track-1");
+  });
+
+  it("leaves session empty when not stored", () => {
+    expect(streamDownloadUrl("track-1")).toBe("/api/s//track-1");
   });
 });
 

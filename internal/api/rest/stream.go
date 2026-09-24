@@ -5,8 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -24,6 +28,32 @@ import (
 // maxMseSegmentSeconds caps a single MSE segment request for callers without
 // download permission, so one request cannot pull the whole track at once.
 const maxMseSegmentSeconds = 30.0
+
+// downloadGuard strips download-only response headers when the wrapped writer
+// emits an error status (e.g. http.ServeFile's 416 for an unsatisfiable
+// Range), so an error body is never delivered under the attachment filename.
+type downloadGuard struct {
+	http.ResponseWriter
+}
+
+func (g downloadGuard) WriteHeader(code int) {
+	if code >= http.StatusBadRequest {
+		g.Header().Del("Content-Disposition")
+		g.Header().Del("Accept-Ranges")
+	}
+	g.ResponseWriter.WriteHeader(code)
+}
+
+// ReadFrom preserves the sendfile fast path used by http.ServeFile.
+func (g downloadGuard) ReadFrom(src io.Reader) (int64, error) {
+	if rf, ok := g.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	return io.Copy(g.ResponseWriter, src)
+}
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (g downloadGuard) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
 type StreamHandler struct {
 	trackRepo    *repository.TrackRepo
@@ -95,10 +125,10 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A request is segmented playback only when it asks for MSE pieces
-	// (init / start). Every other shape (raw file, byte Range, full transcode,
-	// cache serve) delivers the whole track in one response and is treated as
-	// a download, which requires download permission.
+	// Segmented playback asks for MSE pieces (init / start) and streams the
+	// requested quality. Every other shape delivers the untouched original
+	// file as a download with a Content-Disposition filename, which requires
+	// download permission.
 	query := r.URL.Query()
 	isMse := query.Get("init") == "1" || query.Get("start") != ""
 	if !isMse {
@@ -117,7 +147,39 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 				h.awardDownload(context.Background(), userID, track.ID)
 			}
 		}()
-	} else if raw := query.Get("duration"); raw != "" {
+
+		// Resolve missing/permission errors before setting download headers, so
+		// a stat failure is not reported as a misleading 404. Other errors are
+		// logged and surfaced as 500. Content-Length is left to ServeFile, which
+		// sets it from the real on-disk size.
+		if _, err := os.Stat(track.FilePath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				logger.Error("[stream] stat track file %q: %v", track.FilePath, err)
+				http.Error(w, "track file unavailable", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "track file not found", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", middleware.AudioContentType(track.FilePath))
+		w.Header().Set("Accept-Ranges", "bytes")
+		// The filename comes from the real source path so the browser saves
+		// the original file with its correct extension (the stored file_format
+		// is an ffprobe media type, not a usable extension).
+		if cd := mime.FormatMediaType("attachment", map[string]string{
+			"filename": filepath.Base(track.FilePath),
+		}); cd != "" {
+			w.Header().Set("Content-Disposition", cd)
+		}
+		// ServeFile can still emit an error itself (e.g. an unsatisfiable
+		// Range) after the headers above are set; strip the download-only
+		// headers on such responses so the error body is not saved as audio.
+		http.ServeFile(downloadGuard{rec}, r, track.FilePath)
+		return
+	}
+
+	if raw := query.Get("duration"); raw != "" {
 		// Enforce the segment cap only when a duration is actually supplied
 		// (init requests have none). Invalid, non-finite or oversized values
 		// fail closed: the role check runs for all of them.
@@ -131,19 +193,7 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	quality := transcoder.ParseQuality(query.Get("quality"))
-	if isMse {
-		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
-		return
-	}
-	if transcoder.Decide(track.BitRate, track.AudioCodec, quality).Transcode {
-		transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
-		return
-	}
-
-	w.Header().Set("Content-Type", middleware.AudioContentType(track.FilePath))
-	w.Header().Set("Content-Length", strconv.FormatInt(track.FileSize, 10))
-	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeFile(w, r, track.FilePath)
+	transcoder.ServeTranscoded(r.Context(), w, r, track.FilePath, quality)
 }
 
 // ServeTranscodeStatus reports whether the transcode cache for a track is ready,

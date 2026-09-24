@@ -24,14 +24,15 @@ export default function PlaylistsPage() {
 
   const create = async () => {
     if (!name.trim()) return;
-    await createPlaylist(name.trim());
+    const created = await createPlaylist(name.trim());
+    if (!created) return;
     setName("");
     setShowCreate(false);
   };
 
   const del = async (id: string) => {
-    await removePlaylist(id);
-    setDelId(null);
+    const ok = await removePlaylist(id);
+    if (ok) setDelId(null);
   };
 
   const filtered = searchQ.trim()

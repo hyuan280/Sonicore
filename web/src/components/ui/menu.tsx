@@ -15,7 +15,28 @@ interface DropdownMenuProps {
   children: React.ReactNode;
 }
 
-const MenuContext = createContext<{ close: () => void }>({ close: () => {} });
+export const MenuContext = createContext<{ close: () => void }>({ close: () => {} });
+
+// handleMenuKeyDown implements WAI-ARIA arrow-key navigation over the
+// menuitem elements inside a menu panel. Used by DropdownMenu.
+export function handleMenuKeyDown(panel: HTMLElement | null, e: React.KeyboardEvent) {
+  const items = Array.from(panel?.querySelectorAll<HTMLElement>('button[role^="menuitem"]') || []);
+  if (items.length === 0) return;
+  const idx = items.indexOf(document.activeElement as HTMLElement);
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    items[(idx + 1) % items.length].focus();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    items[(idx - 1 + items.length) % items.length].focus();
+  } else if (e.key === "Home") {
+    e.preventDefault();
+    items[0].focus();
+  } else if (e.key === "End") {
+    e.preventDefault();
+    items[items.length - 1].focus();
+  }
+}
 
 // The menu panel is rendered through a portal with fixed positioning so it
 // can escape clipped/scrollable ancestors (e.g. the plugins tab row with
@@ -68,28 +89,6 @@ export function DropdownMenu({ trigger, align = "right", className, children }: 
     };
   }, [open, updatePos]);
 
-  // Arrow-key navigation between menu items (WAI-ARIA menu pattern).
-  const onPanelKeyDown = (e: React.KeyboardEvent) => {
-    const items = Array.from(
-      panelRef.current?.querySelectorAll<HTMLElement>('button[role^="menuitem"]') || [],
-    );
-    if (items.length === 0) return;
-    const idx = items.indexOf(document.activeElement as HTMLElement);
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      items[(idx + 1) % items.length].focus();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      items[(idx - 1 + items.length) % items.length].focus();
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      items[0].focus();
-    } else if (e.key === "End") {
-      e.preventDefault();
-      items[items.length - 1].focus();
-    }
-  };
-
   return (
     <div className="relative" ref={containerRef}>
       {trigger(toggle, open, { "aria-haspopup": "menu", "aria-expanded": open })}
@@ -99,7 +98,7 @@ export function DropdownMenu({ trigger, align = "right", className, children }: 
           <div
             ref={panelRef}
             role="menu"
-            onKeyDown={onPanelKeyDown}
+            onKeyDown={(e) => handleMenuKeyDown(panelRef.current, e)}
             // The panel is portaled, but React events still bubble through
             // the React tree — stop them here too so clicks on the panel's
             // padding/background never reach a clickable parent (e.g. a
@@ -126,12 +125,14 @@ export function MenuItem({
   icon,
   danger,
   disabled,
+  onMouseEnter,
   children,
 }: {
-  onClick?: () => void;
+  onClick?: () => boolean | void | Promise<boolean | void>;
   icon?: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  onMouseEnter?: React.MouseEventHandler<HTMLButtonElement>;
   children: React.ReactNode;
 }) {
   const { close } = useContext(MenuContext);
@@ -140,13 +141,22 @@ export function MenuItem({
       type="button"
       role="menuitem"
       disabled={disabled}
-      onClick={(e) => {
+      onMouseEnter={onMouseEnter}
+      onClick={async (e) => {
         // The panel is portaled, but React events still bubble through the
         // React tree — stop them so a menu inside a clickable card doesn't
         // also trigger the card's onClick.
         e.stopPropagation();
-        onClick?.();
-        close();
+        // A handler returning false (or resolving to false) keeps the menu
+        // open, e.g. to show an inline error after a failed action.
+        let result: boolean | void;
+        try {
+          result = await onClick?.();
+        } catch (err) {
+          console.warn("[menu] menu item action failed", err);
+          result = undefined;
+        }
+        if (result !== false) close();
       }}
       className={cn(
         "w-full text-left px-3 py-2 text-sm cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",

@@ -59,7 +59,7 @@ interface PlayerState {
   setPlaying: (p: boolean) => void;
   togglePlay: () => void;
   cycleMode: () => void;
-  addToQueue: (tracks: PlayerTrack[]) => void;
+  addToQueue: (tracks: PlayerTrack[]) => Promise<boolean>;
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
   setCurrentPlaylistId: (id: string | null) => void;
@@ -123,30 +123,36 @@ export function savePlayerState() {
   } catch {}
 }
 
-export function saveQueue() {
+// saveQueue persists the queue to localStorage (best effort) and to the
+// server. It resolves true on success and false when the server call fails, so
+// callers that care can surface the failure; fire-and-forget callers can just
+// ignore the returned promise (it never rejects).
+export async function saveQueue(): Promise<boolean> {
+  const s = usePlayer.getState();
   try {
-    const s = usePlayer.getState();
-    const tracks = s.queue.map(serializeTrack);
-    const mode = s.mode;
-    const queueIdx = s.queueIdx;
-    const shuffleOrder = s.shuffleOrder;
-    const shuffleIdx = s.shuffleIdx;
-
     localStorage.setItem(
       "playerQueue",
-      JSON.stringify({ tracks, queueIdx, shuffleOrder, shuffleIdx, mode }),
+      JSON.stringify({
+        tracks: s.queue.map(serializeTrack),
+        queueIdx: s.queueIdx,
+        shuffleOrder: s.shuffleOrder,
+        shuffleIdx: s.shuffleIdx,
+        mode: s.mode,
+      }),
     );
-
-    api.user
-      .saveQueue({
-        track_ids: s.queue.map((t) => t.id),
-        queue_idx: queueIdx,
-        shuffle_order: shuffleOrder,
-        shuffle_idx: shuffleIdx,
-        mode,
-      })
-      .catch(() => {});
   } catch {}
+  try {
+    await api.user.saveQueue({
+      track_ids: s.queue.map((t) => t.id),
+      queue_idx: s.queueIdx,
+      shuffle_order: s.shuffleOrder,
+      shuffle_idx: s.shuffleIdx,
+      mode: s.mode,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function restorePlayerState() {
@@ -542,7 +548,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     }
 
     set(update);
-    saveQueue();
+    return saveQueue();
   },
 
   removeFromQueue: (index) => {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Play,
@@ -16,10 +16,14 @@ import {
 import { Link } from "react-router-dom";
 import { ROUTES } from "../lib/constants";
 import { usePlayer } from "../stores/player";
+import type { Playlist } from "../stores/playlists";
 import { api } from "../api/client";
 import { AddBtn, FavBtn, AddQueueBtn } from "./AddToPlaylist";
 import ArtistLink from "./ArtistLink";
 import HeatBadge from "./HeatBadge";
+import TrackContextMenu from "./TrackContextMenu";
+import { InlineError } from "./ui/inline-error";
+import { useInlineError } from "../hooks/useInlineError";
 import { formatDuration, coverImageUrl } from "../lib/utils";
 
 export interface TrackRow {
@@ -43,6 +47,12 @@ export interface TrackRow {
   }[];
 }
 
+type BulkAction = "queue" | "playlist" | "favorite" | "extra";
+
+// reportActionError lets page-provided actions surface failures through the
+// table's inline error bubbles: pass a message to show it, or null to clear.
+export type ReportActionError = (message: string | null) => void;
+
 interface TrackTableProps {
   tracks: TrackRow[];
   header?: React.ReactNode;
@@ -61,8 +71,8 @@ interface TrackTableProps {
   bulkPlaylist?: boolean;
   bulkFavorite?: boolean;
   bulkBar?: boolean;
-  extraBulkActions?: React.ReactNode;
-  playlistFilter?: (pl: any) => boolean;
+  extraBulkActions?: React.ReactNode | ((reportError: ReportActionError) => React.ReactNode);
+  playlistFilter?: (pl: Playlist) => boolean;
   page?: number;
   perPage?: number;
   total?: number;
@@ -70,7 +80,7 @@ interface TrackTableProps {
   onPerPageChange?: (perPage: number) => void;
   extraColumn?: (track: TrackRow) => React.ReactNode;
   extraColumnHeader?: string;
-  extraAction?: (track: TrackRow, index: number) => React.ReactNode;
+  extraAction?: (track: TrackRow, index: number, reportError: ReportActionError) => React.ReactNode;
   emptyText?: string;
   onBulkChange?: () => void;
 }
@@ -115,6 +125,25 @@ export default function TrackTable({
   const [pageEditing, setPageEditing] = useState(false);
   const [perPageOpen, setPerPageOpen] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [menu, setMenu] = useState<{ track: TrackRow; x: number; y: number } | null>(null);
+  // The failing action is tracked so the bubble can be anchored to the button
+  // that produced it, like the per-row buttons. Anchors reuse the shared
+  // outside-click dismissal from useInlineError.
+  const {
+    error: bulkError,
+    setError: setBulkError,
+    anchorRef: bulkActionsRef,
+  } = useInlineError<{ action: BulkAction; message: string }>();
+  const {
+    error: rowError,
+    setError: setRowError,
+    anchorRef: rowErrorRef,
+  } = useInlineError<{ id: string; message: string }, HTMLSpanElement>();
+
+  // A stale error must not survive a new selection.
+  useEffect(() => {
+    if (!multi || selected.size === 0) setBulkError(null);
+  }, [multi, selected, setBulkError]);
 
   const serverPaged = onPageChange != null;
   const page = serverPaged ? (extPage ?? 1) : internalPage;
@@ -160,8 +189,11 @@ export default function TrackTable({
   const selIds = (): string[] =>
     displayedTracks.filter((t) => selected.has(t.id)).map((t) => t.trackId || t.id);
 
-  const handleBulkQueue = useCallback(() => {
-    player.addToQueue(
+  // A false result means the server sync failed after the local queue was
+  // already updated; this is intentionally surfaced as a failure.
+  const handleBulkQueue = useCallback(async () => {
+    setBulkError(null);
+    const ok = await player.addToQueue(
       displayedTracks
         .filter((t) => selected.has(t.id))
         .map((t) => ({
@@ -175,37 +207,60 @@ export default function TrackTable({
           versions: t.versions,
         })),
     );
-  }, [player, displayedTracks, selected]);
+    if (!ok) setBulkError({ action: "queue", message: t("trackTable.queueFailed") });
+  }, [player, displayedTracks, selected, t]);
 
   const handleBulkPlaylist = useCallback(
     async (plId: string) => {
-      await api.user.addTracksToPlaylist(plId, selIds());
+      setBulkError(null);
+      try {
+        await api.user.addTracksToPlaylist(plId, selIds());
+      } catch (err) {
+        console.warn("[track-table] bulk add to playlist failed", err);
+        setBulkError({ action: "playlist", message: t("trackTable.addToPlaylistFailed") });
+        setPlOpen(false);
+        return;
+      }
       setPlOpen(false);
       onBulkChange?.();
     },
-    [selIds, onBulkChange],
+    [selIds, onBulkChange, t],
   );
 
   const handleBulkFavorite = useCallback(async () => {
+    setBulkError(null);
     const ids = selIds();
     const allFav = ids.every((id) => favoriteIds.has(id));
-    if (allFav) {
-      await api.user.removeFavorites("track", ids);
-      ids.forEach((id) => onFavoriteToggle?.(id, false));
-    } else {
-      await api.user.addFavorites("track", ids);
-      ids.forEach((id) => onFavoriteToggle?.(id, true));
+    try {
+      if (allFav) {
+        await api.user.removeFavorites("track", ids);
+      } else {
+        await api.user.addFavorites("track", ids);
+      }
+    } catch (err) {
+      console.warn("[track-table] bulk favorite failed", err);
+      setBulkError({ action: "favorite", message: t("trackTable.favoriteFailed") });
+      return;
     }
+    ids.forEach((id) => onFavoriteToggle?.(id, !allFav));
     onBulkChange?.();
-  }, [selIds, favoriteIds, onFavoriteToggle, onBulkChange]);
+  }, [selIds, favoriteIds, onFavoriteToggle, onBulkChange, t]);
 
   const openPlaylistDropdown = useCallback(async () => {
-    const d = await api.user.playlists();
+    setBulkError(null);
+    let d;
+    try {
+      d = await api.user.playlists();
+    } catch (err) {
+      console.warn("[track-table] load playlists failed", err);
+      setBulkError({ action: "playlist", message: t("trackTable.loadPlaylistsFailed") });
+      return;
+    }
     let items = d.items || [];
     if (playlistFilter) items = items.filter(playlistFilter);
     setPlaylists(items);
     setPlOpen(!plOpen);
-  }, [plOpen, playlistFilter]);
+  }, [plOpen, playlistFilter, t]);
 
   const selectAll = useCallback(() => {
     if (selected.size === displayedTracks.length && displayedTracks.length > 0) {
@@ -233,6 +288,8 @@ export default function TrackTable({
     setPageEditing(true);
   };
 
+  const closeMenu = useCallback(() => setMenu(null), []);
+
   return (
     <div>
       <div className="sticky top-0 z-10 bg-black pb-2 space-y-2 px-6 pt-6">
@@ -250,14 +307,17 @@ export default function TrackTable({
                   : t("trackTable.select")}
               </button>
               {multi && selected.size > 0 && (
-                <div className="flex items-center gap-2">
+                <div ref={bulkActionsRef} className="relative flex items-center gap-2">
                   {bulkQueue && (
-                    <button
-                      onClick={handleBulkQueue}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" /> {t("trackTable.queue")}
-                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={handleBulkQueue}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" /> {t("trackTable.queue")}
+                      </button>
+                      {bulkError?.action === "queue" && <InlineError message={bulkError.message} />}
+                    </div>
                   )}
                   {bulkPlaylist && (
                     <div className="relative">
@@ -310,22 +370,39 @@ export default function TrackTable({
                           )}
                         </div>
                       )}
+                      {bulkError?.action === "playlist" && (
+                        <InlineError message={bulkError.message} />
+                      )}
                     </div>
                   )}
                   {bulkFavorite && (
-                    <button
-                      onClick={handleBulkFavorite}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer"
-                    >
-                      <Heart
-                        className={`w-4 h-4 ${selIds().every((id) => favoriteIds.has(id)) ? "fill-current" : ""}`}
-                      />
-                      {selIds().every((id) => favoriteIds.has(id))
-                        ? t("trackTable.unfavorite")
-                        : t("trackTable.favorite")}
-                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={handleBulkFavorite}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer"
+                      >
+                        <Heart
+                          className={`w-4 h-4 ${selIds().every((id) => favoriteIds.has(id)) ? "fill-current" : ""}`}
+                        />
+                        {selIds().every((id) => favoriteIds.has(id))
+                          ? t("trackTable.unfavorite")
+                          : t("trackTable.favorite")}
+                      </button>
+                      {bulkError?.action === "favorite" && (
+                        <InlineError message={bulkError.message} />
+                      )}
+                    </div>
                   )}
-                  {extraBulkActions}
+                  {typeof extraBulkActions === "function" ? (
+                    <div className="relative">
+                      {extraBulkActions((message) =>
+                        setBulkError(message ? { action: "extra", message } : null),
+                      )}
+                      {bulkError?.action === "extra" && <InlineError message={bulkError.message} />}
+                    </div>
+                  ) : (
+                    extraBulkActions
+                  )}
                 </div>
               )}
             </div>
@@ -576,6 +653,10 @@ export default function TrackTable({
           return (
             <div
               key={t.id}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ track: t, x: e.clientX, y: e.clientY });
+              }}
               className={`flex items-center gap-1 px-4 py-0 rounded-lg group transition-colors ${isCurrent ? "bg-green-600/10" : "hover:bg-zinc-800/50"}`}
             >
               <div className="flex items-center gap-1 w-1/2 min-w-0 shrink-0">
@@ -694,7 +775,15 @@ export default function TrackTable({
                   </span>
                 )}
                 {extraAction && (
-                  <span className="w-10 shrink-0 text-center">{extraAction(t, i)}</span>
+                  <span
+                    ref={rowError?.id === t.id ? rowErrorRef : undefined}
+                    className="relative w-10 shrink-0 text-center"
+                  >
+                    {extraAction(t, i, (message) =>
+                      setRowError(message ? { id: t.id, message } : null),
+                    )}
+                    {rowError?.id === t.id && <InlineError message={rowError.message} />}
+                  </span>
                 )}
               </div>
             </div>
@@ -706,6 +795,19 @@ export default function TrackTable({
           </p>
         )}
       </div>
+
+      {menu && (
+        <TrackContextMenu
+          track={menu.track}
+          x={menu.x}
+          y={menu.y}
+          favoriteIds={favoriteIds}
+          onFavoriteToggle={onFavoriteToggle}
+          onPlaylistChange={onBulkChange}
+          playlistFilter={playlistFilter}
+          onClose={closeMenu}
+        />
+      )}
     </div>
   );
 }

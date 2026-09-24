@@ -7,7 +7,7 @@ import { usePlayer, type PlayerTrack } from "../stores/player";
 import { usePlaylists } from "../stores/playlists";
 import { Button } from "../components/ui/button";
 import { Trash2, ListMusic, X } from "lucide-react";
-import TrackTable, { type TrackRow } from "../components/TrackTable";
+import TrackTable, { type TrackRow, type ReportActionError } from "../components/TrackTable";
 import { usePerPage } from "../hooks/usePerPage";
 
 export default function PlaylistDetailPage() {
@@ -46,13 +46,21 @@ export default function PlaylistDetailPage() {
 
   const handleDelete = async () => {
     if (!id) return;
-    await removePlaylist(id);
+    const ok = await removePlaylist(id);
+    if (!ok) return;
     navigate(ROUTES.playlists);
   };
 
-  const removeTrack = async (trackId: string) => {
+  const removeTrack = async (trackId: string, report: ReportActionError) => {
     if (!id) return;
-    await api.user.removeTracksFromPlaylist(id, [trackId]);
+    report(null);
+    try {
+      await api.user.removeTracksFromPlaylist(id, [trackId]);
+    } catch (err) {
+      console.warn("[playlist] remove track failed", err);
+      report(t("trackTable.removeFailed"));
+      return;
+    }
     load();
   };
 
@@ -64,10 +72,17 @@ export default function PlaylistDetailPage() {
       return n;
     });
   };
-  const batchRemove = async () => {
+  const batchRemove = async (report: ReportActionError) => {
     if (!id) return;
     if (!confirm(t("playlist.removeTracks", { count: selected.size }))) return;
-    await api.user.removeTracksFromPlaylist(id, [...selected]);
+    report(null);
+    try {
+      await api.user.removeTracksFromPlaylist(id, [...selected]);
+    } catch (err) {
+      console.warn("[playlist] batch remove failed", err);
+      report(t("trackTable.removeFailed"));
+      return;
+    }
     setSelected(new Set());
     load();
   };
@@ -169,14 +184,14 @@ export default function PlaylistDetailPage() {
           });
         }}
         playlistFilter={(pl: any) => pl.id !== id}
-        extraBulkActions={
+        extraBulkActions={(reportError) => (
           <button
-            onClick={batchRemove}
+            onClick={() => batchRemove(reportError)}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer"
           >
             <Trash2 className="w-4 h-4" /> {t("trackTable.remove")}
           </button>
-        }
+        )}
         onPlay={(i) => {
           const playerTracks: PlayerTrack[] = (playlist?.tracks || []).map((t: any) => ({
             id: t.id,
@@ -192,11 +207,11 @@ export default function PlaylistDetailPage() {
           player.setQueue(playerTracks, i, id);
         }}
         currentTrackId={player.track?.id ?? null}
-        extraAction={(t) => (
+        extraAction={(row, _i, reportError) => (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              removeTrack(t.id);
+              removeTrack(row.id, reportError);
             }}
             className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 cursor-pointer"
           >

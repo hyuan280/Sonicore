@@ -341,6 +341,17 @@ describe("player store", () => {
       expect(isPermutation(s.shuffleOrder, 2)).toBe(true);
       expect(s.queue.map((t) => t.id)).toEqual(["a", "b"]);
     });
+
+    it("resolves true when the server save succeeds", async () => {
+      mockedUser.saveQueue.mockResolvedValue(null);
+      await expect(usePlayer.getState().addToQueue([track("b")])).resolves.toBe(true);
+    });
+
+    it("resolves false when the server save fails, keeping the local queue", async () => {
+      mockedUser.saveQueue.mockRejectedValue(new Error("boom"));
+      await expect(usePlayer.getState().addToQueue([track("b")])).resolves.toBe(false);
+      expect(usePlayer.getState().queue.map((t) => t.id)).toEqual(["b"]);
+    });
   });
 
   describe("removeFromQueue", () => {

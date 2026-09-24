@@ -4,7 +4,7 @@ import { usePlayer, type PlayerTrack } from "../stores/player";
 import { api } from "../api/client";
 import { Button } from "../components/ui/button";
 import { Play, Trash2, X } from "lucide-react";
-import TrackTable, { type TrackRow } from "../components/TrackTable";
+import TrackTable, { type TrackRow, type ReportActionError } from "../components/TrackTable";
 import { usePerPage } from "../hooks/usePerPage";
 
 export default function HistoryPage() {
@@ -101,14 +101,28 @@ export default function HistoryPage() {
     });
   };
 
-  const deleteItem = async (id: string) => {
-    await api.user.deleteHistoryItems([id]);
+  const deleteItem = async (id: string, report: ReportActionError) => {
+    report(null);
+    try {
+      await api.user.deleteHistoryItems([id]);
+    } catch (err) {
+      console.warn("[history] delete failed", err);
+      report(t("trackTable.deleteFailed"));
+      return;
+    }
     setRecords((prev) => prev.filter((h) => h.id !== id));
   };
 
-  const batchDelete = async () => {
+  const batchDelete = async (report: ReportActionError) => {
     if (!confirm(t("history.removeEntries", { count: selected.size }))) return;
-    await api.user.deleteHistoryItems([...selected]);
+    report(null);
+    try {
+      await api.user.deleteHistoryItems([...selected]);
+    } catch (err) {
+      console.warn("[history] batch delete failed", err);
+      report(t("trackTable.deleteFailed"));
+      return;
+    }
     setRecords((prev) => prev.filter((h) => !selected.has(h.id)));
     setSelected(new Set());
   };
@@ -140,14 +154,14 @@ export default function HistoryPage() {
             return n;
           });
         }}
-        extraBulkActions={
+        extraBulkActions={(reportError) => (
           <button
-            onClick={batchDelete}
+            onClick={() => batchDelete(reportError)}
             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 text-zinc-300 hover:bg-red-400 cursor-pointer"
           >
             <Trash2 className="w-4 h-4" /> {t("trackTable.delete")}
           </button>
-        }
+        )}
         onPlay={(i) => {
           const h = records.find((r) => r.id === tracks[i]?.id);
           if (h) playTrack(h);
@@ -172,11 +186,11 @@ export default function HistoryPage() {
             </span>
           );
         }}
-        extraAction={(t) => (
+        extraAction={(row, _i, reportError) => (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              deleteItem(t.id);
+              deleteItem(row.id, reportError);
             }}
             className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 cursor-pointer"
           >

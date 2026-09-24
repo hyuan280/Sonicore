@@ -41,10 +41,10 @@ describe("usePlaylists", () => {
   });
 
   it("keeps stale list and clears loading on failure", async () => {
-    usePlaylists.setState({ list: [{ id: "old" }], loaded: true });
+    usePlaylists.setState({ list: [{ id: "old", name: "Old" }], loaded: true });
     mocked.playlists.mockRejectedValue(new Error("boom"));
     await usePlaylists.getState().load(true);
-    expect(usePlaylists.getState().list).toEqual([{ id: "old" }]);
+    expect(usePlaylists.getState().list).toEqual([{ id: "old", name: "Old" }]);
     expect(usePlaylists.getState().loading).toBe(false);
   });
 
@@ -52,16 +52,38 @@ describe("usePlaylists", () => {
     usePlaylists.setState({ list: [] });
     mocked.createPlaylist.mockResolvedValue({ id: "new1" });
     const res = await usePlaylists.getState().create("My List");
-    expect(res).toEqual({ id: "new1" });
+    expect(res).toMatchObject({ id: "new1", name: "My List" });
     const list = usePlaylists.getState().list;
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ id: "new1", name: "My List" });
   });
 
+  it("returns null and keeps the list when create fails", async () => {
+    usePlaylists.setState({ list: [] });
+    mocked.createPlaylist.mockRejectedValue(new Error("boom"));
+    const res = await usePlaylists.getState().create("My List");
+    expect(res).toBeNull();
+    expect(usePlaylists.getState().list).toEqual([]);
+  });
+
   it("removes playlist by id", async () => {
-    usePlaylists.setState({ list: [{ id: "p1" }, { id: "p2" }] });
+    usePlaylists.setState({
+      list: [
+        { id: "p1", name: "P1" },
+        { id: "p2", name: "P2" },
+      ],
+    });
     mocked.deletePlaylist.mockResolvedValue(null);
-    await usePlaylists.getState().remove("p1");
+    const ok = await usePlaylists.getState().remove("p1");
+    expect(ok).toBe(true);
     expect(usePlaylists.getState().list.map((p) => p.id)).toEqual(["p2"]);
+  });
+
+  it("keeps the list and returns false when remove fails", async () => {
+    usePlaylists.setState({ list: [{ id: "p1", name: "P1" }] });
+    mocked.deletePlaylist.mockRejectedValue(new Error("boom"));
+    const ok = await usePlaylists.getState().remove("p1");
+    expect(ok).toBe(false);
+    expect(usePlaylists.getState().list.map((p) => p.id)).toEqual(["p1"]);
   });
 });

@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { usePlayer } from "../stores/player";
-import { Plus, ListMusic, Check, Heart, ListPlus, FileMusic } from "lucide-react";
+import { Plus, ListMusic, Check, Heart, ListPlus, FileMusic, Loader2 } from "lucide-react";
+import { InlineError } from "./ui/inline-error";
+import { useInlineError } from "../hooks/useInlineError";
 
 interface Props {
   trackId: string;
@@ -12,12 +14,22 @@ interface Props {
 export function AddBtn({ trackId, onDone }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { error, setError, anchorRef: ref } = useInlineError();
   const [playlists, setPlaylists] = useState<{ id: string; name: string; has: boolean }[]>([]);
-  const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    api.user.playlists().then((d) => {
+  // Load first, open only on success: a failure shows the error bubble without
+  // ever flashing an empty "no playlists" dropdown.
+  const toggle = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const d = await api.user.playlists();
       const all = d.items || [];
       setPlaylists(
         all.map((p: any) => ({
@@ -26,9 +38,17 @@ export function AddBtn({ trackId, onDone }: Props) {
           has: Array.isArray(p.track_ids) && p.track_ids.includes(trackId),
         })),
       );
-    });
-  }, [open, trackId]);
+      setOpen(true);
+    } catch (err) {
+      console.warn("[add-to-playlist] load failed", err);
+      setError(t("trackTable.loadPlaylistsFailed"));
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // Close the playlist dropdown on outside click (the error bubble is dismissed
+  // independently by useInlineError).
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -36,10 +56,18 @@ export function AddBtn({ trackId, onDone }: Props) {
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  }, [open, ref]);
 
   const add = async (plId: string) => {
-    await api.user.addTracksToPlaylist(plId, [trackId]);
+    setError(null);
+    try {
+      await api.user.addTracksToPlaylist(plId, [trackId]);
+    } catch (err) {
+      console.warn("[add-to-playlist] failed", err);
+      setError(t("trackTable.addToPlaylistFailed"));
+      setOpen(false);
+      return;
+    }
     setPlaylists((prev) => prev.map((p) => (p.id === plId ? { ...p, has: true } : p)));
     onDone?.();
   };
@@ -47,15 +75,18 @@ export function AddBtn({ trackId, onDone }: Props) {
   return (
     <div ref={ref} className="relative inline-flex">
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
-        className="p-1 text-zinc-500 hover:text-green-500 cursor-pointer"
+        onClick={toggle}
+        disabled={loading}
+        className="p-1 text-zinc-500 hover:text-green-500 cursor-pointer disabled:cursor-default"
         title={t("trackTable.addToPlaylist")}
       >
-        <ListPlus className="w-4 h-4" />
+        {loading ? (
+          <Loader2 className="w-4 h-4 animate-spin text-green-500" />
+        ) : (
+          <ListPlus className="w-4 h-4" />
+        )}
       </button>
+      {error && <InlineError message={error} />}
       {open && (
         <div
           className="absolute left-1/2 -translate-x-1/2 top-7 w-52 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-[60] py-1 max-h-48 overflow-y-auto"
@@ -98,6 +129,8 @@ interface FavProps {
 export function FavBtn({ trackId, initiallyFav, onToggle }: FavProps) {
   const { t } = useTranslation();
   const [fav, setFav] = useState(initiallyFav || false);
+  const { error, setError, anchorRef: ref } = useInlineError();
+
   useEffect(() => {
     setFav(initiallyFav || false);
   }, [initiallyFav, trackId]);
@@ -105,23 +138,33 @@ export function FavBtn({ trackId, initiallyFav, onToggle }: FavProps) {
   const toggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const newFav = !fav;
-    if (newFav) {
-      await api.user.addFavorites("track", [trackId]).catch(() => {});
-    } else {
-      await api.user.removeFavorites("track", [trackId]).catch(() => {});
+    setError(null);
+    try {
+      if (newFav) {
+        await api.user.addFavorites("track", [trackId]);
+      } else {
+        await api.user.removeFavorites("track", [trackId]);
+      }
+    } catch (err) {
+      console.warn("[favorite] update failed", err);
+      setError(t("trackTable.favoriteFailed"));
+      return;
     }
     setFav(newFav);
     onToggle?.(trackId, newFav);
   };
 
   return (
-    <button
-      onClick={toggle}
-      className={`p-1 cursor-pointer text-zinc-500 hover:text-red-400`}
-      title={fav ? t("player.removeFromFavorites") : t("player.addToFavorites")}
-    >
-      <Heart className={`w-4 h-4 ${fav ? "fill-current" : ""}`} />
-    </button>
+    <div ref={ref} className="relative inline-flex">
+      <button
+        onClick={toggle}
+        className={`p-1 cursor-pointer text-zinc-500 hover:text-red-400`}
+        title={fav ? t("player.removeFromFavorites") : t("player.addToFavorites")}
+      >
+        <Heart className={`w-4 h-4 ${fav ? "fill-current" : ""}`} />
+      </button>
+      {error && <InlineError message={error} />}
+    </div>
   );
 }
 
@@ -152,11 +195,13 @@ export function AddQueueBtn({ track, versions }: AddQueueProps) {
   const ps = usePlayer();
   const [open, setOpen] = useState(false);
   const [flipUp, setFlipUp] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const { error, setError, anchorRef: ref } = useInlineError();
   const trackSuffix = track.suffix || track.file_format || "mp3";
 
   const hasVersions = versions && versions.length > 0;
 
+  // Close the version dropdown on outside click (the error bubble is dismissed
+  // independently by useInlineError).
   useEffect(() => {
     if (!open) {
       setFlipUp(false);
@@ -167,10 +212,19 @@ export function AddQueueBtn({ track, versions }: AddQueueProps) {
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  }, [open, ref]);
 
-  const addTrack = (id: string, title: string, dur: number, suffix: string, label?: string) => {
-    ps.addToQueue([
+  const addTrack = async (
+    id: string,
+    title: string,
+    dur: number,
+    suffix: string,
+    label?: string,
+  ) => {
+    setError(null);
+    // A false result means the server sync failed after the local queue was
+    // already updated; this is intentionally surfaced as a failure.
+    const ok = await ps.addToQueue([
       {
         id,
         title,
@@ -184,6 +238,10 @@ export function AddQueueBtn({ track, versions }: AddQueueProps) {
         versions: versions,
       },
     ]);
+    if (!ok) {
+      setError(t("trackTable.queueFailed"));
+      return;
+    }
     setOpen(false);
   };
 
@@ -212,6 +270,7 @@ export function AddQueueBtn({ track, versions }: AddQueueProps) {
       >
         <Plus className="w-4 h-4" />
       </button>
+      {error && <InlineError message={error} />}
       {open && hasVersions && (
         <div
           className={`absolute left-1/2 -translate-x-1/2 ${posClass} w-64 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-[60] py-1 max-h-72 overflow-y-auto`}
