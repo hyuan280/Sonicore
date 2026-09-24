@@ -55,6 +55,10 @@ func (ce *CoverExtractor) ExtractFromFile(ctx context.Context, audioPath string)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		// The full stderr is verbose (banner, stream dump, per-packet noise),
+		// so it is logged at debug level only; the caller-facing error keeps a
+		// one-line root-cause summary to avoid flooding error-level logs.
+		logger.Debug("[cover] ffmpeg stderr for %s:\n%s", audioPath, stderr.String())
 		return nil, "", fmt.Errorf("ffmpeg extract cover: %w: %s", err, summarizeFFmpegError(stderr.String()))
 	}
 
@@ -67,14 +71,61 @@ func (ce *CoverExtractor) ExtractFromFile(ctx context.Context, audioPath string)
 	return data, contentType, nil
 }
 
-// summarizeFFmpegError returns ffmpeg's stderr in full so no root-cause line
-// is lost (the log-level / file-rotation handling for these is tracked as a
-// known issue). A blank stderr yields a generic message.
+// maxFFmpegSummaryRunes bounds the root-cause line kept in the error returned
+// to callers, so an error-level log stays short even with a pathological
+// stderr. The full stderr is available at debug level (see ExtractFromFile).
+const maxFFmpegSummaryRunes = 300
+
+// summarizeFFmpegError condenses ffmpeg's stderr into a single rune-safe line
+// for the caller-facing error: the last non-empty line that is not a generic
+// trailer ("Conversion failed!" / "Last message repeated ..."), which
+// otherwise masks the real root cause. When every line is such a trailer (or
+// blank), the last non-empty line is kept as-is so the reason after its colon
+// is not lost. A blank stderr yields a generic message.
 func summarizeFFmpegError(stderr string) string {
-	if trimmed := strings.TrimSpace(stderr); trimmed != "" {
-		return trimmed
+	cause, lastLine := "", ""
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lastLine = line
+		if !isFFmpegBoilerplate(line) {
+			cause = line
+		}
 	}
-	return "ffmpeg failed"
+	if cause == "" {
+		cause = lastLine
+	}
+	if cause == "" {
+		return "ffmpeg failed"
+	}
+	return truncateRunes(cause, maxFFmpegSummaryRunes)
+}
+
+// isFFmpegBoilerplate reports whether line is a generic trailing diagnostic
+// that carries no useful root cause. Lines like "Error while decoding stream
+// #0:0: <reason>" are deliberately NOT boilerplate: the text after the colon
+// is usually the real failure reason.
+func isFFmpegBoilerplate(line string) bool {
+	switch line {
+	case "Conversion failed!":
+		return true
+	}
+	return strings.HasPrefix(line, "Last message repeated")
+}
+
+// truncateRunes cuts s to at most max runes (never splitting a multi-byte
+// UTF-8 sequence) and appends an ellipsis when truncated.
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 func (ce *CoverExtractor) Save(libraryID, ownerType, ownerID string, data []byte, ext string, sizes ...int) (string, error) {

@@ -789,14 +789,19 @@ func (c *cachedSettings) get(repo *repository.SettingsRepo, key string) string {
 // in ONE database query with a single timeout (instead of one query per key).
 // The registry build reads four keys, so a cold cache backed by a failing DB
 // would otherwise serialize up to four 2s timeouts (8s worst case) on a hot
-// path. Absent keys are absent from the returned map ("no override").
+// path. Only non-empty values are returned: an empty (or absent, or
+// failed-read) setting is the "no override" case and is kept out of the map,
+// so a key's presence in the result is stable across calls regardless of
+// cache state.
 func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) map[string]string {
 	out := make(map[string]string, len(keys))
 	c.mu.RLock()
 	var stale []string
 	for _, k := range keys {
 		if e, ok := c.vals[k]; ok && time.Since(e.at) < settingsCacheTTL {
-			out[k] = e.value
+			if e.value != "" {
+				out[k] = e.value
+			}
 		} else {
 			stale = append(stale, k)
 		}
@@ -810,11 +815,15 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 	var toQuery []string
 	for _, k := range stale {
 		if e, ok := c.vals[k]; ok && time.Since(e.at) < settingsCacheTTL {
-			out[k] = e.value // another goroutine refreshed it while we waited
+			if e.value != "" {
+				out[k] = e.value // another goroutine refreshed it while we waited
+			}
 			continue
 		}
 		if c.refreshing[k] {
-			out[k] = c.vals[k].value // a refresh is in flight; serve the cached value
+			if v := c.vals[k].value; v != "" {
+				out[k] = v // a refresh is in flight; serve the cached value
+			}
 			continue
 		}
 		c.refreshing[k] = true
@@ -833,11 +842,15 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 	for _, k := range toQuery {
 		delete(c.refreshing, k)
 		if err == nil {
+			// An empty value is the same "no override" as a missing key and is
+			// kept out of the returned map (but cached), so presence is stable
+			// across calls instead of flipping once the entry is cached.
 			if v, ok := values[k]; ok {
-				out[k] = v
+				if v != "" {
+					out[k] = v
+				}
 				c.vals[k] = settingsCacheEntry{value: v, at: time.Now()}
 			} else {
-				// key absent from DB — leave out of map per "no override" contract
 				c.vals[k] = settingsCacheEntry{value: "", at: time.Now()}
 			}
 			continue
@@ -845,7 +858,9 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 		// On failure reuse the cached value (or empty) and back off so a flaky
 		// DB does not force every hot-path read into the query path.
 		old := c.vals[k]
-		out[k] = old.value
+		if old.value != "" {
+			out[k] = old.value
+		}
 		c.vals[k] = settingsCacheEntry{value: old.value, at: time.Now()}
 	}
 	c.mu.Unlock()

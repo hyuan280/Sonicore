@@ -246,14 +246,14 @@ func (h *MetadataHandler) Save(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build artist string from artists array
-	artistStr := ""
-	for i, a := range req.Artists {
-		if i > 0 {
-			artistStr += ","
-		}
-		artistStr += a.Name
+	// Encode the artist list with a separator that cannot occur in a name so
+	// comma-bearing names (e.g. "Last, First") survive the user-cache
+	// round-trip (utils.SplitArtistNames decodes it).
+	artistNames := make([]string, 0, len(req.Artists))
+	for _, a := range req.Artists {
+		artistNames = append(artistNames, a.Name)
 	}
+	artistStr := utils.JoinArtistNames(artistNames)
 
 	// The cache records the source this save is based on (effSource: the
 	// request's effective new source, else the track's current source) so the

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/repository"
@@ -83,15 +82,11 @@ func (s *userSource) Identify(ctx context.Context, q port.MetadataQuery) (*port.
 		Score:      1.0,
 	}
 	if um.Artist != "" {
-		// The cache stores a comma-joined artist list ("A,B") built from
-		// individual names by the Save handler, so only a comma split is
-		// needed — a multi-separator split would wrongly break names that
-		// themselves contain "/", "、" or "&" (e.g. "AC/DC").
-		for _, name := range strings.Split(um.Artist, ",") {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				c.Artists = append(c.Artists, port.ArtistInfo{Name: name})
-			}
+		// The cache stores an artist list encoded by utils.JoinArtistNames
+		// (unit-separator-joined) so names that themselves contain a comma
+		// (e.g. "Last, First") survive a round-trip.
+		for _, name := range utils.SplitArtistNames(um.Artist) {
+			c.Artists = append(c.Artists, port.ArtistInfo{Name: name})
 		}
 	}
 	return c, nil

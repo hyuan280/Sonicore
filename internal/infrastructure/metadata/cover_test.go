@@ -346,12 +346,29 @@ func mustRead(t *testing.T, path string) []byte {
 func TestSummarizeFFmpegError(t *testing.T) {
 	full := "ffmpeg version 5.1.9\n  configuration: --prefix=/usr\nInput #0, flac, from '/x.flac':\n  Duration: 00:00:30.00\nOutput #0, image2, to 'pipe:1':\nOutput file #0 does not contain any stream"
 	got := summarizeFFmpegError(full)
-	// The full stderr is kept verbatim (root-cause line must never be lost).
-	assert.Contains(t, got, "ffmpeg version", "banner kept in full")
-	assert.Contains(t, got, "Output file #0 does not contain any stream", "cause kept in full")
-	assert.Equal(t, strings.TrimSpace(full), got, "whitespace-trimmed passthrough")
+	// Only the root-cause line is kept (banner/stream dump is at debug level).
+	assert.Equal(t, "Output file #0 does not contain any stream", got)
+
+	// A generic trailer must not push the real cause out.
+	generic := "Could not write header for output file #0: Invalid argument\nConversion failed!"
+	assert.Equal(t, "Could not write header for output file #0: Invalid argument", summarizeFFmpegError(generic))
+
+	// A decode line carries the reason after the colon and must be kept even
+	// when followed by the generic "Conversion failed!" trailer.
+	decode := "Error while decoding stream #0:0: Invalid data found when processing input\nConversion failed!"
+	assert.Equal(t, "Error while decoding stream #0:0: Invalid data found when processing input", summarizeFFmpegError(decode))
+
+	// When every line is a generic trailer, fall back to the last one rather
+	// than dropping the reason entirely.
+	assert.Equal(t, "Conversion failed!", summarizeFFmpegError("\nConversion failed!\n"))
 
 	assert.Equal(t, "ffmpeg failed", summarizeFFmpegError("  \n\n"))
+
+	// Long lines are truncated by rune, never splitting a multi-byte char.
+	long := strings.Repeat("错", 400)
+	truncated := summarizeFFmpegError(long)
+	assert.Equal(t, maxFFmpegSummaryRunes+1, len([]rune(truncated)), "max runes plus ellipsis")
+	assert.True(t, strings.HasSuffix(truncated, "…"))
 }
 
 func TestFetchImageOK(t *testing.T) {

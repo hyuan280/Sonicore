@@ -12,6 +12,7 @@ import (
 
 	"github.com/sonicore/server/internal/core/port"
 	"github.com/sonicore/server/internal/infrastructure/repository"
+	"github.com/sonicore/server/pkg/utils"
 )
 
 func newUserSource(t *testing.T, row *repository.UserMetadata) *userSource {
@@ -75,6 +76,39 @@ func TestUserSourceIdentifyHit(t *testing.T) {
 	assert.Equal(t, "用户艺人", c.Artists[0].Name)
 	assert.Equal(t, 2020, c.Year)
 	assert.Equal(t, 1.0, c.Score)
+}
+
+func TestUserSourceIdentifyCommaArtistRoundTrip(t *testing.T) {
+	row := &repository.UserMetadata{
+		UserID:   "u-1",
+		FileHash: "h1",
+		Artist:   utils.JoinArtistNames([]string{"Last, First", "Another"}),
+	}
+	s := newUserSource(t, row)
+
+	c, err := s.Identify(context.Background(), port.MetadataQuery{UserID: "u-1", FileHash: "h1"})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	require.Len(t, c.Artists, 2, "comma inside a name must not split it")
+	assert.Equal(t, "Last, First", c.Artists[0].Name)
+	assert.Equal(t, "Another", c.Artists[1].Name)
+}
+
+func TestUserSourceIdentifyCommaIsData(t *testing.T) {
+	// A stored value without the separator is a single name; a comma inside
+	// it is data, not a list separator.
+	row := &repository.UserMetadata{
+		UserID:   "u-1",
+		FileHash: "h1",
+		Artist:   "Last, First",
+	}
+	s := newUserSource(t, row)
+
+	c, err := s.Identify(context.Background(), port.MetadataQuery{UserID: "u-1", FileHash: "h1"})
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	require.Len(t, c.Artists, 1)
+	assert.Equal(t, "Last, First", c.Artists[0].Name)
 }
 
 func TestUserSourceIdentifyMiss(t *testing.T) {
