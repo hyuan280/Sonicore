@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -211,47 +212,90 @@ func TestAdminUpdateUserRoleActorNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestAdminGetSettings(t *testing.T) {
-	h, mock := newAdminHandler(t)
+const settingsGetManyQuery = `SELECT key, value FROM server_settings WHERE category=$1 AND key = ANY($2)`
+const settingsUpsertQuery = `INSERT INTO server_settings (key, value, category) VALUES ($1, $2, $3)
+		 ON CONFLICT (key) DO UPDATE SET value=$2, category=$3`
 
-	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "subsonic_jukebox_id", "plugins_github_token"} {
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-			WithArgs(k).
-			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
-	}
+func settingsReq(method, category, body string) *http.Request {
+	r := httptest.NewRequest(method, "/api/admin/settings/"+category, strings.NewReader(body))
+	return mux.SetURLVars(r, map[string]string{"category": category})
+}
+
+func TestAdminGetSettingsUnknownCategoryForbidden(t *testing.T) {
+	h, _ := newAdminHandler(t)
 
 	rec := httptest.NewRecorder()
-	h.GetSettings(rec, httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil))
+	h.GetSettings(rec, settingsReq(http.MethodGet, "", ""))
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":815`)
+}
+
+func TestAdminGetSystemSettings(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta(settingsGetManyQuery)).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).
+			AddRow("system.allow_registration", "true").
+			AddRow("system.plugins.github_token", "enc:v1:broken"))
+
+	rec := httptest.NewRecorder()
+	h.GetSettings(rec, settingsReq(http.MethodGet, "system", ""))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"allow_registration":true`)
-	assert.Contains(t, rec.Body.String(), `"metadata_musicbrainz_enabled":true`)
-	assert.Contains(t, rec.Body.String(), `"metadata_netease_enabled":true`)
-	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":true`)
-	assert.Contains(t, rec.Body.String(), `"plugins_github_token_set":true`)
-	assert.NotContains(t, rec.Body.String(), "MUSIC_U", "raw cookie never returned")
+	assert.Contains(t, rec.Body.String(), `"github_token_error":true`)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestAdminUpdateSettingsPartial(t *testing.T) {
+func TestAdminGetSettingsLoadFailure(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta(settingsGetManyQuery)).
+		WillReturnError(errors.New("db down"))
+
+	rec := httptest.NewRecorder()
+	h.GetSettings(rec, settingsReq(http.MethodGet, "system", ""))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"code":816`)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAdminGetSourceSettingsReportsBrokenCookie(t *testing.T) {
+	h, mock := newAdminHandler(t)
+
+	mock.ExpectQuery(regexp.QuoteMeta(settingsGetManyQuery)).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).
+			AddRow("source.musicbrainz.enabled", "true").
+			AddRow("source.netease.cookie", "enc:v1:not-valid"))
+
+	rec := httptest.NewRecorder()
+	h.GetSettings(rec, settingsReq(http.MethodGet, "source", ""))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"source":{`)
+	assert.Contains(t, rec.Body.String(), `"enabled":true`)
+	assert.Contains(t, rec.Body.String(), `"cookie_set":false`)
+	assert.Contains(t, rec.Body.String(), `"cookie_error":true`)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAdminUpdateSystemSettingsPartial(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
 	// only allow_registration is set; the batch commits in one transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
-		WithArgs("allow_registration", "false").
+	mock.ExpectExec(regexp.QuoteMeta(settingsUpsertQuery)).
+		WithArgs("system.allow_registration", "false", "system").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	// then 8 reads for the response
-	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id", "plugins_github_token"} {
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-			WithArgs(k).
-			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(""))
-	}
+	// response reads the system category in one query
+	mock.ExpectQuery(regexp.QuoteMeta(settingsGetManyQuery)).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).
+			AddRow("system.allow_registration", "false"))
 
 	rec := httptest.NewRecorder()
-	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
-		strings.NewReader(`{"allow_registration":false}`)))
+	h.UpdateSettings(rec, settingsReq(http.MethodPut, "system", `{"system":{"allow_registration":false}}`))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"allow_registration":false`)
@@ -267,114 +311,86 @@ func (p prefixArg) Match(v driver.Value) bool {
 	return ok && strings.HasPrefix(s, p.prefix)
 }
 
-func TestAdminUpdateSettingsEncryptsCookie(t *testing.T) {
+func TestAdminUpdateSourceSettingsEncryptsCookie(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
-	// The stored value must actually decrypt: GetSettings now reports a
-	// broken cookie when it cannot, so a stub would flip cookie_set to false.
+	// The stored value must actually decrypt: the read reports a broken
+	// cookie when it cannot, so a stub would flip cookie_set to false.
 	stored, err := h.enc.Encrypt("MUSIC_U=session-token")
 	require.NoError(t, err)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
-		WithArgs("platforms_netease_cookie", prefixArg{prefix: "enc:v1:"}).
+	mock.ExpectExec(regexp.QuoteMeta(settingsUpsertQuery)).
+		WithArgs("source.netease.cookie", prefixArg{prefix: "enc:v1:"}, "source").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	// response reads: cookie comes back encrypted → cookie_set true
-	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id", "plugins_github_token"} {
-		val := ""
-		if k == "platforms_netease_cookie" {
-			val = stored
-		}
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-			WithArgs(k).
-			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(val))
-	}
+	mock.ExpectQuery(regexp.QuoteMeta(settingsGetManyQuery)).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).
+			AddRow("source.netease.cookie", stored))
 
 	rec := httptest.NewRecorder()
-	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
-		strings.NewReader(`{"platforms_netease_cookie":"MUSIC_U=session-token"}`)))
+	h.UpdateSettings(rec, settingsReq(http.MethodPut, "source",
+		`{"source":{"netease":{"cookie":"MUSIC_U=session-token"}}}`))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":true`)
-	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_error":false`)
+	assert.Contains(t, rec.Body.String(), `"cookie_set":true`)
+	assert.Contains(t, rec.Body.String(), `"cookie_error":false`)
 	assert.NotContains(t, rec.Body.String(), "MUSIC_U=session-token", "plaintext never echoed")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestAdminGetSettingsReportsBrokenCookie(t *testing.T) {
-	h, mock := newAdminHandler(t)
-
-	// A stored cookie that no longer decrypts (e.g. after a secret rotation
-	// or corruption) must surface as broken, not as "configured". Query order
-	// mirrors GetSettings' reads.
-	for _, k := range []string{"allow_registration", "metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "platforms_netease_rate_limit", "subsonic_jukebox_id", "plugins_github_token"} {
-		val := ""
-		if k == "platforms_netease_cookie" {
-			val = "enc:v1:not-valid"
-		}
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-			WithArgs(k).
-			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(val))
-	}
-
-	rec := httptest.NewRecorder()
-	h.GetSettings(rec, httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil))
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_set":false`)
-	assert.Contains(t, rec.Body.String(), `"platforms_netease_cookie_error":true`)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestAdminUpdateSettingsCookieClearConflict(t *testing.T) {
-	h, _ := newAdminHandler(t)
-
-	rec := httptest.NewRecorder()
-	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
-		strings.NewReader(`{"platforms_netease_cookie":"MUSIC_U=abc","platforms_netease_cookie_clear":true}`)))
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestAdminUpdateSettingsEncryptsGitHubToken(t *testing.T) {
+func TestAdminUpdateSystemSettingsEncryptsGitHubToken(t *testing.T) {
 	h, mock := newAdminHandler(t)
 
 	stored, err := h.enc.Encrypt("ghp_secret-token")
 	require.NoError(t, err)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO server_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2`)).
-		WithArgs("plugins_github_token", prefixArg{prefix: "enc:v1:"}).
+	mock.ExpectExec(regexp.QuoteMeta(settingsUpsertQuery)).
+		WithArgs("system.plugins.github_token", prefixArg{prefix: "enc:v1:"}, "system").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	for _, k := range []string{"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url", "metadata_musicbrainz_rate_limit", "metadata_netease_enabled", "platforms_netease_cookie", "allow_registration", "subsonic_jukebox_id", "plugins_github_token"} {
-		val := ""
-		if k == "plugins_github_token" {
-			val = stored
-		}
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-			WithArgs(k).
-			WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(val))
-	}
+	mock.ExpectQuery(regexp.QuoteMeta(settingsGetManyQuery)).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).
+			AddRow("system.plugins.github_token", stored))
 
 	rec := httptest.NewRecorder()
-	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
-		strings.NewReader(`{"plugins_github_token":"ghp_secret-token"}`)))
+	h.UpdateSettings(rec, settingsReq(http.MethodPut, "system",
+		`{"system":{"plugins":{"github_token":"ghp_secret-token"}}}`))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"plugins_github_token_set":true`)
-	assert.Contains(t, rec.Body.String(), `"plugins_github_token_error":false`)
+	assert.Contains(t, rec.Body.String(), `"github_token_set":true`)
+	assert.Contains(t, rec.Body.String(), `"github_token_error":false`)
 	assert.NotContains(t, rec.Body.String(), "ghp_secret-token", "plaintext never echoed")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestAdminUpdateSettingsTokenClearConflict(t *testing.T) {
+func TestAdminUpdateSourceSettingsCookieClearConflict(t *testing.T) {
 	h, _ := newAdminHandler(t)
 
 	rec := httptest.NewRecorder()
-	h.UpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/api/admin/settings",
-		strings.NewReader(`{"plugins_github_token":"ghp_abc","plugins_github_token_clear":true}`)))
+	h.UpdateSettings(rec, settingsReq(http.MethodPut, "source",
+		`{"source":{"netease":{"cookie":"MUSIC_U=abc","cookie_clear":true}}}`))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUpdateSystemSettingsTokenClearConflict(t *testing.T) {
+	h, _ := newAdminHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.UpdateSettings(rec, settingsReq(http.MethodPut, "system",
+		`{"system":{"plugins":{"github_token":"ghp_abc","github_token_clear":true}}}`))
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUpdateNetworkSettingsValidatesProxy(t *testing.T) {
+	h, _ := newAdminHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.UpdateSettings(rec, settingsReq(http.MethodPut, "network",
+		`{"network":{"proxy_url":"ftp://bad"}}`))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

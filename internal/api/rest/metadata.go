@@ -60,13 +60,13 @@ func (h *MetadataHandler) mbConfig(ctx context.Context) metadata.MBConfig {
 	// actually stored. Enabled follows the runtime switch so manual identify
 	// (SearchTrack/Identify/Reidentify/Save) stays consistent with the covers
 	// and scanner paths.
-	if enabled, err := h.settingsRepo.Get(ctx, "metadata_musicbrainz_enabled"); err == nil && enabled != "" {
+	if enabled, err := h.settingsRepo.Get(ctx, repository.CategorySource, "musicbrainz.enabled"); err == nil && enabled != "" {
 		cfg.Enabled = enabled == "true"
 	}
-	if url, err := h.settingsRepo.Get(ctx, "metadata_musicbrainz_api_url"); err == nil && url != "" {
+	if url, err := h.settingsRepo.Get(ctx, repository.CategorySource, "musicbrainz.api_url"); err == nil && url != "" {
 		cfg.APIURL = url
 	}
-	if rl, err := h.settingsRepo.Get(ctx, "metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
+	if rl, err := h.settingsRepo.Get(ctx, repository.CategorySource, "musicbrainz.rate_limit"); err == nil && rl != "" {
 		if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
 			logger.Warn("[metadata] invalid musicbrainz rate limit %q", rl)
 		} else {
@@ -92,7 +92,7 @@ func (h *MetadataHandler) newRegistry(ctx context.Context) *metadata.Registry {
 	mbCfg := h.mbConfig(ctx)
 
 	neteaseEnabled := h.neteaseEnabled
-	if enabled, err := h.settingsRepo.Get(ctx, "metadata_netease_enabled"); err == nil && enabled != "" {
+	if enabled, err := h.settingsRepo.Get(ctx, repository.CategorySource, "netease.enabled"); err == nil && enabled != "" {
 		neteaseEnabled = enabled == "true"
 	}
 	var sources []port.MetadataSource

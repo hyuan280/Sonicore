@@ -197,6 +197,63 @@ async function requestBlob(path: string): Promise<Blob | null> {
   }
 }
 
+// Admin server settings are split by category. Request and response bodies are
+// nested and mirror the backend's dotted keys (e.g. source.musicbrainz.enabled
+// <-> {"source":{"musicbrainz":{"enabled":true}}}).
+export type AdminSettingsCategory = "system" | "source" | "network" | "notification";
+
+export interface SystemSettingsUpdate {
+  system?: {
+    allow_registration?: boolean;
+    log?: { level?: string };
+    subsonic?: { jukebox_id?: string };
+    plugins?: { github_token?: string; github_token_clear?: boolean };
+  };
+}
+
+export interface NeteaseSettingsUpdate {
+  enabled?: boolean;
+  cookie?: string;
+  cookie_clear?: boolean;
+  rate_limit?: string;
+}
+
+export interface SourceSettingsUpdate {
+  source?: {
+    musicbrainz?: { enabled?: boolean; api_url?: string; rate_limit?: string };
+    netease?: NeteaseSettingsUpdate;
+  };
+}
+
+export interface NetworkSettingsUpdate {
+  network?: {
+    proxy_url?: string;
+    github?: { proxy_url?: string; use_global?: boolean };
+  };
+}
+
+export interface EmailSettingsUpdate {
+  enabled?: boolean;
+  smtp_host?: string;
+  smtp_port?: string;
+  username?: string;
+  password?: string;
+  from_address?: string;
+  from_name?: string;
+  tls?: boolean;
+}
+
+export interface NotificationSettingsUpdate {
+  notification?: { email?: EmailSettingsUpdate };
+}
+
+export interface AdminSettingsUpdateMap {
+  system: SystemSettingsUpdate;
+  source: SourceSettingsUpdate;
+  network: NetworkSettingsUpdate;
+  notification: NotificationSettingsUpdate;
+}
+
 export const api = {
   auth: {
     login: (d: any) => request("/api/auth/login", { method: "POST", body: JSON.stringify(d) }),
@@ -221,9 +278,10 @@ export const api = {
     updateRole: (id: string, role: string) =>
       request(`/api/admin/users/${id}/role`, { method: "PUT", body: JSON.stringify({ role }) }),
     getUserAvatar: (id: string) => requestBlob(`/api/admin/users/${encodeURIComponent(id)}/avatar`),
-    getSettings: () => request("/api/admin/settings"),
-    updateSettings: (s: any) =>
-      request("/api/admin/settings", { method: "PUT", body: JSON.stringify(s) }),
+    getSettings: <C extends AdminSettingsCategory>(category: C) =>
+      request(`/api/admin/settings/${category}`),
+    updateSettings: <C extends AdminSettingsCategory>(category: C, s: AdminSettingsUpdateMap[C]) =>
+      request(`/api/admin/settings/${category}`, { method: "PUT", body: JSON.stringify(s) }),
     dirs: (dir: string) => request(`/api/admin/dirs?path=${encodeURIComponent(dir)}`),
   },
   libraries: {

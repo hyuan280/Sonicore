@@ -57,7 +57,7 @@ func NewNotificationService(cfg config.NotificationConfig, users port.UserReposi
 		if svc.settingsRepo == nil {
 			return nil
 		}
-		if err := svc.settingsRepo.Set(ctx, "notification_email_enabled", strconv.FormatBool(enabled)); err != nil {
+		if err := svc.settingsRepo.Set(ctx, repository.CategoryNotification, "email.enabled", strconv.FormatBool(enabled)); err != nil {
 			return err
 		}
 		svc.ReloadEmailConfig(ctx)
@@ -206,37 +206,37 @@ func (s *NotificationService) loadEmailConfig(ctx context.Context) config.EmailC
 		return cfg
 	}
 	keys := []string{
-		"notification_email_enabled",
-		"notification_email_smtp_host",
-		"notification_email_smtp_port",
-		"notification_email_username",
-		"notification_email_password",
-		"notification_email_from_address",
-		"notification_email_from_name",
-		"notification_email_tls",
+		"email.enabled",
+		"email.smtp_host",
+		"email.smtp_port",
+		"email.username",
+		"email.password",
+		"email.from_address",
+		"email.from_name",
+		"email.tls",
 	}
-	values, err := s.settingsRepo.GetMany(ctx, keys)
+	values, err := s.settingsRepo.GetMany(ctx, repository.CategoryNotification, keys)
 	if err != nil {
 		logger.Error("[notification] failed to load email config from db: %v, using defaults", err)
 		return cfg
 	}
-	if v := values["notification_email_enabled"]; v != "" {
+	if v := values["email.enabled"]; v != "" {
 		cfg.Enabled = v == "true"
 	}
-	if v := values["notification_email_smtp_host"]; v != "" {
+	if v := values["email.smtp_host"]; v != "" {
 		cfg.SMTPHost = v
 	}
-	if v := values["notification_email_smtp_port"]; v != "" {
+	if v := values["email.smtp_port"]; v != "" {
 		if n, err := strconv.Atoi(v); err != nil {
 			logger.Warn("[notification] invalid smtp_port %q: %v", v, err)
 		} else {
 			cfg.SMTPPort = n
 		}
 	}
-	if v := values["notification_email_username"]; v != "" {
+	if v := values["email.username"]; v != "" {
 		cfg.Username = v
 	}
-	if v := values["notification_email_password"]; v != "" {
+	if v := values["email.password"]; v != "" {
 		if s.enc != nil {
 			if d, err := s.enc.Decrypt(v); err == nil {
 				cfg.Password = d
@@ -247,13 +247,13 @@ func (s *NotificationService) loadEmailConfig(ctx context.Context) config.EmailC
 			cfg.Password = v
 		}
 	}
-	if v := values["notification_email_from_address"]; v != "" {
+	if v := values["email.from_address"]; v != "" {
 		cfg.FromAddress = v
 	}
-	if v := values["notification_email_from_name"]; v != "" {
+	if v := values["email.from_name"]; v != "" {
 		cfg.FromName = v
 	}
-	if v := values["notification_email_tls"]; v != "" {
+	if v := values["email.tls"]; v != "" {
 		cfg.TLS = v == "true"
 	}
 	return cfg

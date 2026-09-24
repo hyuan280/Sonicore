@@ -74,8 +74,8 @@ func expectUserFindByUsername(mock sqlmock.Sqlmock, username, email, hash string
 func TestAuthRegisterSuccess(t *testing.T) {
 	handler, _, mock, mr := newAuthHandler(t)
 
-	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
-		WithArgs("allow_registration").
+	mock.ExpectQuery(`SELECT value FROM server_settings WHERE category=\$1 AND key=\$2`).
+		WithArgs("system", "system.allow_registration").
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
 	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("alice").
@@ -109,7 +109,7 @@ func TestAuthRegisterSuccess(t *testing.T) {
 func TestAuthRegisterSecondUserIsRegular(t *testing.T) {
 	handler, _, mock, _ := newAuthHandler(t)
 
-	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
+	mock.ExpectQuery(`SELECT value FROM server_settings WHERE category=\$1 AND key=\$2`).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
 	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WillReturnError(sql.ErrNoRows)
@@ -154,8 +154,8 @@ func TestAuthRegisterShortPassword(t *testing.T) {
 func TestAuthRegisterDisabled(t *testing.T) {
 	handler, _, mock, _ := newAuthHandler(t)
 
-	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
-		WithArgs("allow_registration").
+	mock.ExpectQuery(`SELECT value FROM server_settings WHERE category=\$1 AND key=\$2`).
+		WithArgs("system", "system.allow_registration").
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("false"))
 
 	rec := doJSONRequest(handler.Register, http.MethodPost, "/api/auth/register",
@@ -167,7 +167,7 @@ func TestAuthRegisterDisabled(t *testing.T) {
 func TestAuthRegisterDuplicateUsername(t *testing.T) {
 	handler, _, mock, _ := newAuthHandler(t)
 
-	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
+	mock.ExpectQuery(`SELECT value FROM server_settings WHERE category=\$1 AND key=\$2`).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
 	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("alice").
@@ -183,7 +183,7 @@ func TestAuthRegisterDuplicateUsername(t *testing.T) {
 func TestAuthRegisterDuplicateEmail(t *testing.T) {
 	handler, _, mock, _ := newAuthHandler(t)
 
-	mock.ExpectQuery(`SELECT value FROM server_settings WHERE key=\$1`).
+	mock.ExpectQuery(`SELECT value FROM server_settings WHERE category=\$1 AND key=\$2`).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("true"))
 	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, avatar_format, created_at, updated_at FROM users WHERE username = \$1`).
 		WillReturnError(sql.ErrNoRows)

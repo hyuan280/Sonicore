@@ -140,7 +140,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// provider so changes apply without a restart. The stored value is
 	// encrypted at rest; decrypt it at the point of use.
 	neteaseProvider.SetCookieProvider(func() string {
-		raw := cachedSettings.get(settingsRepo, "platforms_netease_cookie")
+		raw := cachedSettings.get(settingsRepo, repository.CategorySource, "netease.cookie")
 		if raw == "" {
 			return ""
 		}
@@ -152,17 +152,17 @@ func New(cfg *config.Config) (*Server, error) {
 		return dec
 	})
 	// The NetEase request pacing follows the runtime admin setting
-	// (platforms_netease_rate_limit), falling back to the config value; an
+	// (source.netease.rate_limit), falling back to the config value; an
 	// empty/invalid setting keeps the config default.
 	neteaseProvider.SetRateLimitProvider(func() int {
-		raw := cachedSettings.get(settingsRepo, "platforms_netease_rate_limit")
+		raw := cachedSettings.get(settingsRepo, repository.CategorySource, "netease.rate_limit")
 		if n, err := strconv.Atoi(raw); err == nil {
 			return n
 		}
 		return cfg.Platforms.Netease.RateLimit
 	})
 	// Runtime log level override from admin settings.
-	if lvl := cachedSettings.get(settingsRepo, "log_level"); lvl != "" {
+	if lvl := cachedSettings.get(settingsRepo, repository.CategorySystem, "log.level"); lvl != "" {
 		if _, ok := logger.ParseLevelOk(lvl); !ok {
 			logger.Warn("[server] invalid log_level %q in settings, ignoring", lvl)
 		} else {
@@ -179,16 +179,16 @@ func New(cfg *config.Config) (*Server, error) {
 		// Read every runtime switch in one batched, TTL-cached query so a cold
 		// cache (or a failing DB) does not serialize one timeout per key on
 		// the cover hot path.
-		vals := cachedSettings.getMany(settingsRepo,
-			"metadata_musicbrainz_enabled", "metadata_musicbrainz_api_url",
-			"metadata_musicbrainz_rate_limit", "metadata_netease_enabled")
-		if enabled := vals["metadata_musicbrainz_enabled"]; enabled != "" {
+		vals := cachedSettings.getMany(settingsRepo, repository.CategorySource,
+			"musicbrainz.enabled", "musicbrainz.api_url",
+			"musicbrainz.rate_limit", "netease.enabled")
+		if enabled := vals["musicbrainz.enabled"]; enabled != "" {
 			mbCfg.Enabled = enabled == "true"
 		}
-		if url := vals["metadata_musicbrainz_api_url"]; url != "" {
+		if url := vals["musicbrainz.api_url"]; url != "" {
 			mbCfg.APIURL = url
 		}
-		if rl := vals["metadata_musicbrainz_rate_limit"]; rl != "" {
+		if rl := vals["musicbrainz.rate_limit"]; rl != "" {
 			if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
 				logger.Warn("[server] invalid musicbrainz rate limit %q", rl)
 			} else {
@@ -196,7 +196,7 @@ func New(cfg *config.Config) (*Server, error) {
 			}
 		}
 		neEnabled := cfg.Metadata.NeteaseEnabled
-		if enabled := vals["metadata_netease_enabled"]; enabled != "" {
+		if enabled := vals["netease.enabled"]; enabled != "" {
 			neEnabled = enabled == "true"
 		}
 		var sources []port.MetadataSource
@@ -217,7 +217,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// its cleanup pass can be registered as a task. Plugin-declared
 	// schedules are registered into the same scheduler by the plugin
 	// manager, so it must exist before plugin discovery starts.
-	sched := task.NewScheduler(task.NewSettingsStateStore(settingsRepo))
+	sched := task.NewScheduler(task.NewTaskStateStore(repository.NewTaskStateRepo(db)))
 	authLimiter := middleware.NewRateLimiter(10, time.Minute)
 	if err := sched.Register(task.Spec{
 		ID:       "transcode_cache_cleanup",
@@ -273,7 +273,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// download-count lookups can use an authenticated GitHub API (higher rate
 	// limit). The stored value is encrypted at rest; decrypt at the point of use.
 	marketSvc.SetGitHubTokenProvider(func() string {
-		raw := cachedSettings.get(settingsRepo, "plugins_github_token")
+		raw := cachedSettings.get(settingsRepo, repository.CategorySystem, "plugins.github_token")
 		if raw == "" {
 			return ""
 		}
@@ -291,12 +291,12 @@ func New(cfg *config.Config) (*Server, error) {
 	// global proxy never silently drops the configured GitHub proxy). An empty
 	// result means no proxy (direct connection).
 	marketSvc.SetGitHubProxyProvider(func() string {
-		if cachedSettings.get(settingsRepo, "network_github_proxy_use_global") == "true" {
-			if global := cachedSettings.get(settingsRepo, "network_proxy_url"); global != "" {
+		if cachedSettings.get(settingsRepo, repository.CategoryNetwork, "github.use_global") == "true" {
+			if global := cachedSettings.get(settingsRepo, repository.CategoryNetwork, "proxy_url"); global != "" {
 				return global
 			}
 		}
-		return cachedSettings.get(settingsRepo, "network_github_proxy_url")
+		return cachedSettings.get(settingsRepo, repository.CategoryNetwork, "github.proxy_url")
 	})
 	if err := marketSvc.SeedOfficialRepos(context.Background()); err != nil {
 		logger.Warn("[plugin-market] seed official repos: %v", err)
@@ -366,7 +366,7 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	// Public: check registration status
 	api.HandleFunc("/auth/registration-status", func(w http.ResponseWriter, r *http.Request) {
 		settingsRepo := repository.NewSettingsRepo(db)
-		allowReg, _ := settingsRepo.Get(r.Context(), "allow_registration")
+		allowReg, _ := settingsRepo.Get(r.Context(), repository.CategorySystem, "allow_registration")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"allow_registration": allowReg == "true",
@@ -536,8 +536,8 @@ func registerRoutes(r *mux.Router, db *sql.DB, jwtService *auth.JWTService, toke
 	admin.HandleFunc("/users", adminHandler.ListUsers).Methods("GET")
 	admin.HandleFunc("/users/{id}/role", adminHandler.UpdateUserRole).Methods("PUT")
 	admin.HandleFunc("/users/{id}/avatar", adminHandler.GetUserAvatar).Methods("GET")
-	admin.HandleFunc("/settings", adminHandler.GetSettings).Methods("GET")
-	admin.HandleFunc("/settings", adminHandler.UpdateSettings).Methods("PUT")
+	admin.HandleFunc("/settings/{category}", adminHandler.GetSettings).Methods("GET")
+	admin.HandleFunc("/settings/{category}", adminHandler.UpdateSettings).Methods("PUT")
 	admin.HandleFunc("/dirs", adminHandler.ListDirs).Methods("GET")
 
 	// Notification channels
@@ -730,75 +730,77 @@ func newCachedSettings() *cachedSettings {
 	return &cachedSettings{vals: make(map[string]settingsCacheEntry), refreshing: make(map[string]bool)}
 }
 
-// get returns the setting value for a key, refreshing from the repo at most
-// once per TTL window. The DB query runs outside the global lock so a slow
-// or failing database cannot serialize every key's read; concurrent readers
-// of the same stale key share the refresh and are served the cached value.
-func (c *cachedSettings) get(repo *repository.SettingsRepo, key string) string {
+// get returns the setting value for a (category, name), refreshing from the
+// repo at most once per TTL window. The DB query runs outside the global lock
+// so a slow or failing database cannot serialize every key's read; concurrent
+// readers of the same stale key share the refresh and are served the cached
+// value.
+func (c *cachedSettings) get(repo *repository.SettingsRepo, category, key string) string {
+	cacheKey := category + "." + key
 	c.mu.RLock()
-	e, ok := c.vals[key]
+	e, ok := c.vals[cacheKey]
 	c.mu.RUnlock()
 	if ok && time.Since(e.at) < settingsCacheTTL {
 		return e.value
 	}
 
 	c.mu.Lock()
-	if e, ok := c.vals[key]; ok && time.Since(e.at) < settingsCacheTTL {
+	if e, ok := c.vals[cacheKey]; ok && time.Since(e.at) < settingsCacheTTL {
 		c.mu.Unlock()
 		return e.value // another goroutine refreshed while we waited
 	}
-	if c.refreshing[key] {
-		stale := c.vals[key].value
+	if c.refreshing[cacheKey] {
+		stale := c.vals[cacheKey].value
 		c.mu.Unlock()
 		return stale // a refresh is in flight; serve the cached value
 	}
-	c.refreshing[key] = true
+	c.refreshing[cacheKey] = true
 	c.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	value, err := repo.Get(ctx, key)
+	value, err := repo.Get(ctx, category, key)
 
 	c.mu.Lock()
-	delete(c.refreshing, key)
+	delete(c.refreshing, cacheKey)
 	if err != nil {
-		if old, ok := c.vals[key]; ok {
+		if old, ok := c.vals[cacheKey]; ok {
 			// Treat the TTL as a failure backoff: refresh entry.at so a
 			// flaky DB does not force every hot-path read into the (up to
 			// 2s) synchronous query path on each call.
-			c.vals[key] = settingsCacheEntry{value: old.value, at: time.Now()}
+			c.vals[cacheKey] = settingsCacheEntry{value: old.value, at: time.Now()}
 			c.mu.Unlock()
-			logger.Error("[server] settings %q read failed: %v (using cached value)", key, err)
+			logger.Error("[server] settings %s read failed: %v (using cached value)", cacheKey, err)
 			return old.value
 		}
 		// Back off on the empty value too (cold start / never-set keys): an
 		// empty string is a safe "no override, use defaults" semantic, and
 		// caching it prevents every hot-path read from paying the 2s query
 		// during a DB outage.
-		c.vals[key] = settingsCacheEntry{value: "", at: time.Now()}
+		c.vals[cacheKey] = settingsCacheEntry{value: "", at: time.Now()}
 		c.mu.Unlock()
-		logger.Error("[server] settings %q read failed: %v", key, err)
+		logger.Error("[server] settings %s read failed: %v", cacheKey, err)
 		return ""
 	}
-	c.vals[key] = settingsCacheEntry{value: value, at: time.Now()}
+	c.vals[cacheKey] = settingsCacheEntry{value: value, at: time.Now()}
 	c.mu.Unlock()
 	return value
 }
 
-// getMany returns the values for the given keys, refreshing every stale key
-// in ONE database query with a single timeout (instead of one query per key).
-// The registry build reads four keys, so a cold cache backed by a failing DB
-// would otherwise serialize up to four 2s timeouts (8s worst case) on a hot
-// path. Only non-empty values are returned: an empty (or absent, or
-// failed-read) setting is the "no override" case and is kept out of the map,
-// so a key's presence in the result is stable across calls regardless of
-// cache state.
-func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) map[string]string {
+// getMany returns the values for the given names within one category,
+// refreshing every stale key in ONE database query with a single timeout
+// (instead of one query per key). The registry build reads four keys, so a
+// cold cache backed by a failing DB would otherwise serialize up to four 2s
+// timeouts (8s worst case) on a hot path. Only non-empty values are returned:
+// an empty (or absent, or failed-read) setting is the "no override" case and
+// is kept out of the map, so a key's presence in the result is stable across
+// calls regardless of cache state.
+func (c *cachedSettings) getMany(repo *repository.SettingsRepo, category string, keys ...string) map[string]string {
 	out := make(map[string]string, len(keys))
 	c.mu.RLock()
 	var stale []string
 	for _, k := range keys {
-		if e, ok := c.vals[k]; ok && time.Since(e.at) < settingsCacheTTL {
+		if e, ok := c.vals[category+"."+k]; ok && time.Since(e.at) < settingsCacheTTL {
 			if e.value != "" {
 				out[k] = e.value
 			}
@@ -814,19 +816,20 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 	c.mu.Lock()
 	var toQuery []string
 	for _, k := range stale {
-		if e, ok := c.vals[k]; ok && time.Since(e.at) < settingsCacheTTL {
+		cacheKey := category + "." + k
+		if e, ok := c.vals[cacheKey]; ok && time.Since(e.at) < settingsCacheTTL {
 			if e.value != "" {
 				out[k] = e.value // another goroutine refreshed it while we waited
 			}
 			continue
 		}
-		if c.refreshing[k] {
-			if v := c.vals[k].value; v != "" {
+		if c.refreshing[cacheKey] {
+			if v := c.vals[cacheKey].value; v != "" {
 				out[k] = v // a refresh is in flight; serve the cached value
 			}
 			continue
 		}
-		c.refreshing[k] = true
+		c.refreshing[cacheKey] = true
 		toQuery = append(toQuery, k)
 	}
 	c.mu.Unlock()
@@ -836,11 +839,12 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	values, err := repo.GetMany(ctx, toQuery)
+	values, err := repo.GetMany(ctx, category, toQuery)
 
 	c.mu.Lock()
 	for _, k := range toQuery {
-		delete(c.refreshing, k)
+		cacheKey := category + "." + k
+		delete(c.refreshing, cacheKey)
 		if err == nil {
 			// An empty value is the same "no override" as a missing key and is
 			// kept out of the returned map (but cached), so presence is stable
@@ -849,19 +853,19 @@ func (c *cachedSettings) getMany(repo *repository.SettingsRepo, keys ...string) 
 				if v != "" {
 					out[k] = v
 				}
-				c.vals[k] = settingsCacheEntry{value: v, at: time.Now()}
+				c.vals[cacheKey] = settingsCacheEntry{value: v, at: time.Now()}
 			} else {
-				c.vals[k] = settingsCacheEntry{value: "", at: time.Now()}
+				c.vals[cacheKey] = settingsCacheEntry{value: "", at: time.Now()}
 			}
 			continue
 		}
 		// On failure reuse the cached value (or empty) and back off so a flaky
 		// DB does not force every hot-path read into the query path.
-		old := c.vals[k]
+		old := c.vals[cacheKey]
 		if old.value != "" {
 			out[k] = old.value
 		}
-		c.vals[k] = settingsCacheEntry{value: old.value, at: time.Now()}
+		c.vals[cacheKey] = settingsCacheEntry{value: old.value, at: time.Now()}
 	}
 	c.mu.Unlock()
 	if err != nil {

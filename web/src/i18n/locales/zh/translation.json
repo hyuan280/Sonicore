@@ -537,7 +537,9 @@
       "ADMIN_READ_DIRECTORY_FAILED": "读取目录失败",
       "ADMIN_ACCESS_REQUIRED": "需要管理员权限",
       "ADMIN_ENCRYPT_SECRET_FAILED": "加密密钥失败",
-      "ADMIN_TOKEN_CONFLICT": "无法同时设置和清除 Token"
+      "ADMIN_TOKEN_CONFLICT": "无法同时设置和清除 Token",
+      "ADMIN_SETTINGS_CATEGORY_REQUIRED": "缺少设置分类",
+      "ADMIN_LOAD_SETTINGS_FAILED": "加载设置失败"
     },
     "download": {
       "DOWNLOAD_URL_REQUIRED": "URL 不能为空",

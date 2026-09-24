@@ -216,23 +216,23 @@ func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) (*metadata.R
 	readErr := false
 	var firstErr error
 	var firstKey string
-	read := func(key string) (string, error) {
-		v, err := s.settingsRepo.Get(ctx, key)
+	read := func(name string) (string, error) {
+		v, err := s.settingsRepo.Get(ctx, repository.CategorySource, name)
 		if err != nil && !readErr {
-			firstErr, firstKey = err, key
+			firstErr, firstKey = err, name
 			readErr = true
 		}
 		return v, err
 	}
 	// Get returns ("", nil) for missing keys; only override when a value
 	// is actually stored.
-	if enabled, err := read("metadata_musicbrainz_enabled"); err == nil && enabled != "" {
+	if enabled, err := read("musicbrainz.enabled"); err == nil && enabled != "" {
 		mbCfg.Enabled = enabled == "true"
 	}
-	if url, err := read("metadata_musicbrainz_api_url"); err == nil && url != "" {
+	if url, err := read("musicbrainz.api_url"); err == nil && url != "" {
 		mbCfg.APIURL = url
 	}
-	if rl, err := read("metadata_musicbrainz_rate_limit"); err == nil && rl != "" {
+	if rl, err := read("musicbrainz.rate_limit"); err == nil && rl != "" {
 		if n, err := strconv.Atoi(rl); err != nil || n <= 0 {
 			logger.Warn("[scanner] invalid musicbrainz rate limit %q", rl)
 		} else {
@@ -243,7 +243,7 @@ func (s *ScannerService) buildRegistryUnlocked(ctx context.Context) (*metadata.R
 	neteaseEnabled := s.neteaseEnabled
 	// Get returns ("", nil) for missing keys; only override when a value
 	// is actually stored.
-	if enabled, err := read("metadata_netease_enabled"); err == nil && enabled != "" {
+	if enabled, err := read("netease.enabled"); err == nil && enabled != "" {
 		neteaseEnabled = enabled == "true"
 	}
 

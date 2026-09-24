@@ -537,7 +537,9 @@
       "ADMIN_READ_DIRECTORY_FAILED": "Failed to read directory",
       "ADMIN_ACCESS_REQUIRED": "Admin access required",
       "ADMIN_ENCRYPT_SECRET_FAILED": "Failed to encrypt secret",
-      "ADMIN_TOKEN_CONFLICT": "Cannot set and clear the token in one request"
+      "ADMIN_TOKEN_CONFLICT": "Cannot set and clear the token in one request",
+      "ADMIN_SETTINGS_CATEGORY_REQUIRED": "Settings category is required",
+      "ADMIN_LOAD_SETTINGS_FAILED": "Failed to load settings"
     },
     "download": {
       "DOWNLOAD_URL_REQUIRED": "URL is required",

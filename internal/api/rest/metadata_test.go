@@ -28,17 +28,17 @@ func newMetadataHandler(t *testing.T) (*MetadataHandler, sqlmock.Sqlmock) {
 // expectMBSettings mocks the settings reads done by mbConfig() and
 // newRegistry() (enabled switch, API URL, rate limit, NetEase switch).
 func expectMBSettings(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-		WithArgs("metadata_musicbrainz_enabled").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE category=$1 AND key=$2`)).
+		WithArgs("source", "source.musicbrainz.enabled").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-		WithArgs("metadata_musicbrainz_api_url").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE category=$1 AND key=$2`)).
+		WithArgs("source", "source.musicbrainz.api_url").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-		WithArgs("metadata_musicbrainz_rate_limit").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE category=$1 AND key=$2`)).
+		WithArgs("source", "source.musicbrainz.rate_limit").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE key=$1`)).
-		WithArgs("metadata_netease_enabled").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT value FROM server_settings WHERE category=$1 AND key=$2`)).
+		WithArgs("source", "source.netease.enabled").
 		WillReturnError(sql.ErrNoRows)
 }
 

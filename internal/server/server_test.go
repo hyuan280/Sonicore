@@ -20,7 +20,7 @@ func newMockSettingsRepo(t *testing.T) (*repository.SettingsRepo, sqlmock.Sqlmoc
 	return repository.NewSettingsRepo(db), mock
 }
 
-const getManyQuery = `SELECT key, value FROM server_settings WHERE key = ANY($1)`
+const getManyQuery = `SELECT key, value FROM server_settings WHERE category=$1 AND key = ANY($2)`
 
 func TestCachedSettingsGetManyStablePresence(t *testing.T) {
 	repo, mock := newMockSettingsRepo(t)
@@ -31,8 +31,8 @@ func TestCachedSettingsGetManyStablePresence(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(getManyQuery)).
 		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}))
 
-	assert.Empty(t, c.getMany(repo, "missing"))
-	assert.Empty(t, c.getMany(repo, "missing"), "presence must not flip after caching")
+	assert.Empty(t, c.getMany(repo, repository.CategorySource, "musicbrainz.enabled"))
+	assert.Empty(t, c.getMany(repo, repository.CategorySource, "musicbrainz.enabled"), "presence must not flip after caching")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -42,11 +42,11 @@ func TestCachedSettingsGetManyTreatsEmptyAsAbsent(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(getManyQuery)).
 		WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).
-			AddRow("enabled", "true").
-			AddRow("empty", ""))
+			AddRow("source.musicbrainz.enabled", "true").
+			AddRow("source.empty", ""))
 
-	got := c.getMany(repo, "enabled", "empty")
-	assert.Equal(t, map[string]string{"enabled": "true"}, got)
+	got := c.getMany(repo, repository.CategorySource, "musicbrainz.enabled", "empty")
+	assert.Equal(t, map[string]string{"musicbrainz.enabled": "true"}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -57,6 +57,6 @@ func TestCachedSettingsGetManyFailureOmitsKeys(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(getManyQuery)).
 		WillReturnError(errors.New("db down"))
 
-	assert.Empty(t, c.getMany(repo, "missing"))
+	assert.Empty(t, c.getMany(repo, repository.CategorySource, "musicbrainz.enabled"))
 	require.NoError(t, mock.ExpectationsWereMet())
 }

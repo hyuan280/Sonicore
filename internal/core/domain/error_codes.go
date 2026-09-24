@@ -176,6 +176,8 @@ const (
 	ErrAdminAccessRequired   ErrorCode = 812
 	ErrAdminEncryptSecret    ErrorCode = 813
 	ErrAdminTokenConflict    ErrorCode = 814
+	ErrAdminSettingsCategory ErrorCode = 815
+	ErrAdminLoadSettings     ErrorCode = 816
 )
 
 // ---- notification (1000-1099) ----
@@ -364,6 +366,8 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrAdminAccessRequired:      "ADMIN_ACCESS_REQUIRED",
 	ErrAdminEncryptSecret:       "ADMIN_ENCRYPT_SECRET_FAILED",
 	ErrAdminTokenConflict:       "ADMIN_TOKEN_CONFLICT",
+	ErrAdminSettingsCategory:    "ADMIN_SETTINGS_CATEGORY_REQUIRED",
+	ErrAdminLoadSettings:        "ADMIN_LOAD_SETTINGS_FAILED",
 	ErrDownloadURLRequired:      "DOWNLOAD_URL_REQUIRED",
 	ErrDownloadJobNotFound:      "DOWNLOAD_JOB_NOT_FOUND",
 	ErrNotificationSendFailed:   "NOTIFICATION_SEND_FAILED",
@@ -488,6 +492,8 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrAdminAccessRequired:      "Admin access required",
 	ErrAdminEncryptSecret:       "Failed to encrypt secret",
 	ErrAdminTokenConflict:       "Cannot set and clear the token in one request",
+	ErrAdminSettingsCategory:    "Settings category is required",
+	ErrAdminLoadSettings:        "Failed to load settings",
 	ErrDownloadURLRequired:      "URL is required",
 	ErrDownloadJobNotFound:      "Download job not found",
 	ErrNotificationSendFailed:   "Notification send failed",

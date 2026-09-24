@@ -938,13 +938,13 @@ func (h *Handler) getUsers(ctx context.Context, user *domain.User) map[string]in
 
 func (h *Handler) hasJukebox(ctx context.Context) bool {
 	var val string
-	err := h.db.QueryRowContext(ctx, "SELECT value FROM server_settings WHERE key='subsonic_jukebox_id'").Scan(&val)
+	err := h.db.QueryRowContext(ctx, "SELECT value FROM server_settings WHERE key='system.subsonic.jukebox_id'").Scan(&val)
 	return err == nil && val != ""
 }
 
 func (h *Handler) jukeboxControl(ctx context.Context, w http.ResponseWriter, r *http.Request, user *domain.User, q url.Values) {
 	var jukeboxID string
-	h.db.QueryRowContext(ctx, "SELECT value FROM server_settings WHERE key='subsonic_jukebox_id'").Scan(&jukeboxID)
+	h.db.QueryRowContext(ctx, "SELECT value FROM server_settings WHERE key='system.subsonic.jukebox_id'").Scan(&jukeboxID)
 	if jukeboxID == "" || h.engineManager == nil {
 		h.respond(w, r, "failed", map[string]interface{}{
 			"error": map[string]interface{}{"code": 50, "message": "Jukebox is not configured"},

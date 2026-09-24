@@ -34,14 +34,15 @@ export default function SystemTab() {
   // arrive so a click can never save defaults over the real configuration.
   useEffect(() => {
     api.admin
-      .getSettings()
+      .getSettings("system")
       .then((s) => {
-        setAllowRegistration(s.allow_registration ?? false);
-        setSubsonicJukeboxId(s.subsonic_jukebox_id || "");
-        setLogLevel(s.log_level || "info");
-        setLogLevelInit(s.log_level || "info");
-        setGithubTokenSet(!!s.plugins_github_token_set);
-        setGithubTokenError(!!s.plugins_github_token_error);
+        const sys = s.system ?? {};
+        setAllowRegistration(sys.allow_registration ?? false);
+        setSubsonicJukeboxId(sys.subsonic?.jukebox_id || "");
+        setLogLevel(sys.log?.level || "info");
+        setLogLevelInit(sys.log?.level || "info");
+        setGithubTokenSet(!!sys.plugins?.github_token_set);
+        setGithubTokenError(!!sys.plugins?.github_token_error);
       })
       .catch((err: unknown) => setError(translateApiError(t, err)))
       .finally(() => setLoading(false));
@@ -52,7 +53,7 @@ export default function SystemTab() {
     setRegistrationSaving(true);
     try {
       const next = !allowRegistration;
-      await api.admin.updateSettings({ allow_registration: next });
+      await api.admin.updateSettings("system", { system: { allow_registration: next } });
       setAllowRegistration(next);
       setError("");
     } catch (err) {
@@ -103,7 +104,7 @@ export default function SystemTab() {
               setLogLevelSaving(true);
               setLogLevelError("");
               try {
-                await api.admin.updateSettings({ log_level: next });
+                await api.admin.updateSettings("system", { system: { log: { level: next } } });
                 setLogLevelInit(next);
               } catch (err) {
                 setLogLevel(logLevelInit);
@@ -160,7 +161,7 @@ function GitHubTokenSetting({
     setSaving(true);
     setError("");
     try {
-      await api.admin.updateSettings({ plugins_github_token: trimmed });
+      await api.admin.updateSettings("system", { system: { plugins: { github_token: trimmed } } });
       setToken("");
       setShow(false);
       onSaved(true);
@@ -176,7 +177,9 @@ function GitHubTokenSetting({
     setSaving(true);
     setError("");
     try {
-      await api.admin.updateSettings({ plugins_github_token_clear: true });
+      await api.admin.updateSettings("system", {
+        system: { plugins: { github_token_clear: true } },
+      });
       setToken("");
       setShow(false);
       onSaved(false);
@@ -294,7 +297,7 @@ function SubsonicJukeboxSetting({
     setSelected(id);
     setOpen(false);
     try {
-      await api.admin.updateSettings({ subsonic_jukebox_id: id || "" });
+      await api.admin.updateSettings("system", { system: { subsonic: { jukebox_id: id || "" } } });
       // Keep the parent's copy in sync so a future re-render can never
       // roll the UI back to the old value.
       onSaved(id || "");

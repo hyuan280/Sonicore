@@ -5,7 +5,7 @@ import { useAuth } from "../../stores/auth";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card } from "../../components/ui/card";
-import { api } from "../../api/client";
+import { api, type EmailSettingsUpdate } from "../../api/client";
 import { Bell, Plus, Pen, Trash2, Settings, Loader2, Puzzle } from "lucide-react";
 import type { NotifTestOptions } from "../../types";
 
@@ -546,25 +546,26 @@ function EmailNotificationSettings() {
   // until the values arrive so defaults can never be saved over real config.
   useEffect(() => {
     api.admin
-      .getSettings()
+      .getSettings("notification")
       .then((s) => {
-        setNotifEmailEnabled(s.notification_email_enabled);
-        setNotifSmtpHost(s.notification_email_smtp_host || "");
-        setNotifSmtpPort(s.notification_email_smtp_port || "587");
-        setNotifUsername(s.notification_email_username || "");
+        const email = s.notification?.email ?? {};
+        setNotifEmailEnabled(email.enabled ?? false);
+        setNotifSmtpHost(email.smtp_host || "");
+        setNotifSmtpPort(email.smtp_port || "587");
+        setNotifUsername(email.username || "");
         setNotifPassword("");
-        setNotifFromAddr(s.notification_email_from_address || "");
-        setNotifFromName(s.notification_email_from_name || "");
-        setNotifTls(s.notification_email_tls);
+        setNotifFromAddr(email.from_address || "");
+        setNotifFromName(email.from_name || "");
+        setNotifTls(email.tls ?? false);
         setNotifInit({
-          enabled: s.notification_email_enabled,
-          smtpHost: s.notification_email_smtp_host || "",
-          smtpPort: s.notification_email_smtp_port || "587",
-          username: s.notification_email_username || "",
-          passwordSet: s.notification_email_password_set,
-          fromAddr: s.notification_email_from_address || "",
-          fromName: s.notification_email_from_name || "",
-          tls: s.notification_email_tls,
+          enabled: email.enabled ?? false,
+          smtpHost: email.smtp_host || "",
+          smtpPort: email.smtp_port || "587",
+          username: email.username || "",
+          passwordSet: email.password_set,
+          fromAddr: email.from_address || "",
+          fromName: email.from_name || "",
+          tls: email.tls ?? false,
         });
       })
       .catch((err: unknown) => setNotifError(translateApiError(t, err)))
@@ -776,21 +777,23 @@ function EmailNotificationSettings() {
                   setNotifError("");
                   setNotifSuccess("");
                   try {
-                    const payload: Record<string, unknown> = {
-                      notification_email_enabled: notifEmailEnabled,
-                      notification_email_smtp_host: notifSmtpHost,
-                      notification_email_smtp_port: notifSmtpPort,
-                      notification_email_username: notifUsername,
-                      notification_email_from_address: notifFromAddr,
-                      notification_email_from_name: notifFromName,
-                      notification_email_tls: notifTls,
+                    const email: EmailSettingsUpdate = {
+                      enabled: notifEmailEnabled,
+                      smtp_host: notifSmtpHost,
+                      smtp_port: notifSmtpPort,
+                      username: notifUsername,
+                      from_address: notifFromAddr,
+                      from_name: notifFromName,
+                      tls: notifTls,
                     };
                     if (notifPasswordAction === "set" && notifPassword !== "") {
-                      payload.notification_email_password = notifPassword;
+                      email.password = notifPassword;
                     } else if (notifPasswordAction === "clear") {
-                      payload.notification_email_password = "";
+                      email.password = "";
                     }
-                    await api.admin.updateSettings(payload);
+                    await api.admin.updateSettings("notification", {
+                      notification: { email },
+                    });
                     // buttons disappearing is the success feedback
                     setNotifModified(false);
                     const savedPasswordSet = (() => {

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { translateApiError } from "../../i18n/errorCodes";
 import { Input } from "../../components/ui/input";
-import { api } from "../../api/client";
+import { api, type NeteaseSettingsUpdate } from "../../api/client";
 import { MetadataProviderCard } from "../../components/MetadataProviderCard";
 import { Loader2, Trash2, Eye, EyeOff } from "lucide-react";
 
@@ -28,23 +28,24 @@ export default function SourcesTab() {
   // never re-fetches and overwrites in-progress edits.
   useEffect(() => {
     api.admin
-      .getSettings()
+      .getSettings("source")
       .then((s) => {
-        setMbEnabled(s.metadata_musicbrainz_enabled ?? false);
-        setMbApiUrl(s.metadata_musicbrainz_api_url || "");
-        setMbRateLimit(s.metadata_musicbrainz_rate_limit || "1");
+        const src = s.source ?? {};
+        setMbEnabled(src.musicbrainz?.enabled ?? false);
+        setMbApiUrl(src.musicbrainz?.api_url || "");
+        setMbRateLimit(src.musicbrainz?.rate_limit || "1");
         setMbInit({
-          enabled: s.metadata_musicbrainz_enabled ?? false,
-          apiUrl: s.metadata_musicbrainz_api_url || "",
-          rateLimit: s.metadata_musicbrainz_rate_limit || "1",
+          enabled: src.musicbrainz?.enabled ?? false,
+          apiUrl: src.musicbrainz?.api_url || "",
+          rateLimit: src.musicbrainz?.rate_limit || "1",
         });
-        setNeEnabled(s.metadata_netease_enabled ?? false);
+        setNeEnabled(src.netease?.enabled ?? false);
         setNeCookie("");
-        setNeRateLimit(s.platforms_netease_rate_limit || "1");
+        setNeRateLimit(src.netease?.rate_limit || "1");
         setNeInit({
-          enabled: s.metadata_netease_enabled ?? false,
-          cookieSet: !!s.platforms_netease_cookie_set,
-          rateLimit: s.platforms_netease_rate_limit || "1",
+          enabled: src.netease?.enabled ?? false,
+          cookieSet: !!src.netease?.cookie_set,
+          rateLimit: src.netease?.rate_limit || "1",
         });
       })
       .catch((err: unknown) => {
@@ -76,7 +77,7 @@ export default function SourcesTab() {
     setNeSaving(true);
     setNeError("");
     try {
-      await api.admin.updateSettings({ platforms_netease_cookie_clear: true });
+      await api.admin.updateSettings("source", { source: { netease: { cookie_clear: true } } });
       setNeInit((prev) => ({ ...prev, cookieSet: false }));
       setNeCookie("");
       setNeShowCookie(false);
@@ -125,10 +126,14 @@ export default function SourcesTab() {
               // An empty API URL or rate limit is sent verbatim so clearing a
               // field resets it to the server's config default (the backend
               // treats an empty stored value as "no override").
-              await api.admin.updateSettings({
-                metadata_musicbrainz_enabled: mbEnabled,
-                metadata_musicbrainz_api_url: mbApiUrl,
-                metadata_musicbrainz_rate_limit: mbRateLimit,
+              await api.admin.updateSettings("source", {
+                source: {
+                  musicbrainz: {
+                    enabled: mbEnabled,
+                    api_url: mbApiUrl,
+                    rate_limit: mbRateLimit,
+                  },
+                },
               });
               setMbInit({ enabled: mbEnabled, apiUrl: mbApiUrl, rateLimit: mbRateLimit });
             } catch (err) {
@@ -189,12 +194,12 @@ export default function SourcesTab() {
             setNeSaving(true);
             setNeError("");
             try {
-              const payload: Record<string, unknown> = { metadata_netease_enabled: neEnabled };
-              if (neCookie !== "") payload.platforms_netease_cookie = neCookie;
-              // An empty rate limit is sent verbatim so clearing the field
-              // resets the provider to the config default.
-              payload.platforms_netease_rate_limit = neRateLimit;
-              await api.admin.updateSettings(payload);
+              const netease: NeteaseSettingsUpdate = {
+                enabled: neEnabled,
+                rate_limit: neRateLimit,
+              };
+              if (neCookie !== "") netease.cookie = neCookie;
+              await api.admin.updateSettings("source", { source: { netease } });
               setNeModified(false);
               setNeInit({
                 enabled: neEnabled,

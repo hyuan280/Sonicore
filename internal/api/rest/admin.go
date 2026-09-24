@@ -202,322 +202,534 @@ func (h *AdminHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
-	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
-	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
-	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
-	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
-	neEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_netease_enabled")
-	neCookie, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_cookie")
-	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
-	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
-	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
-	githubToken, _ := h.settingsRepo.Get(r.Context(), "plugins_github_token")
-	proxyURL, _ := h.settingsRepo.Get(r.Context(), "network_proxy_url")
-	githubProxyURL, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_url")
-	githubProxyUseGlobal, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_use_global")
-	// A stored cookie that no longer decrypts (secret rotation, corruption)
-	// is reported so ops can distinguish "not configured" from "configured
-	// but unreadable" — the provider silently degrades to anonymous in the
-	// latter case.
-	cookieBroken := h.cookieBroken(neCookie)
-	tokenBroken := h.tokenBroken(githubToken)
-	resp := map[string]interface{}{
-		"allow_registration":              allowReg == "true",
-		"metadata_musicbrainz_enabled":    mbEnabled == "true",
-		"metadata_musicbrainz_api_url":    mbURL,
-		"metadata_musicbrainz_rate_limit": mbRateLimit,
-		"metadata_netease_enabled":        neEnabled == "true",
-		"platforms_netease_rate_limit":    neRateLimit,
-		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
-		"platforms_netease_cookie_error":  cookieBroken,
-		"subsonic_jukebox_id":             subJukebox,
-		"log_level":                       logLevel,
-		"plugins_github_token_set":        githubToken != "" && !tokenBroken,
-		"plugins_github_token_error":      tokenBroken,
-		"network_proxy_url":               proxyURL,
-		"network_github_proxy_url":        githubProxyURL,
-		"network_github_proxy_use_global": githubProxyUseGlobal == "true",
+// Settings are split by category and served from /api/admin/settings/{category}.
+// The request and response bodies are nested objects whose shape mirrors the
+// dotted key: the category is the top-level wrapper, then each key segment
+// becomes a level (e.g. source.musicbrainz.enabled maps to
+// {"source":{"musicbrainz":{"enabled":...}}}). The repo composes the stored
+// key from the category and the short name, so handlers only deal in short
+// names.
+
+func boolString(v bool) string {
+	if v {
+		return "true"
 	}
-	h.mergeNotificationSettings(r.Context(), resp)
-	writeJSON(w, http.StatusOK, resp)
+	return "false"
 }
 
-type updateSettingsRequest struct {
-	AllowRegistration         *bool   `json:"allow_registration,omitempty"`
-	MusicBrainzEnabled        *bool   `json:"metadata_musicbrainz_enabled,omitempty"`
-	MusicBrainzAPIURL         *string `json:"metadata_musicbrainz_api_url,omitempty"`
-	MusicBrainzRateLimit      *string `json:"metadata_musicbrainz_rate_limit,omitempty"`
-	NeteaseEnabled            *bool   `json:"metadata_netease_enabled,omitempty"`
-	NeteaseCookie             *string `json:"platforms_netease_cookie,omitempty"`
-	NeteaseCookieClear        *bool   `json:"platforms_netease_cookie_clear,omitempty"`
-	NeteaseRateLimit          *string `json:"platforms_netease_rate_limit,omitempty"`
-	SubsonicJukeboxID         *string `json:"subsonic_jukebox_id,omitempty"`
-	LogLevel                  *string `json:"log_level,omitempty"`
-	GitHubToken               *string `json:"plugins_github_token,omitempty"`
-	GitHubTokenClear          *bool   `json:"plugins_github_token_clear,omitempty"`
-	NetworkProxyURL           *string `json:"network_proxy_url,omitempty"`
-	NetworkGitHubProxyURL     *string `json:"network_github_proxy_url,omitempty"`
-	NetworkGitHubUseGlobal    *bool   `json:"network_github_proxy_use_global,omitempty"`
-	NotificationEmailEnabled  *bool   `json:"notification_email_enabled,omitempty"`
-	NotificationEmailSMTPHost *string `json:"notification_email_smtp_host,omitempty"`
-	NotificationEmailSMTPPort *string `json:"notification_email_smtp_port,omitempty"`
-	NotificationEmailUsername *string `json:"notification_email_username,omitempty"`
-	NotificationEmailPassword *string `json:"notification_email_password,omitempty"`
-	NotificationEmailFromAddr *string `json:"notification_email_from_address,omitempty"`
-	NotificationEmailFromName *string `json:"notification_email_from_name,omitempty"`
-	NotificationEmailTLS      *bool   `json:"notification_email_tls,omitempty"`
+// settingsCategory resolves and validates the {category} path variable. An
+// unknown or empty category is refused so a request can never fall through to
+// the wrong section.
+func settingsCategory(r *http.Request) (string, bool) {
+	switch category := mux.Vars(r)["category"]; category {
+	case repository.CategorySystem, repository.CategorySource,
+		repository.CategoryNetwork, repository.CategoryNotification:
+		return category, true
+	default:
+		return "", false
+	}
+}
+
+func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	category, ok := settingsCategory(r)
+	if !ok {
+		writeCodedError(w, http.StatusForbidden, domain.ErrAdminSettingsCategory)
+		return
+	}
+	switch category {
+	case repository.CategorySystem:
+		h.GetSystemSettings(w, r)
+	case repository.CategorySource:
+		h.GetSourceSettings(w, r)
+	case repository.CategoryNetwork:
+		h.GetNetworkSettings(w, r)
+	case repository.CategoryNotification:
+		h.GetNotificationSettings(w, r)
+	}
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
-	var req updateSettingsRequest
+	category, ok := settingsCategory(r)
+	if !ok {
+		writeCodedError(w, http.StatusForbidden, domain.ErrAdminSettingsCategory)
+		return
+	}
+	switch category {
+	case repository.CategorySystem:
+		h.UpdateSystemSettings(w, r)
+	case repository.CategorySource:
+		h.UpdateSourceSettings(w, r)
+	case repository.CategoryNetwork:
+		h.UpdateNetworkSettings(w, r)
+	case repository.CategoryNotification:
+		h.UpdateNotificationSettings(w, r)
+	}
+}
+
+// ---- system ----
+
+type systemSettingsRequest struct {
+	System *systemSettingsBody `json:"system"`
+}
+
+type systemSettingsBody struct {
+	AllowRegistration *bool               `json:"allow_registration"`
+	Log               *systemLogBody      `json:"log"`
+	Subsonic          *systemSubsonicBody `json:"subsonic"`
+	Plugins           *systemPluginsBody  `json:"plugins"`
+}
+
+type systemLogBody struct {
+	Level *string `json:"level"`
+}
+
+type systemSubsonicBody struct {
+	JukeboxID *string `json:"jukebox_id"`
+}
+
+type systemPluginsBody struct {
+	GitHubToken      *string `json:"github_token"`
+	GitHubTokenClear *bool   `json:"github_token_clear"`
+}
+
+// readSystemSettings loads the system category. A read failure is returned so
+// the caller reports 500 instead of 200 with defaults.
+func (h *AdminHandler) readSystemSettings(ctx context.Context) (map[string]interface{}, error) {
+	vals, err := h.settingsRepo.GetMany(ctx, repository.CategorySystem, []string{
+		"allow_registration", "log.level", "subsonic.jukebox_id", "plugins.github_token",
+	})
+	if err != nil {
+		logger.Error("[admin] load system settings: %v", err)
+		return nil, err
+	}
+	githubToken := vals["plugins.github_token"]
+	tokenBroken := h.tokenBroken(githubToken)
+	return map[string]interface{}{
+		"system": map[string]interface{}{
+			"allow_registration": vals["allow_registration"] == "true",
+			"log": map[string]interface{}{
+				"level": vals["log.level"],
+			},
+			"subsonic": map[string]interface{}{
+				"jukebox_id": vals["subsonic.jukebox_id"],
+			},
+			"plugins": map[string]interface{}{
+				"github_token_set":   githubToken != "" && !tokenBroken,
+				"github_token_error": tokenBroken,
+			},
+		},
+	}, nil
+}
+
+func (h *AdminHandler) GetSystemSettings(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.readSystemSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *AdminHandler) UpdateSystemSettings(w http.ResponseWriter, r *http.Request) {
+	var req systemSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
 		return
 	}
-
-	// Validate the whole request before any write, so a rejected batch never
-	// leaves a partial state behind (settings written, then a 400).
-	if req.NeteaseCookie != nil && req.NeteaseCookieClear != nil &&
-		*req.NeteaseCookieClear && *req.NeteaseCookie != "" {
-		writeCodedError(w, http.StatusBadRequest, domain.ErrAdminCookieConflict)
-		return
-	}
-	if req.GitHubToken != nil && req.GitHubTokenClear != nil &&
-		*req.GitHubTokenClear && *req.GitHubToken != "" {
-		writeCodedError(w, http.StatusBadRequest, domain.ErrAdminTokenConflict)
-		return
-	}
-
-	// Collect every write and commit them in one transaction (SetMany), so a
-	// mid-batch write failure rolls the whole update back instead of leaving
-	// a partial state.
 	writes := make(map[string]string)
-	if req.AllowRegistration != nil {
-		val := "false"
-		if *req.AllowRegistration {
-			val = "true"
+	if body := req.System; body != nil {
+		if body.AllowRegistration != nil {
+			writes["allow_registration"] = boolString(*body.AllowRegistration)
 		}
-		writes["allow_registration"] = val
-	}
-	if req.MusicBrainzEnabled != nil {
-		val := "false"
-		if *req.MusicBrainzEnabled {
-			val = "true"
-		}
-		writes["metadata_musicbrainz_enabled"] = val
-	}
-	if req.MusicBrainzAPIURL != nil {
-		writes["metadata_musicbrainz_api_url"] = *req.MusicBrainzAPIURL
-	}
-	if req.MusicBrainzRateLimit != nil {
-		writes["metadata_musicbrainz_rate_limit"] = *req.MusicBrainzRateLimit
-	}
-	if req.NeteaseEnabled != nil {
-		val := "false"
-		if *req.NeteaseEnabled {
-			val = "true"
-		}
-		writes["metadata_netease_enabled"] = val
-	}
-	if req.NeteaseCookie != nil {
-		// An empty value keeps the existing cookie (the client never holds
-		// the raw credential, so it cannot resend it); only a non-empty
-		// value overwrites, and a clear is requested explicitly.
-		if *req.NeteaseCookie != "" {
-			enc, err := h.encryptSecret(*req.NeteaseCookie)
-			if err != nil {
-				logger.Info("[admin] store platforms_netease_cookie: %v", err)
-				writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminStoreCookie)
+		if body.Log != nil && body.Log.Level != nil {
+			if _, ok := logger.ParseLevelOk(*body.Log.Level); !ok {
+				writeCodedError(w, http.StatusBadRequest, domain.ErrAdminInvalidLogLevel)
 				return
 			}
-			writes["platforms_netease_cookie"] = enc
+			writes["log.level"] = *body.Log.Level
 		}
-	}
-	if req.NeteaseCookieClear != nil && *req.NeteaseCookieClear {
-		writes["platforms_netease_cookie"] = ""
-	}
-	if req.NeteaseRateLimit != nil {
-		writes["platforms_netease_rate_limit"] = *req.NeteaseRateLimit
-	}
-	if req.SubsonicJukeboxID != nil {
-		writes["subsonic_jukebox_id"] = *req.SubsonicJukeboxID
-	}
-	if req.LogLevel != nil {
-		if _, ok := logger.ParseLevelOk(*req.LogLevel); !ok {
-			writeCodedError(w, http.StatusBadRequest, domain.ErrAdminInvalidLogLevel)
-			return
+		if body.Subsonic != nil && body.Subsonic.JukeboxID != nil {
+			writes["subsonic.jukebox_id"] = *body.Subsonic.JukeboxID
 		}
-		writes["log_level"] = *req.LogLevel
-	}
-	if req.GitHubToken != nil {
-		// An empty value keeps the existing token (the client never holds the
-		// raw credential, so it cannot resend it); only a non-empty value
-		// overwrites, and a clear is requested explicitly.
-		if *req.GitHubToken != "" {
-			enc, err := h.encryptSecret(*req.GitHubToken)
-			if err != nil {
-				logger.Error("[admin] encrypt plugins_github_token: %v", err)
-				writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminEncryptSecret)
+		if body.Plugins != nil {
+			if body.Plugins.GitHubToken != nil && body.Plugins.GitHubTokenClear != nil &&
+				*body.Plugins.GitHubTokenClear && *body.Plugins.GitHubToken != "" {
+				writeCodedError(w, http.StatusBadRequest, domain.ErrAdminTokenConflict)
 				return
 			}
-			writes["plugins_github_token"] = enc
-		}
-	}
-	if req.GitHubTokenClear != nil && *req.GitHubTokenClear {
-		writes["plugins_github_token"] = ""
-	}
-	if req.NetworkProxyURL != nil {
-		if !validProxyURL(*req.NetworkProxyURL) {
-			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
-			return
-		}
-		writes["network_proxy_url"] = *req.NetworkProxyURL
-	}
-	if req.NetworkGitHubProxyURL != nil {
-		if !validProxyURL(*req.NetworkGitHubProxyURL) {
-			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
-			return
-		}
-		writes["network_github_proxy_url"] = *req.NetworkGitHubProxyURL
-	}
-	if req.NetworkGitHubUseGlobal != nil {
-		val := "false"
-		if *req.NetworkGitHubUseGlobal {
-			val = "true"
-		}
-		writes["network_github_proxy_use_global"] = val
-	}
-	notifDirty := false
-	if req.NotificationEmailEnabled != nil {
-		notifDirty = true
-		val := "false"
-		if *req.NotificationEmailEnabled {
-			val = "true"
-		}
-		writes["notification_email_enabled"] = val
-	}
-	if req.NotificationEmailSMTPHost != nil {
-		notifDirty = true
-		writes["notification_email_smtp_host"] = *req.NotificationEmailSMTPHost
-	}
-	if req.NotificationEmailSMTPPort != nil {
-		notifDirty = true
-		if port, err := strconv.Atoi(*req.NotificationEmailSMTPPort); err != nil || port < 1 || port > 65535 {
-			writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
-			return
-		}
-		writes["notification_email_smtp_port"] = *req.NotificationEmailSMTPPort
-	}
-	if req.NotificationEmailUsername != nil {
-		notifDirty = true
-		writes["notification_email_username"] = *req.NotificationEmailUsername
-	}
-	if req.NotificationEmailPassword != nil {
-		notifDirty = true
-		if *req.NotificationEmailPassword != "" {
-			enc, err := h.encryptSecret(*req.NotificationEmailPassword)
-			if err != nil {
-				logger.Error("[admin] encrypt notification_email_password: %v", err)
-				writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminEncryptSecret)
-				return
+			if body.Plugins.GitHubToken != nil && *body.Plugins.GitHubToken != "" {
+				enc, err := h.encryptSecret(*body.Plugins.GitHubToken)
+				if err != nil {
+					logger.Error("[admin] encrypt plugins.github_token: %v", err)
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminEncryptSecret)
+					return
+				}
+				writes["plugins.github_token"] = enc
 			}
-			writes["notification_email_password"] = enc
-		} else {
-			writes["notification_email_password"] = ""
+			if body.Plugins.GitHubTokenClear != nil && *body.Plugins.GitHubTokenClear {
+				writes["plugins.github_token"] = ""
+			}
 		}
 	}
-	if req.NotificationEmailFromAddr != nil {
-		notifDirty = true
-		writes["notification_email_from_address"] = *req.NotificationEmailFromAddr
-	}
-	if req.NotificationEmailFromName != nil {
-		notifDirty = true
-		writes["notification_email_from_name"] = *req.NotificationEmailFromName
-	}
-	if req.NotificationEmailTLS != nil {
-		notifDirty = true
-		val := "false"
-		if *req.NotificationEmailTLS {
-			val = "true"
-		}
-		writes["notification_email_tls"] = val
-	}
-
-	if err := h.settingsRepo.SetMany(r.Context(), writes); err != nil {
-		logger.Info("[admin] save settings batch: %v", err)
+	if err := h.settingsRepo.SetMany(r.Context(), repository.CategorySystem, writes); err != nil {
+		logger.Info("[admin] save system settings: %v", err)
 		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminSaveSettings)
 		return
 	}
-
-	if req.LogLevel != nil {
-		logger.SetLevel(*req.LogLevel)
+	if lvl, ok := writes["log.level"]; ok {
+		logger.SetLevel(lvl)
 	}
-
-	if notifDirty {
-		h.reloadNotif(r.Context())
+	resp, err := h.readSystemSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
 	}
-
-	mbEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_enabled")
-	mbURL, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_api_url")
-	mbRateLimit, _ := h.settingsRepo.Get(r.Context(), "metadata_musicbrainz_rate_limit")
-	neEnabled, _ := h.settingsRepo.Get(r.Context(), "metadata_netease_enabled")
-	neCookie, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_cookie")
-	neRateLimit, _ := h.settingsRepo.Get(r.Context(), "platforms_netease_rate_limit")
-	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
-	subJukebox, _ := h.settingsRepo.Get(r.Context(), "subsonic_jukebox_id")
-	logLevel, _ := h.settingsRepo.Get(r.Context(), "log_level")
-	githubToken, _ := h.settingsRepo.Get(r.Context(), "plugins_github_token")
-	proxyURL, _ := h.settingsRepo.Get(r.Context(), "network_proxy_url")
-	githubProxyURL, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_url")
-	githubProxyUseGlobal, _ := h.settingsRepo.Get(r.Context(), "network_github_proxy_use_global")
-	cookieBroken := h.cookieBroken(neCookie)
-	tokenBroken := h.tokenBroken(githubToken)
-	resp := map[string]interface{}{
-		"allow_registration":              allowReg == "true",
-		"metadata_musicbrainz_enabled":    mbEnabled == "true",
-		"metadata_musicbrainz_api_url":    mbURL,
-		"metadata_musicbrainz_rate_limit": mbRateLimit,
-		"metadata_netease_enabled":        neEnabled == "true",
-		"platforms_netease_rate_limit":    neRateLimit,
-		"platforms_netease_cookie_set":    neCookie != "" && !cookieBroken,
-		"platforms_netease_cookie_error":  cookieBroken,
-		"subsonic_jukebox_id":             subJukebox,
-		"log_level":                       logLevel,
-		"plugins_github_token_set":        githubToken != "" && !tokenBroken,
-		"plugins_github_token_error":      tokenBroken,
-		"network_proxy_url":               proxyURL,
-		"network_github_proxy_url":        githubProxyURL,
-		"network_github_proxy_use_global": githubProxyUseGlobal == "true",
-	}
-	h.mergeNotificationSettings(r.Context(), resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *AdminHandler) mergeNotificationSettings(ctx context.Context, resp map[string]interface{}) {
-	keys := []string{
-		"notification_email_enabled",
-		"notification_email_smtp_host",
-		"notification_email_smtp_port",
-		"notification_email_username",
-		"notification_email_password",
-		"notification_email_from_address",
-		"notification_email_from_name",
-		"notification_email_tls",
-	}
-	vals, err := h.settingsRepo.GetMany(ctx, keys)
+// ---- source ----
+
+type sourceSettingsRequest struct {
+	Source *sourceSettingsBody `json:"source"`
+}
+
+type sourceSettingsBody struct {
+	MusicBrainz *sourceMusicBrainzBody `json:"musicbrainz"`
+	Netease     *sourceNeteaseBody     `json:"netease"`
+}
+
+type sourceMusicBrainzBody struct {
+	Enabled   *bool   `json:"enabled"`
+	APIURL    *string `json:"api_url"`
+	RateLimit *string `json:"rate_limit"`
+}
+
+type sourceNeteaseBody struct {
+	Enabled     *bool   `json:"enabled"`
+	Cookie      *string `json:"cookie"`
+	CookieClear *bool   `json:"cookie_clear"`
+	RateLimit   *string `json:"rate_limit"`
+}
+
+// readSourceSettings loads the source category; a read failure is returned so
+// the caller can report 500 instead of 200 with defaults.
+func (h *AdminHandler) readSourceSettings(ctx context.Context) (map[string]interface{}, error) {
+	vals, err := h.settingsRepo.GetMany(ctx, repository.CategorySource, []string{
+		"musicbrainz.enabled", "musicbrainz.api_url", "musicbrainz.rate_limit",
+		"netease.enabled", "netease.cookie", "netease.rate_limit",
+	})
 	if err != nil {
-		logger.Error("[admin] failed to load notification settings: %v", err)
+		logger.Error("[admin] load source settings: %v", err)
+		return nil, err
+	}
+	// A stored cookie that no longer decrypts (secret rotation, corruption)
+	// is reported so ops can distinguish "not configured" from "configured
+	// but unreadable" — the provider silently degrades to anonymous in the
+	// latter case.
+	cookie := vals["netease.cookie"]
+	cookieBroken := h.cookieBroken(cookie)
+	return map[string]interface{}{
+		"source": map[string]interface{}{
+			"musicbrainz": map[string]interface{}{
+				"enabled":    vals["musicbrainz.enabled"] == "true",
+				"api_url":    vals["musicbrainz.api_url"],
+				"rate_limit": vals["musicbrainz.rate_limit"],
+			},
+			"netease": map[string]interface{}{
+				"enabled":      vals["netease.enabled"] == "true",
+				"cookie_set":   cookie != "" && !cookieBroken,
+				"cookie_error": cookieBroken,
+				"rate_limit":   vals["netease.rate_limit"],
+			},
+		},
+	}, nil
+}
+
+func (h *AdminHandler) GetSourceSettings(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.readSourceSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
 		return
 	}
-	resp["notification_email_enabled"] = vals["notification_email_enabled"] == "true"
-	resp["notification_email_smtp_host"] = vals["notification_email_smtp_host"]
-	resp["notification_email_smtp_port"] = vals["notification_email_smtp_port"]
-	resp["notification_email_username"] = vals["notification_email_username"]
-	resp["notification_email_password_set"] = vals["notification_email_password"] != ""
-	resp["notification_email_from_address"] = vals["notification_email_from_address"]
-	resp["notification_email_from_name"] = vals["notification_email_from_name"]
-	resp["notification_email_tls"] = vals["notification_email_tls"] == "true"
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *AdminHandler) UpdateSourceSettings(w http.ResponseWriter, r *http.Request) {
+	var req sourceSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	writes := make(map[string]string)
+	if body := req.Source; body != nil {
+		if body.MusicBrainz != nil {
+			if body.MusicBrainz.Enabled != nil {
+				writes["musicbrainz.enabled"] = boolString(*body.MusicBrainz.Enabled)
+			}
+			if body.MusicBrainz.APIURL != nil {
+				writes["musicbrainz.api_url"] = *body.MusicBrainz.APIURL
+			}
+			if body.MusicBrainz.RateLimit != nil {
+				writes["musicbrainz.rate_limit"] = *body.MusicBrainz.RateLimit
+			}
+		}
+		if body.Netease != nil {
+			if body.Netease.Cookie != nil && body.Netease.CookieClear != nil &&
+				*body.Netease.CookieClear && *body.Netease.Cookie != "" {
+				writeCodedError(w, http.StatusBadRequest, domain.ErrAdminCookieConflict)
+				return
+			}
+			if body.Netease.Enabled != nil {
+				writes["netease.enabled"] = boolString(*body.Netease.Enabled)
+			}
+			// An empty value keeps the existing cookie (the client never holds
+			// the raw credential, so it cannot resend it); only a non-empty
+			// value overwrites, and a clear is requested explicitly.
+			if body.Netease.Cookie != nil && *body.Netease.Cookie != "" {
+				enc, err := h.encryptSecret(*body.Netease.Cookie)
+				if err != nil {
+					logger.Info("[admin] store netease.cookie: %v", err)
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminStoreCookie)
+					return
+				}
+				writes["netease.cookie"] = enc
+			}
+			if body.Netease.CookieClear != nil && *body.Netease.CookieClear {
+				writes["netease.cookie"] = ""
+			}
+			if body.Netease.RateLimit != nil {
+				writes["netease.rate_limit"] = *body.Netease.RateLimit
+			}
+		}
+	}
+	if err := h.settingsRepo.SetMany(r.Context(), repository.CategorySource, writes); err != nil {
+		logger.Info("[admin] save source settings: %v", err)
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminSaveSettings)
+		return
+	}
+	resp, err := h.readSourceSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---- network ----
+
+type networkSettingsRequest struct {
+	Network *networkSettingsBody `json:"network"`
+}
+
+type networkSettingsBody struct {
+	ProxyURL *string            `json:"proxy_url"`
+	GitHub   *networkGitHubBody `json:"github"`
+}
+
+type networkGitHubBody struct {
+	ProxyURL  *string `json:"proxy_url"`
+	UseGlobal *bool   `json:"use_global"`
+}
+
+// readNetworkSettings loads the network category; a read failure is returned
+// so the caller can report 500 instead of 200 with defaults.
+func (h *AdminHandler) readNetworkSettings(ctx context.Context) (map[string]interface{}, error) {
+	vals, err := h.settingsRepo.GetMany(ctx, repository.CategoryNetwork, []string{
+		"proxy_url", "github.proxy_url", "github.use_global",
+	})
+	if err != nil {
+		logger.Error("[admin] load network settings: %v", err)
+		return nil, err
+	}
+	return map[string]interface{}{
+		"network": map[string]interface{}{
+			"proxy_url": vals["proxy_url"],
+			"github": map[string]interface{}{
+				"proxy_url":  vals["github.proxy_url"],
+				"use_global": vals["github.use_global"] == "true",
+			},
+		},
+	}, nil
+}
+
+func (h *AdminHandler) GetNetworkSettings(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.readNetworkSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *AdminHandler) UpdateNetworkSettings(w http.ResponseWriter, r *http.Request) {
+	var req networkSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	writes := make(map[string]string)
+	if body := req.Network; body != nil {
+		if body.ProxyURL != nil {
+			if !validProxyURL(*body.ProxyURL) {
+				writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+				return
+			}
+			writes["proxy_url"] = *body.ProxyURL
+		}
+		if body.GitHub != nil {
+			if body.GitHub.ProxyURL != nil {
+				if !validProxyURL(*body.GitHub.ProxyURL) {
+					writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+					return
+				}
+				writes["github.proxy_url"] = *body.GitHub.ProxyURL
+			}
+			if body.GitHub.UseGlobal != nil {
+				writes["github.use_global"] = boolString(*body.GitHub.UseGlobal)
+			}
+		}
+	}
+	if err := h.settingsRepo.SetMany(r.Context(), repository.CategoryNetwork, writes); err != nil {
+		logger.Info("[admin] save network settings: %v", err)
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminSaveSettings)
+		return
+	}
+	resp, err := h.readNetworkSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---- notification ----
+
+type notificationSettingsRequest struct {
+	Notification *notificationSettingsBody `json:"notification"`
+}
+
+type notificationSettingsBody struct {
+	Email *notificationEmailBody `json:"email"`
+}
+
+type notificationEmailBody struct {
+	Enabled     *bool   `json:"enabled"`
+	SMTPHost    *string `json:"smtp_host"`
+	SMTPPort    *string `json:"smtp_port"`
+	Username    *string `json:"username"`
+	Password    *string `json:"password"`
+	FromAddress *string `json:"from_address"`
+	FromName    *string `json:"from_name"`
+	TLS         *bool   `json:"tls"`
+}
+
+// readNotificationSettings loads the notification category; a read failure is
+// returned so the caller can report 500 instead of 200 with defaults.
+func (h *AdminHandler) readNotificationSettings(ctx context.Context) (map[string]interface{}, error) {
+	vals, err := h.settingsRepo.GetMany(ctx, repository.CategoryNotification, []string{
+		"email.enabled", "email.smtp_host", "email.smtp_port", "email.username",
+		"email.password", "email.from_address", "email.from_name", "email.tls",
+	})
+	if err != nil {
+		logger.Error("[admin] load notification settings: %v", err)
+		return nil, err
+	}
+	return map[string]interface{}{
+		"notification": map[string]interface{}{
+			"email": map[string]interface{}{
+				"enabled":      vals["email.enabled"] == "true",
+				"smtp_host":    vals["email.smtp_host"],
+				"smtp_port":    vals["email.smtp_port"],
+				"username":     vals["email.username"],
+				"password_set": vals["email.password"] != "",
+				"from_address": vals["email.from_address"],
+				"from_name":    vals["email.from_name"],
+				"tls":          vals["email.tls"] == "true",
+			},
+		},
+	}, nil
+}
+
+func (h *AdminHandler) GetNotificationSettings(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.readNotificationSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *AdminHandler) UpdateNotificationSettings(w http.ResponseWriter, r *http.Request) {
+	var req notificationSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+		return
+	}
+	writes := make(map[string]string)
+	notifDirty := false
+	if body := req.Notification; body != nil && body.Email != nil {
+		email := body.Email
+		if email.Enabled != nil {
+			notifDirty = true
+			writes["email.enabled"] = boolString(*email.Enabled)
+		}
+		if email.SMTPHost != nil {
+			notifDirty = true
+			writes["email.smtp_host"] = *email.SMTPHost
+		}
+		if email.SMTPPort != nil {
+			notifDirty = true
+			if port, err := strconv.Atoi(*email.SMTPPort); err != nil || port < 1 || port > 65535 {
+				writeCodedError(w, http.StatusBadRequest, domain.ErrInvalidBody)
+				return
+			}
+			writes["email.smtp_port"] = *email.SMTPPort
+		}
+		if email.Username != nil {
+			notifDirty = true
+			writes["email.username"] = *email.Username
+		}
+		if email.Password != nil {
+			notifDirty = true
+			if *email.Password != "" {
+				enc, err := h.encryptSecret(*email.Password)
+				if err != nil {
+					logger.Error("[admin] encrypt notification.email.password: %v", err)
+					writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminEncryptSecret)
+					return
+				}
+				writes["email.password"] = enc
+			} else {
+				writes["email.password"] = ""
+			}
+		}
+		if email.FromAddress != nil {
+			notifDirty = true
+			writes["email.from_address"] = *email.FromAddress
+		}
+		if email.FromName != nil {
+			notifDirty = true
+			writes["email.from_name"] = *email.FromName
+		}
+		if email.TLS != nil {
+			notifDirty = true
+			writes["email.tls"] = boolString(*email.TLS)
+		}
+	}
+	if err := h.settingsRepo.SetMany(r.Context(), repository.CategoryNotification, writes); err != nil {
+		logger.Info("[admin] save notification settings: %v", err)
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminSaveSettings)
+		return
+	}
+	if notifDirty {
+		h.reloadNotif(r.Context())
+	}
+	resp, err := h.readNotificationSettings(r.Context())
+	if err != nil {
+		writeCodedError(w, http.StatusInternalServerError, domain.ErrAdminLoadSettings)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *AdminHandler) ListDirs(w http.ResponseWriter, r *http.Request) {

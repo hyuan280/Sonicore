@@ -52,9 +52,11 @@ function useProxyUrl(saveValue: (url: string) => Promise<unknown>) {
 export default function NetworkTab() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const proxy = useProxyUrl((url) => api.admin.updateSettings({ network_proxy_url: url }));
+  const proxy = useProxyUrl((url) =>
+    api.admin.updateSettings("network", { network: { proxy_url: url } }),
+  );
   const githubProxy = useProxyUrl((url) =>
-    api.admin.updateSettings({ network_github_proxy_url: url }),
+    api.admin.updateSettings("network", { network: { github: { proxy_url: url } } }),
   );
   const [githubUseGlobal, setGithubUseGlobal] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
@@ -66,12 +68,13 @@ export default function NetworkTab() {
   useEffect(() => {
     let cancelled = false;
     api.admin
-      .getSettings()
+      .getSettings("network")
       .then((s) => {
         if (cancelled) return;
-        proxy.load(s.network_proxy_url || "");
-        githubProxy.load(s.network_github_proxy_url || "");
-        setGithubUseGlobal(s.network_github_proxy_use_global ?? false);
+        const net = s.network ?? {};
+        proxy.load(net.proxy_url || "");
+        githubProxy.load(net.github?.proxy_url || "");
+        setGithubUseGlobal(net.github?.use_global ?? false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -96,7 +99,7 @@ export default function NetworkTab() {
     setGithubSaving(true);
     setGithubError("");
     try {
-      await api.admin.updateSettings({ network_github_proxy_use_global: next });
+      await api.admin.updateSettings("network", { network: { github: { use_global: next } } });
     } catch (err: unknown) {
       setGithubUseGlobal(!next);
       setGithubError(translateApiError(t, err));

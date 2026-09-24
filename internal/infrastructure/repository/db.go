@@ -316,8 +316,16 @@ func RunMigrations(db *sql.DB) error {
 		updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	CREATE TABLE IF NOT EXISTS server_settings (
-		key   VARCHAR(64) PRIMARY KEY,
-		value TEXT NOT NULL DEFAULT ''
+		key      VARCHAR(64) PRIMARY KEY,
+		value    TEXT NOT NULL DEFAULT '',
+		category VARCHAR(32) NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_server_settings_category ON server_settings(category);
+
+	CREATE TABLE IF NOT EXISTS task_state (
+		id         VARCHAR(64) PRIMARY KEY,
+		enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 
 	CREATE TABLE IF NOT EXISTS user_metadata (
@@ -337,7 +345,7 @@ func RunMigrations(db *sql.DB) error {
 		PRIMARY KEY (user_id, file_hash)
 	);
 
-	INSERT INTO server_settings (key, value) VALUES ('allow_registration', 'true')
+	INSERT INTO server_settings (key, value, category) VALUES ('system.allow_registration', 'true', 'system')
 		ON CONFLICT (key) DO NOTHING;
 
 	CREATE TABLE IF NOT EXISTS notification_category_prefs (

@@ -76,7 +76,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowReg, _ := h.settingsRepo.Get(r.Context(), "allow_registration")
+	allowReg, _ := h.settingsRepo.Get(r.Context(), repository.CategorySystem, "allow_registration")
 	if allowReg != "true" {
 		writeCodedError(w, http.StatusForbidden, domain.ErrAuthRegistrationDisabled)
 		return
