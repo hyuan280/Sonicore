@@ -16,8 +16,10 @@ import {
 } from "lucide-react";
 import { coverImageUrl } from "../lib/utils";
 import { usePerPage } from "../hooks/usePerPage";
+import { useScan } from "../stores/scan";
 
 export default function ArtistsPage() {
+  const scanRevision = useScan((s) => s.revision);
   const [artists, setArtists] = useState<any[]>([]);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = usePerPage("artists", 10);
@@ -69,7 +71,9 @@ export default function ArtistsPage() {
 
   useEffect(() => {
     load();
-  }, [page, perPage]);
+    // scanRevision refetches when a library scan completes in the background.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, perPage, scanRevision]);
 
   useEffect(() => {
     clearTimeout(timerRef.current);

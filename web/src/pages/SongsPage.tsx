@@ -6,9 +6,11 @@ import { Play, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import TrackTable, { type TrackRow } from "../components/TrackTable";
 import { usePerPage } from "../hooks/usePerPage";
+import { useScan } from "../stores/scan";
 
 export default function SongsPage() {
   const player = usePlayer();
+  const scanRevision = useScan((s) => s.revision);
   const [tracks, setTracks] = useState<TrackRow[]>([]);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = usePerPage("tracks", 20);
@@ -65,7 +67,8 @@ export default function SongsPage() {
 
   useEffect(() => {
     loadRef.current();
-  }, [page, perPage, sort]);
+    // scanRevision refetches when a library scan completes in the background.
+  }, [page, perPage, sort, scanRevision]);
 
   useEffect(() => {
     clearTimeout(timerRef.current);

@@ -74,6 +74,7 @@ const (
 	ErrLibUpdateRoleFailed   ErrorCode = 212
 	ErrLibListMembersFailed  ErrorCode = 213
 	ErrLibDeleteFailed       ErrorCode = 214
+	ErrLibScanBusy           ErrorCode = 215
 )
 
 // ---- user (300-399) ----
@@ -340,6 +341,7 @@ var errorCodeKeys = map[ErrorCode]string{
 	ErrPlatUnsupportedType:      "UNSUPPORTED_SEARCH_TYPE",
 	ErrPlatUpstream:             "PLATFORM_UPSTREAM_ERROR",
 	ErrLibDeleteFailed:          "DELETE_LIBRARY_FAILED",
+	ErrLibScanBusy:              "LIBRARY_SCAN_BUSY",
 	ErrMetaUnsupportedSource:    "UNSUPPORTED_METADATA_SOURCE",
 	ErrMetaLookupEnrichment:     "LOOKUP_ENRICHMENT_FAILED",
 	ErrMetaIdentifyTrack:        "IDENTIFY_TRACK_FAILED",
@@ -466,6 +468,7 @@ var errorCodeMessages = map[ErrorCode]string{
 	ErrPlatUnsupportedType:      "Unsupported search type",
 	ErrPlatUpstream:             "Upstream platform error",
 	ErrLibDeleteFailed:          "Failed to delete library",
+	ErrLibScanBusy:              "Library scan is still stopping; retry in a moment",
 	ErrMetaUnsupportedSource:    "Unsupported metadata source",
 	ErrMetaLookupEnrichment:     "Failed to lookup enrichment data",
 	ErrMetaIdentifyTrack:        "Failed to identify track",

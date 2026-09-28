@@ -219,6 +219,8 @@
     "startScan": "开始扫描",
     "cancel": "取消",
     "deleteLibrary": "删除此音乐库？",
+    "delete": "删除",
+    "deleting": "删除中…",
     "audioDevices": "音频设备",
     "noDevices": "未配置设备",
     "deviceAlreadyExists": "该设备已配置",
@@ -240,7 +242,7 @@
     "loadingMetadata": "加载元数据中...",
     "serverUpdated": "服务器已更新：请重新登录以继续播放。",
     "scanErrors": "{{count}} 个扫描错误",
-    "scanStatusFailed": "获取扫描状态失败，已停止轮询",
+    "scanStatusFailed": "扫描失败，无法获取音乐库状态",
     "failed": "失败",
     "trackCount_one": "{{count}} 首",
     "trackCount_other": "{{count}} 首",
@@ -453,7 +455,8 @@
       "CANNOT_CHANGE_OWNER_ROLE": "无法更改拥有者的角色",
       "UPDATE_ROLE_FAILED": "更新角色失败",
       "LIST_MEMBERS_FAILED": "获取成员列表失败",
-      "DELETE_LIBRARY_FAILED": "删除音乐库失败"
+      "DELETE_LIBRARY_FAILED": "删除音乐库失败",
+      "LIBRARY_SCAN_BUSY": "扫描仍在停止中，请稍后重试"
     },
     "user": {
       "USER_NOT_FOUND": "用户不存在",

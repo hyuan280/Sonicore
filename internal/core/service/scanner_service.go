@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,6 +32,23 @@ type ScanProgress struct {
 	Errors        int    `json:"errors"`
 }
 
+// scanRun is one in-flight scan's bookkeeping. Pointer identity is used so a
+// finishing goroutine clears only its own entry: after CancelScan removes the
+// entry, a concurrent StartScan may install a new run for the same library and
+// the old goroutine must not delete it.
+type scanRun struct {
+	progress *ScanProgress
+	cancel   context.CancelFunc
+	// done is closed when runScan returns, so CancelScan can wait for the scan
+	// to actually stop before the caller tears down the library's files.
+	done chan struct{}
+}
+
+// scanCancelWait bounds how long CancelScan waits for a cancelled scan to
+// unwind (it checks the context at each file boundary and ffmpeg/metadata
+// calls honor it). A var so tests can shorten it.
+var scanCancelWait = 10 * time.Second
+
 type ScannerService struct {
 	db              *sql.DB
 	engine          *scanner.Engine
@@ -47,8 +65,16 @@ type ScannerService struct {
 	covers          *metadata.CoverManager
 	notif           *NotificationService
 
-	mu         sync.RWMutex
-	activeScan map[string]*ScanProgress
+	mu sync.RWMutex
+	// activeScan tracks each running scan by library id. The value carries the
+	// scan's own cancel func and completion signal so it can be stopped and so
+	// a finishing scan only clears its OWN entry (a later scan may have
+	// replaced it after a CancelScan).
+	activeScan map[string]*scanRun
+	// deleting marks libraries whose deletion is in progress so no scan can be
+	// started for them while teardown runs (otherwise a new scan could recreate
+	// the directories the delete is removing, or write rows for a gone library).
+	deleting map[string]bool
 
 	// registryMu guards the TTL cache for buildRegistry.
 	registryMu  sync.Mutex
@@ -98,7 +124,8 @@ func NewScannerService(db *sql.DB, imagesDir, lyricsDir string, mbCfg metadata.M
 		neteaseProvider: neteaseProvider,
 		neteaseEnabled:  neteaseEnabled,
 		notif:           notif,
-		activeScan:      make(map[string]*ScanProgress),
+		activeScan:      make(map[string]*scanRun),
+		deleting:        make(map[string]bool),
 	}
 	if covers == nil {
 		covers = metadata.NewCoverManager(imagesDir, db, func() *metadata.Registry { return s.buildRegistry(context.Background()) })
@@ -301,20 +328,88 @@ func (s *ScannerService) rebuildEngine(ctx context.Context) {
 func (s *ScannerService) GetProgress(libraryID string) *ScanProgress {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.activeScan[libraryID]
+	run := s.activeScan[libraryID]
+	if run == nil {
+		return nil
+	}
+	// Return a copy: the caller JSON-encodes it outside the lock while the
+	// scan goroutine keeps mutating the shared progress struct.
+	cp := *run.progress
+	return &cp
+}
+
+// BeginLibraryDelete marks a library as being deleted so StartScan rejects it
+// while teardown runs. EndLibraryDelete clears the mark (deferred by the
+// caller so it also runs when the delete is aborted after a cancel timeout).
+func (s *ScannerService) BeginLibraryDelete(libraryID string) {
+	s.mu.Lock()
+	s.deleting[libraryID] = true
+	s.mu.Unlock()
+}
+
+func (s *ScannerService) EndLibraryDelete(libraryID string) {
+	s.mu.Lock()
+	delete(s.deleting, libraryID)
+	s.mu.Unlock()
+}
+
+// CancelScan stops a running scan for a library (if any) and waits (bounded by
+// scanCancelWait or ctx) for its goroutine to unwind, reporting whether it
+// actually stopped. The lookup + cancel happen under the lock so they cannot
+// race a normal completion (TOCTOU), and the caller is expected to hold a
+// BeginLibraryDelete mark so no new scan can be installed during the wait.
+func (s *ScannerService) CancelScan(ctx context.Context, libraryID string) bool {
+	s.mu.Lock()
+	run := s.activeScan[libraryID]
+	if run != nil {
+		run.cancel()
+	}
+	s.mu.Unlock()
+	if run == nil {
+		return true
+	}
+	select {
+	case <-run.done:
+		logger.Info("[scanner] cancelled scan for library=%s", libraryID)
+		return true
+	case <-ctx.Done():
+		logger.Warn("[scanner] cancel for library=%s aborted: %v", libraryID, ctx.Err())
+		return false
+	case <-time.After(scanCancelWait):
+		logger.Warn("[scanner] scan for library=%s did not stop within %s", libraryID, scanCancelWait)
+		return false
+	}
+}
+
+// clearActive removes a finished run's entry, but only when it is still the
+// current one: after CancelScan an old goroutine may finish while a newer scan
+// already owns the library, and it must not clear the newer run.
+func (s *ScannerService) clearActive(libraryID string, run *scanRun) {
+	s.mu.Lock()
+	if s.activeScan[libraryID] == run {
+		delete(s.activeScan, libraryID)
+	}
+	s.mu.Unlock()
 }
 
 func (s *ScannerService) StartScan(ctx context.Context, libraryID string, mode string) error {
 	s.mu.Lock()
+	if s.deleting[libraryID] {
+		s.mu.Unlock()
+		return fmt.Errorf("library %s is being deleted", libraryID)
+	}
 	if _, running := s.activeScan[libraryID]; running {
 		s.mu.Unlock()
 		return fmt.Errorf("scan already running for library %s", libraryID)
 	}
 	s.rebuildEngine(ctx)
-	s.activeScan[libraryID] = &ScanProgress{
-		LibraryID: libraryID,
-		Status:    "running",
+	scanCtx, cancel := context.WithCancel(context.Background())
+	run := &scanRun{
+		progress: &ScanProgress{LibraryID: libraryID, Status: "running"},
+		cancel:   cancel,
+		done:     make(chan struct{}),
 	}
+	s.activeScan[libraryID] = run
 	// Snapshot the engine while still holding the lock: rebuildEngine just
 	// swapped it, and the scan goroutine must run against the engine it was
 	// started with (concurrent scans of other libraries may rebuild it again
@@ -325,14 +420,17 @@ func (s *ScannerService) StartScan(ctx context.Context, libraryID string, mode s
 	if mode != "overwrite" {
 		mode = "missing"
 	}
-	go s.runScan(context.Background(), libraryID, mode, engine)
+	go s.runScan(scanCtx, libraryID, mode, engine, run)
 	return nil
 }
 
-func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, engine *scanner.Engine) {
+func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, engine *scanner.Engine, run *scanRun) {
+	defer close(run.done)
+	defer s.clearActive(libraryID, run)
+
 	lib, err := s.libRepo.FindByID(ctx, libraryID)
 	if err != nil {
-		s.setError(libraryID, fmt.Sprintf("library not found: %v", err))
+		s.setError(libraryID, run, fmt.Sprintf("library not found: %v", err))
 		return
 	}
 
@@ -348,13 +446,13 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, en
 
 	stats, err := engine.ScanLibrary(ctx, lib, scanner.ScanOptions{Mode: mode}, func(stats scanner.ScanStats) {
 		s.mu.Lock()
-		if p := s.activeScan[libraryID]; p != nil {
-			p.TotalFiles = stats.TotalFiles
-			p.Scanned = stats.Scanned
-			p.NewTracks = stats.NewTracks
-			p.UpdatedTracks = stats.UpdatedTracks
-			p.DeletedTracks = stats.DeletedTracks
-			p.Errors = len(stats.Errors)
+		if s.activeScan[libraryID] == run {
+			run.progress.TotalFiles = stats.TotalFiles
+			run.progress.Scanned = stats.Scanned
+			run.progress.NewTracks = stats.NewTracks
+			run.progress.UpdatedTracks = stats.UpdatedTracks
+			run.progress.DeletedTracks = stats.DeletedTracks
+			run.progress.Errors = len(stats.Errors)
 		}
 		s.mu.Unlock()
 	})
@@ -362,19 +460,37 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, en
 	if stats == nil {
 		stats = &scanner.ScanStats{}
 	}
+	// A cancellation is identified by the error the engine returns (it returns
+	// ctx.Err() once it observes the cancelled context), NOT by whether a cancel
+	// was requested: a distinct non-context failure that races a cancel must
+	// still be reported as failed, not masked as cancelled.
+	cancelled := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+
+	// Finalize on a fresh context: a cancelled scan's own context is already
+	// done, so it could not persist the terminal state.
+	bg, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer bgCancel()
 
 	s.mu.Lock()
-	if p := s.activeScan[libraryID]; p != nil {
-		if err != nil {
-			p.Status = "failed"
-		} else {
-			p.Status = "completed"
-		}
+	switch {
+	case cancelled:
+		run.progress.Status = "cancelled"
+	case err != nil:
+		run.progress.Status = "failed"
+	default:
+		run.progress.Status = "completed"
 	}
 	s.mu.Unlock()
 
 	completedAt := time.Now()
-	job.Status = "completed"
+	switch {
+	case cancelled:
+		job.Status = "cancelled"
+	case err != nil:
+		job.Status = "failed"
+	default:
+		job.Status = "completed"
+	}
 	job.TotalFiles = stats.TotalFiles
 	job.Scanned = stats.Scanned
 	job.NewTracks = stats.NewTracks
@@ -385,11 +501,18 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, en
 		errData, _ := json.Marshal(stats.Errors)
 		job.Errors = string(errData)
 	}
-	s.scanRepo.Update(ctx, job)
+	s.scanRepo.Update(bg, job)
+
+	// A cancelled scan (library deleted mid-scan) must not touch the library
+	// row or notify: the library is gone and the scan never produced a result.
+	if cancelled {
+		logger.Info("[scanner] cancelled library=%s after new=%d updated=%d", libraryID, job.NewTracks, job.UpdatedTracks)
+		return
+	}
 
 	lib.LastScanErrors = len(stats.Errors)
 	lib.UpdatedAt = time.Now()
-	s.libRepo.UpdateStats(ctx, lib)
+	s.libRepo.UpdateStats(bg, lib)
 
 	logger.Info("[scanner] finished library=%s status=%s new=%d updated=%d deleted=%d errors=%d",
 		libraryID, job.Status, job.NewTracks, job.UpdatedTracks, job.DeletedTracks, len(stats.Errors))
@@ -405,20 +528,15 @@ func (s *ScannerService) runScan(ctx context.Context, libraryID, mode string, en
 			}
 		}
 	}
-
-	s.mu.Lock()
-	delete(s.activeScan, libraryID)
-	s.mu.Unlock()
 }
 
-func (s *ScannerService) setError(libraryID, msg string) {
-	s.mu.Lock()
-	if p := s.activeScan[libraryID]; p != nil {
-		p.Status = "failed"
+func (s *ScannerService) setError(libraryID string, run *scanRun, msg string) {
+	if run != nil {
+		s.mu.Lock()
+		if s.activeScan[libraryID] == run {
+			run.progress.Status = "failed"
+		}
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
-	s.mu.Lock()
-	delete(s.activeScan, libraryID)
-	s.mu.Unlock()
 	logger.Error("[scanner] error library=%s: %s", libraryID, msg)
 }

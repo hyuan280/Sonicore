@@ -5,10 +5,12 @@ import { Link } from "react-router-dom";
 import { ROUTES } from "../../lib/constants";
 import { translateApiError } from "../../i18n/errorCodes";
 import { useLibrary } from "../../stores/library";
+import { useScan } from "../../stores/scan";
 import { usePlayer, type PlayerTrack } from "../../stores/player";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Card } from "../../components/ui/card";
+import { Modal } from "../../components/ui/modal";
 import { api } from "../../api/client";
 import {
   Music,
@@ -25,6 +27,7 @@ import {
   RefreshCw,
   Scan,
   TriangleAlert,
+  CircleAlert,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -40,20 +43,21 @@ import type { Library } from "../../types";
 
 export default function LibrariesTab() {
   const { t } = useTranslation();
-  const { libraries, load: reloadLibs } = useLibrary();
+  const { libraries, load: reloadLibs, error: libraryError } = useLibrary();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [createError, setCreateError] = useState("");
   const formRef = useRef<HTMLDivElement>(null);
-  const [scanning, setScanning] = useState<
-    Record<string, { scanned: number; total: number; errors?: number }>
-  >({});
-  const pollingRef = useRef<Record<string, boolean>>({});
-  const pollRetryRef = useRef<Record<string, number>>({});
+  // Scan progress lives in a global store so polling continues after this tab
+  // unmounts (switching pages) and completion can refresh other views.
+  const scanning = useScan((s) => s.scans);
+  const scanRevision = useScan((s) => s.revision);
+  const scanFailed = useScan((s) => s.failed);
+  const startScan = useScan((s) => s.start);
+  const recoverScan = useScan((s) => s.recover);
+  const forgetScan = useScan((s) => s.forget);
   const statusCheckSeqRef = useRef(0);
-  // Give up polling after this many consecutive status failures (~30s).
-  const MAX_POLL_RETRIES = 30;
 
   const [dirPickerOpen, setDirPickerOpen] = useState(false);
 
@@ -72,6 +76,9 @@ export default function LibrariesTab() {
   const [managePerPageOpen, setManagePerPageOpen] = useState(false);
   const [manageError, setManageError] = useState("");
   const [listError, setListError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Library | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
   const [searching, setSearching] = useState("");
   const [searchModal, setSearchModal] = useState<SearchResultData | null>(null);
   const loadSeqRef = useRef(0);
@@ -155,7 +162,9 @@ export default function LibrariesTab() {
 
   useEffect(() => {
     doLoad();
-  }, [doLoad]);
+    // scanRevision refetches the track list when a (background) scan finishes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doLoad, scanRevision]);
 
   useEffect(() => {
     if (!manageLib) return;
@@ -187,115 +196,46 @@ export default function LibrariesTab() {
     });
   }, [showForm]);
 
-  useEffect(() => {
-    return () => {
-      pollingRef.current = {};
-      pollRetryRef.current = {};
-    };
-  }, []);
-
-  // On mount / libraries loaded, check for active scans
+  // On mount / libraries loaded, resume tracking any scan already running
+  // (e.g. started before this tab remounted). track() is idempotent, and the
+  // polling loop lives in the global store so it survives unmounting this tab.
+  // The seq + cancelled guard makes stale responses from a previous pass (or a
+  // deleted library) harmless.
   useEffect(() => {
     if (libraries.length === 0) return;
-    // Sequence guard: a new check cycle (or unmount) invalidates in-flight
-    // responses from the previous one, so a late failure can never
-    // resurrect a cleared error or poll a deleted library.
+    let cancelled = false;
     const seq = ++statusCheckSeqRef.current;
     setListError("");
-    libraries.forEach((lib) => {
-      api.libraries
-        .scanStatus(lib.id)
-        .then((status) => {
-          if (seq !== statusCheckSeqRef.current) return;
-          // Skip when a polling loop for this library is already active so
-          // re-running this effect (e.g. after reloadLibs) never spawns a
-          // second loop.
-          if (status.status === "running" && !pollingRef.current[lib.id]) {
-            pollingRef.current[lib.id] = true;
-            setScanning((prev) => ({
-              ...prev,
-              [lib.id]: {
-                scanned: status.scanned,
-                total: status.total_files,
-                errors: status.errors,
-              },
-            }));
-            setTimeout(() => pollScan(lib.id), 1000);
-          }
-        })
-        .catch((err) => {
-          if (seq !== statusCheckSeqRef.current) return;
-          setListError(translateApiError(t, err));
-        });
+    Promise.all(
+      libraries.map((lib) =>
+        api.libraries.scanStatus(lib.id).then((status) => {
+          if (cancelled || seq !== statusCheckSeqRef.current) return;
+          // Reconciling a successful read clears any give-up flag and either
+          // resumes progress or refreshes data if the scan ended meanwhile.
+          recoverScan(lib.id, status);
+        }),
+      ),
+    ).catch((err) => {
+      if (cancelled || seq !== statusCheckSeqRef.current) return;
+      setListError(translateApiError(t, err));
     });
     return () => {
+      cancelled = true;
       statusCheckSeqRef.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libraries]);
+  }, [libraries, recoverScan]);
 
-  const pollScan = useCallback(
-    async (libId: string) => {
-      if (!pollingRef.current[libId]) return;
-      try {
-        const status = await api.libraries.scanStatus(libId);
-        if (!pollingRef.current[libId]) return;
-        pollRetryRef.current[libId] = 0;
-        if (status.status === "running") {
-          setScanning((prev) => ({
-            ...prev,
-            [libId]: { scanned: status.scanned, total: status.total_files, errors: status.errors },
-          }));
-          setTimeout(() => pollScan(libId), 1000);
-        } else {
-          setScanning((prev) => {
-            const n = { ...prev };
-            delete n[libId];
-            return n;
-          });
-          pollingRef.current[libId] = false;
-          reloadLibs();
-        }
-      } catch {
-        if (pollingRef.current[libId] === false) return;
-        pollRetryRef.current[libId] = (pollRetryRef.current[libId] || 0) + 1;
-        if (pollRetryRef.current[libId] >= MAX_POLL_RETRIES) {
-          pollingRef.current[libId] = false;
-          delete pollRetryRef.current[libId];
-          setScanning((prev) => {
-            const n = { ...prev };
-            delete n[libId];
-            return n;
-          });
-          setListError(t("settings.scanStatusFailed"));
-          return;
-        }
-        setTimeout(() => pollScan(libId), 1000);
-      }
-    },
-    [reloadLibs, t],
-  );
-
-  const startScan = useCallback(
+  const beginScan = useCallback(
     async (id: string, mode?: string) => {
-      pollingRef.current[id] = true;
-      pollRetryRef.current[id] = 0;
       setListError("");
-      setScanning((prev) => ({ ...prev, [id]: { scanned: 0, total: 0 } }));
       try {
-        await api.libraries.scan(id, mode);
-        pollScan(id);
+        await startScan(id, mode);
       } catch (err) {
-        setScanning((prev) => {
-          const n = { ...prev };
-          delete n[id];
-          return n;
-        });
-        pollingRef.current[id] = false;
         setListError(translateApiError(t, err));
       }
     },
-    [pollScan, t],
+    [startScan, t],
   );
 
   const create = async () => {
@@ -311,48 +251,53 @@ export default function LibrariesTab() {
     }
   };
 
-  const del = async (id: string) => {
-    if (confirm(t("settings.deleteLibrary"))) {
-      setListError("");
-      // Stop any scan polling for this library and clear its progress so a
-      // deleted library is never polled again.
-      pollingRef.current[id] = false;
-      delete pollRetryRef.current[id];
-      setScanning((prev) => {
-        const n = { ...prev };
-        delete n[id];
-        return n;
-      });
-      try {
-        await api.libraries.delete(id);
-      } catch (err) {
-        setListError(translateApiError(t, err));
-        return;
-      }
-      reloadLibs();
-      api.user
-        .getQueue()
-        .then((data: UserQueue) => {
-          if (data?.tracks) {
-            usePlayer.setState({
-              queue: data.tracks,
-              queueIdx: data.queue_idx ?? 0,
-              shuffleOrder: data.shuffle_order ?? [],
-              shuffleIdx: data.shuffle_idx ?? 0,
-              mode: data.mode ?? "normal",
-            });
-          }
-          if (!data?.tracks?.length) {
-            usePlayer.setState({ track: null, playing: false });
-          }
-        })
-        .catch(() => {});
+  const performDelete = async (id: string) => {
+    setListError("");
+    setDeleteError("");
+    setDeletingId(id);
+    try {
+      await api.libraries.delete(id);
+    } catch (err) {
+      // The backend refuses (409) when a scan is still stopping; show it in the
+      // modal (and page) so the user sees why, and keep tracking the library.
+      const msg = translateApiError(t, err);
+      setDeleteError(msg);
+      setListError(msg);
+      setDeletingId(null);
+      return;
     }
+    // Delete succeeded (the backend cancelled any running scan); stop tracking
+    // this library so it is never polled again. Close the confirm modal only if
+    // it is still showing this library (the user may have dismissed it).
+    forgetScan(id);
+    setDeletingId(null);
+    setDeleteTarget((cur) => (cur && cur.id === id ? null : cur));
+    reloadLibs();
+    api.user
+      .getQueue()
+      .then((data: UserQueue) => {
+        if (data?.tracks) {
+          usePlayer.setState({
+            queue: data.tracks,
+            queueIdx: data.queue_idx ?? 0,
+            shuffleOrder: data.shuffle_order ?? [],
+            shuffleIdx: data.shuffle_idx ?? 0,
+            mode: data.mode ?? "normal",
+          });
+        }
+        if (!data?.tracks?.length) {
+          usePlayer.setState({ track: null, playing: false });
+        }
+      })
+      .catch(() => {});
   };
 
   return (
     <div className="space-y-4">
       {listError && <p className="text-sm text-red-400">{listError}</p>}
+      {libraryError !== null && libraryError !== undefined && (
+        <p className="text-sm text-red-400">{translateApiError(t, libraryError)}</p>
+      )}
       {libraries.map((lib) => {
         const prog = scanning[lib.id];
         return (
@@ -370,6 +315,14 @@ export default function LibrariesTab() {
                       >
                         <TriangleAlert className="w-4 h-4" />
                         {lib.last_scan_errors}
+                      </span>
+                    )}
+                    {scanFailed[lib.id] && (
+                      <span
+                        className="text-red-400 flex items-center shrink-0"
+                        title={t("settings.scanStatusFailed")}
+                      >
+                        <CircleAlert className="w-4 h-4" />
                       </span>
                     )}
                   </p>
@@ -396,7 +349,7 @@ export default function LibrariesTab() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setManageLib(lib)}
-                  disabled={!!prog}
+                  disabled={!!prog || deletingId === lib.id}
                 >
                   <ColumnsSettings className="w-4 h-4" />
                 </Button>
@@ -407,7 +360,7 @@ export default function LibrariesTab() {
                     setScanDialogLib(lib.id);
                     setScanOverwrite(false);
                   }}
-                  disabled={!!prog}
+                  disabled={!!prog || deletingId === lib.id}
                 >
                   {prog ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -415,9 +368,24 @@ export default function LibrariesTab() {
                     <ScanSearch className="w-4 h-4" />
                   )}
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => del(lib.id)}>
-                  <Trash2 className="w-4 h-4 text-red-400" />
-                </Button>
+                {deletingId === lib.id ? (
+                  <span className="flex items-center gap-1.5 px-1 text-xs text-zinc-400 whitespace-nowrap">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {t("settings.deleting")}
+                  </span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setDeleteError("");
+                      setDeleteTarget(lib);
+                    }}
+                    disabled={deletingId !== null}
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </Button>
+                )}
               </div>
             </div>
           </Card>
@@ -518,6 +486,40 @@ export default function LibrariesTab() {
         </div>
       )}
 
+      {/* Delete confirm dialog */}
+      {deleteTarget && (
+        <Modal
+          title={t("settings.deleteLibrary")}
+          onClose={() => setDeleteTarget(null)}
+          className="max-w-md"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-400 truncate">{deleteTarget.name}</p>
+            {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
+            {deletingId === deleteTarget.id ? (
+              <div className="flex items-center justify-center gap-2 py-2 text-sm text-zinc-400">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t("settings.deleting")}
+              </div>
+            ) : (
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+                  {t("settings.cancel")}
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    void performDelete(deleteTarget.id);
+                  }}
+                >
+                  {t("settings.delete")}
+                </Button>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {/* Scan dialog */}
       {scanDialogLib && (
         <div
@@ -569,7 +571,7 @@ export default function LibrariesTab() {
                   const id = scanDialogLib;
                   const mode = scanOverwrite ? "overwrite" : "missing";
                   setScanDialogLib(null);
-                  startScan(id, mode);
+                  beginScan(id, mode);
                 }}
               >
                 {t("settings.startScan")}

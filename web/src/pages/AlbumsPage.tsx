@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { coverImageUrl } from "../lib/utils";
 import { usePerPage } from "../hooks/usePerPage";
+import { useScan } from "../stores/scan";
 
 interface AlbumItem {
   id: string;
@@ -30,6 +31,7 @@ interface AlbumItem {
 }
 
 export default function AlbumsPage() {
+  const scanRevision = useScan((s) => s.revision);
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = usePerPage("albums", 10);
@@ -64,7 +66,9 @@ export default function AlbumsPage() {
 
   useEffect(() => {
     load();
-  }, [page, perPage]);
+    // scanRevision refetches when a library scan completes in the background.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, perPage, scanRevision]);
 
   useEffect(() => {
     clearTimeout(timerRef.current);

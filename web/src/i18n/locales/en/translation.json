@@ -219,6 +219,8 @@
     "startScan": "Start Scan",
     "cancel": "Cancel",
     "deleteLibrary": "Delete this library?",
+    "delete": "Delete",
+    "deleting": "Deleting...",
     "audioDevices": "Audio Devices",
     "noDevices": "No devices configured",
     "deviceAlreadyExists": "This device is already configured",
@@ -240,7 +242,7 @@
     "loadingMetadata": "Loading metadata...",
     "serverUpdated": "Server updated: please sign in again to continue playing.",
     "scanErrors": "{{count}} scan error(s)",
-    "scanStatusFailed": "Failed to fetch scan status; polling stopped",
+    "scanStatusFailed": "Scan failed; unable to get library status",
     "failed": "Failed",
     "trackCount_one": "{{count}} track",
     "trackCount_other": "{{count}} tracks",
@@ -453,7 +455,8 @@
       "CANNOT_CHANGE_OWNER_ROLE": "Cannot change the owner's role",
       "UPDATE_ROLE_FAILED": "Failed to update role",
       "LIST_MEMBERS_FAILED": "Failed to list members",
-      "DELETE_LIBRARY_FAILED": "Failed to delete library"
+      "DELETE_LIBRARY_FAILED": "Failed to delete library",
+      "LIBRARY_SCAN_BUSY": "Library scan is still stopping; retry in a moment"
     },
     "user": {
       "USER_NOT_FOUND": "User not found",

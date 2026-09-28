@@ -666,8 +666,18 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		return stats, err
 	}
 
+	// The post-walk cleanup phases below no longer poll ctx on their own, so
+	// check at each stage boundary: a scan cancelled while its library is being
+	// deleted must surface ctx.Err() instead of completing as if successful.
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
+
 	var deletedIDs []string
 	for path := range existingByPath {
+		if err := ctx.Err(); err != nil {
+			return stats, err
+		}
 		if !seenPaths[path] {
 			trackID, err := e.trackRepo.FindIDByFilePath(ctx, path, lib.ID)
 			if err != nil {
@@ -720,6 +730,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 	}
 
 	// Remove covers of albums that no longer have any track before pruning them.
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	if rows, err := e.db.QueryContext(ctx,
 		`SELECT id FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM track_albums)`); err == nil {
 		var orphanIDs []string
@@ -753,6 +766,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 
 	// Prune orphaned artists: cover rows first so a failure keeps the
 	// artist row for a later retry instead of orphaning its images.
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	if rows, err := e.db.QueryContext(ctx,
 		`SELECT id FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)`); err == nil {
 		var orphanArtistIDs []string
@@ -781,6 +797,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 	// Full scans also sweep covers and lyrics orphaned by interrupted
 	// deletions or manual database edits. Incremental (missing) scans skip
 	// this maintenance work.
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	if opts.Mode == "overwrite" {
 		if err := e.covers.SweepOrphanCovers(ctx); err != nil {
 			logger.Error("[scan] orphan cover sweep error: %v", err)
@@ -788,15 +807,24 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 		e.sweepOrphanLyrics(ctx, lib.ID)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	if err := e.mergeDuplicates(ctx, lib.ID); err != nil {
 		logger.Error("[scan] duplicate merge error for %s: %v", lib.Name, err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	if err := e.resolveVersions(ctx, lib.ID); err != nil {
 		logger.Error("[scan] version resolution error for %s: %v", lib.Name, err)
 	}
 
 	// Recalculate album song_count and duration for all albums
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	if err := e.recalcAlbumStats(ctx, lib.ID); err != nil {
 		logger.Error("[scan] album stats recalculation error: %v", err)
 	}
@@ -804,6 +832,9 @@ func (e *Engine) ScanLibrary(ctx context.Context, lib *domain.Library, opts Scan
 	// Backfill artist avatars last: every track and its artist associations
 	// are now persisted, so the per-artist title set read from the DB is
 	// complete for same-name disambiguation.
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
 	e.backfillArtistAvatars(ctx, pendingArtists)
 
 	lib.TrackCount = len(existingByPath) + stats.NewTracks - stats.DeletedTracks

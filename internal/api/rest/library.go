@@ -14,6 +14,7 @@ import (
 
 	"github.com/sonicore/server/internal/api/middleware"
 	"github.com/sonicore/server/internal/core/domain"
+	"github.com/sonicore/server/internal/core/service"
 	"github.com/sonicore/server/internal/infrastructure/logger"
 	"github.com/sonicore/server/internal/infrastructure/metadata"
 	"github.com/sonicore/server/internal/infrastructure/player"
@@ -29,12 +30,15 @@ type LibraryHandler struct {
 	lyricsDir   string
 	covers      *metadata.CoverManager
 	manager     *player.EngineManager
+	scanner     *service.ScannerService
 }
 
 // NewLibraryHandler builds the library handler. covers is the shared cover
 // manager (may be nil; a private one is created then — sharing serializes
-// cover mutations against the scanner and cover-handler paths).
-func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, covers *metadata.CoverManager, manager *player.EngineManager) *LibraryHandler {
+// cover mutations against the scanner and cover-handler paths). scanner is
+// used to cancel a running scan when its library is deleted (may be nil in
+// tests).
+func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, covers *metadata.CoverManager, manager *player.EngineManager, scanner *service.ScannerService) *LibraryHandler {
 	if covers == nil {
 		covers = metadata.NewCoverManager(imagesDir, db, nil)
 	}
@@ -47,6 +51,7 @@ func NewLibraryHandler(db *sql.DB, imagesDir, lyricsDir string, covers *metadata
 		lyricsDir:   lyricsDir,
 		covers:      covers,
 		manager:     manager,
+		scanner:     scanner,
 	}
 }
 
@@ -153,6 +158,19 @@ func (h *LibraryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.perm.IsOwner(r.Context(), libID, userID) {
 		writeCodedError(w, http.StatusForbidden, domain.ErrLibNotOwner)
 		return
+	}
+
+	// Stop a running scan before tearing the library down. The delete mark makes
+	// StartScan reject the library while teardown runs, and the wait is bounded
+	// by the request context / scanCancelWait. If it does not stop, abort rather
+	// than racing directory removal (and DB writes) against a still-running scan.
+	if h.scanner != nil {
+		h.scanner.BeginLibraryDelete(libID)
+		defer h.scanner.EndLibraryDelete(libID)
+		if !h.scanner.CancelScan(r.Context(), libID) {
+			writeCodedError(w, http.StatusConflict, domain.ErrLibScanBusy)
+			return
+		}
 	}
 
 	h.db.ExecContext(r.Context(),
